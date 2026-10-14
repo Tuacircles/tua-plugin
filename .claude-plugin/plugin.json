@@ -1,0 +1,22 @@
+{
+  "name": "tua",
+  "displayName": "Tua",
+  "version": "0.3.0",
+  "description": "Tua er arkivet for det du lager med AI: lagre med proveniens, finn igjen på tvers av prosjekter (S/M/L), Innboks for Claude- og ChatGPT-eksport. Alt er markdown-filer i din egen mappe — ingen server, ingen nøkkel hos oss.",
+  "author": { "name": "Tua Circles Holding AS" },
+  "keywords": ["arkiv", "minne", "memory", "notater", "proveniens", "mcp"],
+  "userConfig": {
+    "arkivmappe": {
+      "type": "directory",
+      "title": "Arkivmappe",
+      "description": "Mappa der atomene dine ligger som markdown-filer. La stå tom, så velger Tua: iCloud Drive/Tua, Dropbox/Tua eller ~/Tua (den som finnes).",
+      "required": false
+    },
+    "auto_lagring": {
+      "type": "boolean",
+      "title": "Automatisk fangst i Claude Code",
+      "description": "Lagre lange svar, dokumenter du skriver (.md/.txt) og økt-sammendrag som atomer uten å spørre. Slå av om du bare vil lagre når du sier «lagre dette til Tua».",
+      "default": true
+    }
+  }
+}

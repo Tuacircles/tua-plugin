@@ -1,0 +1,12 @@
+{
+  "name": "tua-lokal",
+  "description": "Tua fra denne mappa (lokal markedsplass for utvikling og egen bruk)",
+  "owner": { "name": "Tua Circles Holding AS" },
+  "plugins": [
+    {
+      "name": "tua",
+      "source": "./",
+      "description": "Tua — arkivet for AI-arbeid: lagre, finn igjen på tvers av prosjekter, Innboks for Claude-/ChatGPT-eksport"
+    }
+  ]
+}
