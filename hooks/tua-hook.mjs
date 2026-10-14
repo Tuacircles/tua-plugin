@@ -26,7 +26,7 @@ if (!process.env.TUA_DATA_DIR && process.env.CLAUDE_PLUGIN_DATA) process.env.TUA
 const store = await import(path.join(HERE, '..', 'server', 'store.js'))
 const imp = await import(path.join(HERE, '..', 'server', 'import.js'))
 const { load, save, upsert, FILES_ROOT, filesMode, S_MAX, SHORT_L, importState } = store
-const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, MIN_SVAR, inboxPending, pendingCodeSessions } = imp
+const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions } = imp
 
 if (!filesMode()) process.exit(0)                                   // arkivet er ikke valgt ennå — serveren spør ved første verktøykall
 
@@ -48,15 +48,17 @@ try {
   if (mode === 'start') {
     // Påminnelse — standard i pluginen. Stdout fra SessionStart blir kontekst for Claude.
     const st = importState()
-    const lastCode = st.code?.at || 0
-    const pending = pendingCodeSessions(lastCode)
+    const lastCode = st.code?.at || 0, lastCowork = st.cowork?.at || 0
+    const pending = pendingCodeSessions(lastCode), pendingCw = pendingCoworkSessions(lastCowork)
     const inbox = inboxPending()
     const days = lastCode ? Math.floor((Date.now() - lastCode) / DAYS) : null
+    const daysCw = lastCowork ? Math.floor((Date.now() - lastCowork) / DAYS) : null
     const parts = []
     if (inbox.length) parts.push(`${inbox.length} fil${inbox.length === 1 ? '' : 'er'} venter i Innboks (${inbox.join(', ')}) — de importeres av serveren når den starter, eller med tua_import(kilde=innboks)`)
     if (pending && (days === null || days >= 7)) parts.push(`${pending} Code-økt${pending === 1 ? '' : 'er'} er ikke tatt med i Tua${days === null ? ' (aldri importert)' : ` (siste import for ${days} dager siden)`} — tilby «ta med historikken» (tua_import kilde=code) én gang hvis det passer`)
+    if (pendingCw && (daysCw === null || daysCw >= 7)) parts.push(`${pendingCw} Cowork-økt${pendingCw === 1 ? '' : 'er'} er ikke tatt med${daysCw === null ? ' (aldri importert)' : ` (siste import for ${daysCw} dager siden)`} — tua_import(kilde=cowork)`)
     if (parts.length) process.stdout.write(`Tua: ${parts.join('. ')}. Ikke kjør noe uten at brukeren sier ja.\n`)
-    log({ pending, inbox: inbox.length, days })
+    log({ pending, pendingCw, inbox: inbox.length, days, daysCw })
   } else if (mode === 'svar') {
     const msg = String(input.last_assistant_message || '').trim()
     if (msg.length < MIN_SVAR) { log({ skipped: 'kort', len: msg.length }); process.exit(0) }
