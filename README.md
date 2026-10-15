@@ -29,8 +29,16 @@ Serveren heter da `plugin:tua:tua` i Code. Beholder du også `tua` i repoets `.m
 gir `dist/tua-plugin.zip` (claude.ai › Customize › Plugins › Upload, eller `claude --plugin-dir dist/tua-plugin.zip`)
 og `dist/tua.mcpb` (Claude Desktop: dobbeltklikk). `dist/` er ikke versjonert. Ingenting publiseres automatisk.
 
+## Historikken (M17)
+
+«Ta med historikken» leser alt som finnes lokalt, uten eksport og uten innlogging: Code-økter (`~/.claude/projects`),
+Cowork-økter (`audit.jsonl`), Desktop-samtaler (fra Claude Desktops egen cache — alt som har vært åpnet i Desktop, med
+prosjekt; leses også av seg selv hvert 10. minutt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved
+referanse, aldri kopi). `tua_import(kilde=alt, dryRun=true)` viser tallene først. Delte lenker (`claude.ai/share/…`)
+limes inn eller legges i Innboks; innholdet fylles når lenken åpnes i Desktop. Tua kaller aldri claude.ai sitt interne API.
+
 ## Ærlige grenser
 
 - Chat på claude.ai (web/mobil) kjører ikke lokale servere — der virker bare skillene. Desktop trenger fortsatt `.mcpb` eller config-fila.
-- Hooks finnes bare i Claude Code (og Cowork), ikke i Desktop-chat.
-- Eksporten fra Claude er manuell og kan ta timer å få; plugins forutsetter betalt plan.
+- Hooks finnes bare i Claude Code (og Cowork), ikke i Desktop-chat. Desktop-samtaler fanges i stedet fra appens cache — men bare de som har vært åpnet i Desktop, slik de så ut sist.
+- Samtaler som bare finnes på claude.ai web/mobil: åpne dem i Desktop, lag en delt lenke, eller bestill eksport (manuell, kan ta timer) og legg den i Innboks. Plugins forutsetter betalt plan.

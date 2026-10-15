@@ -26,7 +26,7 @@ if (!process.env.TUA_DATA_DIR && process.env.CLAUDE_PLUGIN_DATA) process.env.TUA
 const store = await import(path.join(HERE, '..', 'server', 'store.js'))
 const imp = await import(path.join(HERE, '..', 'server', 'import.js'))
 const { load, save, upsert, FILES_ROOT, filesMode, S_MAX, SHORT_L, importState } = store
-const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions } = imp
+const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts } = imp
 
 if (!filesMode()) process.exit(0)                                   // arkivet er ikke valgt ennå — serveren spør ved første verktøykall
 
@@ -57,8 +57,14 @@ try {
     if (inbox.length) parts.push(`${inbox.length} fil${inbox.length === 1 ? '' : 'er'} venter i Innboks (${inbox.join(', ')}) — de importeres av serveren når den starter, eller med tua_import(kilde=innboks)`)
     if (pending && (days === null || days >= 7)) parts.push(`${pending} Code-økt${pending === 1 ? '' : 'er'} er ikke tatt med i Tua${days === null ? ' (aldri importert)' : ` (siste import for ${days} dager siden)`} — tilby «ta med historikken» (tua_import kilde=code) én gang hvis det passer`)
     if (pendingCw && (daysCw === null || daysCw >= 7)) parts.push(`${pendingCw} Cowork-økt${pendingCw === 1 ? '' : 'er'} er ikke tatt med${daysCw === null ? ' (aldri importert)' : ` (siste import for ${daysCw} dager siden)`} — tua_import(kilde=cowork)`)
-    if (parts.length) process.stdout.write(`Tua: ${parts.join('. ')}. Ikke kjør noe uten at brukeren sier ja.\n`)
-    log({ pending, pendingCw, inbox: inbox.length, days, daysCw })
+    // M17: Desktop-samtaler i cachen og dokumenter med AI-opphav — raske tall (forrige skanning / bare opphav), hooken har 10 s
+    let hc = null
+    try { hc = historyCounts({ quick: true, fresh: true }) } catch {}
+    const lastDesk = st.desktop?.at || 0, daysDesk = lastDesk ? Math.floor((Date.now() - lastDesk) / DAYS) : null
+    if (hc?.desktopNew && (daysDesk === null || daysDesk >= 7)) parts.push(`${hc.desktopNew} Desktop-samtale${hc.desktopNew === 1 ? '' : 'r'} i Claude Desktops cache er ikke tatt med — tua_import(kilde=desktop); leses ellers av seg selv når serveren kjører`)
+    if (hc?.dokumenter && !st.finder) parts.push(`${hc.dokumenter} dokument${hc.dokumenter === 1 ? '' : 'er'} med AI-opphav i Nedlastinger/Dokumenter/Skrivebord er ikke i Tua — tua_import(kilde=finder)`)
+    if (parts.length) process.stdout.write(`Tua: ${parts.join('. ')}. Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. Ikke kjør noe uten at brukeren sier ja.\n`)
+    log({ pending, pendingCw, desktop: hc?.desktopNew, dokumenter: hc?.dokumenter, inbox: inbox.length, days, daysCw })
   } else if (mode === 'svar') {
     const msg = String(input.last_assistant_message || '').trim()
     if (msg.length < MIN_SVAR) { log({ skipped: 'kort', len: msg.length }); process.exit(0) }
