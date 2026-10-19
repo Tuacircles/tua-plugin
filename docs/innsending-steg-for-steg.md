@@ -58,7 +58,7 @@ Kontroller:
 git ls-tree --name-only tua-plugin-export
 ```
 
-→ skal vise `.claude-plugin`, `LICENSE`, `README.md`, `PRIVACY.md`, `package.json`, `package-lock.json`, `server`, `skills`, `hooks`, `icon.png`, `docs` … i **rota**.
+→ skal vise `.claude-plugin`, `LICENSE`, `README.md`, `PRIVACY.md`, `package.json`, `package-lock.json`, `server`, `skills`, `hooks`, ikon-PNG-en, `docs` … i **rota**.
 
 ```bash
 git ls-tree -r --name-only tua-plugin-export | grep -ci "ds_store\|node_modules\|server/data"
@@ -175,7 +175,7 @@ Repository `tuacircles/tua-plugin` · Plugin path **tomt** · Branch/tag **tomt*
 | Name may be confused with an existing listing | *mulig* | Svar: Tua er det registrerte produktet til Tua Circles Holding AS, tuacircles.com, live siden 2024. |
 
 ### Listing details
-Kontroller at portalen har lest fra `plugin.json`: navn **Tua**, author **Tua Circles Holding AS**, lisens **AGPL-3.0-only**. Last opp **`icon.png`** (ligger i rota av repoet; 512 × 512, 71 KB — det er Tua-appikonet fra tuacircles.com skalert opp fra 257 px; vil du ha skarpere, be designeren om originalfila og erstatt). Fyll inn fra tabellen *Listing materials* i SUBMISSION.md: Documentation URL, Privacy policy URL (`https://tuacircles.com/plugin-privacy` hvis steg 6A er gjort, ellers GitHub-adressen), Support contact `tech@tuacircles.com`, kategorier, one-liner og detaljbeskrivelse (kopier teksten ordrett).
+Kontroller at portalen har lest fra `plugin.json`: navn **Tua**, author **Tua Circles Holding AS**, lisens **AGPL-3.0-only**. Last opp **ikonet** (PNG-fila i rota av repoet; 512 × 512, 71 KB — det er Tua-appikonet fra tuacircles.com skalert opp fra 257 px; vil du ha skarpere, be designeren om originalfila og erstatt). Fyll inn fra tabellen *Listing materials* i SUBMISSION.md: Documentation URL, Privacy policy URL (`https://tuacircles.com/plugin-privacy` hvis steg 6A er gjort, ellers GitHub-adressen), Support contact `tech@tuacircles.com`, kategorier, one-liner og detaljbeskrivelse (kopier teksten ordrett).
 
 ### Data handling
 Svar nøyaktig som tabellen *Data handling step* i SUBMISSION.md: leser/lagrer persondata **ja — bare lokalt**; sender til andre tjenester **nei**; oppbevaring **så lenge brukeren beholder filene**; under 18 **nei**; helsedata/sponset **nei/nei**.
@@ -206,7 +206,7 @@ cd /Users/bruker/Documents/Claude/Projects/tua && git branch -D tua-plugin-expor
 ## Hva som er klart (gjort 19.10.2026, uten dine kontoer)
 
 - **Repoet <https://github.com/tuacircles/tua-plugin>** er public, med `main` = `8eee3dc` og tag `v0.4.0`: M15 + M18 + ikon, docs og tech@. Rota har `.claude-plugin/plugin.json`, `LICENSE`, `README.md`; ingen `.DS_Store`, `node_modules` eller `server/data`. `claude plugin validate --strict` bestått både med og uten `marketplace.json`; `test-tools.mjs` og `test-platform.mjs` grønne. Eksportgrenen ble laget fra `claude/elastic-taussig-41b833` etter fletting av `claude/m18-merge`; `main` i Tua-repoet har ennå ikke disse commitene.
-- **`icon.png`** 512 × 512 PNG, 71 KB, i `tua-plugin/`.
+- **Ikonet** 512 × 512 PNG, 71 KB, i rota av `tua-plugin/`.
 - **`docs/privacy-policy.html`** klar til å legges på tuacircles.com/plugin-privacy.
 - **`SUBMISSION.md`** oppdatert med ikon- og personvern-URL.
 

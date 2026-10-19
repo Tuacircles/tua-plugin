@@ -29,8 +29,8 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { unzipToTemp } from './unzip.js'   // 19.10.2026: utpakking uten shell, skilt ut (validatoren så fetch + spawn i samme fil)
 import {
   load, save, upsert, FILES_ROOT, INBOX_DIR, ensureArchive, registerProject, projectOf as registeredProject, claudeProjectHref,
   finishOnboarding, noteImport, importState, S_MAX, SHORT_L, filesMode,
@@ -427,20 +427,8 @@ function findRoot(dir, loose = false) {
   return null
 }
 
-// Zip → temp-mappe (bare json-filene; medier i ChatGPT-eksporten pakkes ikke ut). unzip finnes på macOS/Linux;
-// Windows 10+ og macOS har `tar` (bsdtar) som leser zip — den brukes når unzip mangler (M18). Aldri shell.
-function unzip(zipPath) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tua-import-'))
-  const tries = process.env.TUA_NO_UNZIP ? [] : [['unzip', ['-o', '-q', zipPath, '*.json', '-d', tmp]]]
-  tries.push(['tar', ['-xf', zipPath, '-C', tmp, '--include=*.json']], ['tar', ['-xf', zipPath, '-C', tmp]])
-  let last = ''
-  for (const [cmd, args] of tries) {
-    const r = spawnSync(cmd, args, { encoding: 'utf8' })
-    if (findRoot(tmp, true)) return tmp
-    last = r.error ? `${cmd}: ${r.error.message}` : (r.stderr || r.stdout || '').trim()
-  }
-  throw new Error(`kunne ikke pakke ut ${path.basename(zipPath)}: ${last || 'ingen json-filer i zip-en'} (trenger unzip eller tar)`)
-}
+// Zip → temp-mappe (bare json-filene; medier i ChatGPT-eksporten pakkes ikke ut). Selve utpakkingen ligger i unzip.js.
+const unzip = (zipPath) => unzipToTemp(zipPath, (tmp) => !!findRoot(tmp, true))
 
 // ── Claude-eksporten slik den faktisk kommer (sett hos Erik 14.10.2026) ────
 // Eksportsiden gir en manifest-<uuid>-<tid>.json med `data_files[]` ({filename, category, part, batch_index, export_url})

@@ -2,7 +2,7 @@
 
 Everything to paste into the developer portal at <https://claude.ai/directory/manage> (Submit new → **Plugin bundle**). Written 19 October 2026 against the docs read the same day (`/docs/plugins/submit`, `/docs/plugins/pre-submission-checklist`, `/docs/connectors/building/submission`, `/docs/connectors/building/review-criteria`). Re-read them before submitting; they change.
 
-> **Before you start:** (1) create the public GitHub repository `tuacircles/tua-plugin` (or another owner — then replace `tuacircles/tua-plugin` in `plugin.json`, `package.json`, `pakk.mjs`, `README.md`, `PRIVACY.md` and this file) with the contents of this folder at the repository **root** (plugin path empty — that avoids the "scripts the validator couldn't follow" hold for sub-folder plugins); (2) connect that GitHub account on claude.ai in the Tua Circles organization; (3) publish `PRIVACY.md` at an HTTPS URL you control — `docs/privacy-policy.html` is a ready-made standalone page for <https://tuacircles.com/plugin-privacy> — or keep the GitHub URL; (4) the icon is `icon.png` in this folder (512 × 512 PNG, 71 KB, the Tua app icon from tuacircles.com).
+> **Before you start:** (1) create the public GitHub repository `tuacircles/tua-plugin` (or another owner — then replace `tuacircles/tua-plugin` in `plugin.json`, `package.json`, `pakk.mjs`, `README.md`, `PRIVACY.md` and this file) with the contents of this folder at the repository **root** (plugin path empty — that avoids the "scripts the validator couldn't follow" hold for sub-folder plugins); (2) connect that GitHub account on claude.ai in the Tua Circles organization; (3) publish `PRIVACY.md` at an HTTPS URL you control — `docs/privacy-policy.html` is a ready-made standalone page for <https://tuacircles.com/plugin-privacy> — or keep the GitHub URL; (4) the icon is the 512 × 512 PNG in this folder's root (71 KB, the Tua app icon from tuacircles.com) — upload it in the Listing step.
 >
 > The Norwegian step-by-step for everything that needs Erik's accounts (GitHub, claude.ai, e-mail, website) is in `docs/innsending-steg-for-steg.md`.
 
@@ -42,7 +42,7 @@ Listing materials, if the portal asks for them separately:
 | Support contact | `tech@tuacircles.com` |
 | Company | Tua Circles Holding AS, Oslo, Norway · `https://tuacircles.com` |
 | Primary contact for review updates | Erik Teigen, `tech@tuacircles.com` |
-| Icon | `icon.png` in the repository root — 512 × 512 PNG, 71 KB, the Tua app icon (favicon of tuacircles.com, upscaled from 257 px; replace with the designer's original for a sharper result) |
+| Icon | the PNG in the repository root — 512 × 512, 71 KB, the Tua app icon (favicon of tuacircles.com, upscaled from 257 px; replace with the designer's original for a sharper result) |
 | Categories | Productivity · Notes & knowledge management · Developer tools |
 | One-liner (≤ 200 chars) | The local-first archive for everything you make with AI: save with provenance, find it again across projects, bring in your Claude history — all as markdown files in your own folder. |
 
@@ -98,5 +98,5 @@ If the portal shows the connector-style list of seven acknowledgements (director
 - [x] `node server/test-tools.mjs` and `node server/test-platform.mjs` → all green (19 Oct 2026)
 - [ ] `tech@tuacircles.com` exists and is monitored
 - [ ] Privacy policy reachable over HTTPS at the URL you enter
-- [x] Icon PNG ready (`icon.png`)
+- [x] Icon PNG ready (512 × 512, repository root)
 - [x] Owner/URL `tuacircles/tua-plugin` matches the real repository (personal account Tuacircles)
