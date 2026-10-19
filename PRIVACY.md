@@ -1,6 +1,6 @@
 # Privacy Policy — Tua plugin for Claude
 
-*Tua Circles Holding AS · Oslo, Norway · Last updated 19 October 2026 · Contact: support@tuacircles.com*
+*Tua Circles Holding AS · Oslo, Norway · Last updated 19 October 2026 · Contact: tech@tuacircles.com*
 
 This policy covers the **Tua plugin** (MCP server, skills and hooks) distributed through Anthropic's directory and from <https://github.com/tuacircles/tua-plugin>. The Tua apps and website have their own policy at <https://tuacircles.com/privacy-policy>.
 
@@ -42,7 +42,7 @@ Your data stays as long as you keep the files. To delete one atom, delete its fi
 
 ## 7. Your rights and contact
 
-Because Tua Circles holds no data about you, there is nothing for us to access, correct, export or erase on request — you hold it all, as plain files. Questions about this policy, or security reports, go to **support@tuacircles.com**. We answer within five working days.
+Because Tua Circles holds no data about you, there is nothing for us to access, correct, export or erase on request — you hold it all, as plain files. Questions about this policy, or security reports, go to **tech@tuacircles.com**. We answer within five working days.
 
 ## 8. Changes
 

@@ -20,18 +20,11 @@
 
 ---
 
-## 1. Beslutning først: eiernavn på GitHub
+## 1. Eiernavn på GitHub — avgjort
 
-Alle filer peker i dag på `tuacircles/tua-plugin`. Velg én av to:
+**Avgjort 19.10.2026:** organisasjonen heter `tuacircles` (firmaet, Tua Circles Holding AS) og repoet heter `tua-plugin` (produktet Tua). Adressen blir `https://github.com/tuacircles/tua-plugin`, som alle filene allerede peker på. Ingenting skal byttes.
 
-- **A — organisasjon `tuacircles` (anbefalt).** Pluginen eies av Tua Circles Holding AS, ikke av deg privat; en organisasjon kan få flere medlemmer senere, og navnet matcher tuacircles.com. Opprett på <https://github.com/account/organizations/new> → *Free* → Organization name `tuacircles`, Contact email `support@tuacircles.com` (eller din), «My personal account». Du trenger en vanlig GitHub-brukerkonto først (<https://github.com/signup>) hvis du ikke har en.
-- **B — et annet navn.** Da må `tuacircles/tua-plugin` byttes **før** steg 2, i disse filene i `tua-plugin/`: `.claude-plugin/plugin.json`, `package.json`, `pakk.mjs`, `README.md`, `PRIVACY.md`, `SUBMISSION.md`, `docs/privacy-policy.html` og denne fila. Kommando som finner alle:
-
-  ```bash
-  grep -rn "tuacircles/tua-plugin" tua-plugin --include="*.json" --include="*.md" --include="*.mjs" --include="*.html"
-  ```
-
-  Be Claude gjøre byttet, commit, og lag eksportgrenen på nytt (steg 2).
+Opprett organisasjonen på <https://github.com/account/organizations/new> → *Free* → Organization name `tuacircles`, Contact email `tech@tuacircles.com`, «My personal account». Du trenger en vanlig GitHub-brukerkonto først (<https://github.com/signup>) hvis du ikke har en. Navnet var ledig 19.10.2026 — er det tatt i mellomtiden, prøv `tuacirclesapp` eller `tua-circles` og be Claude bytte `tuacircles/tua-plugin` i filene (`grep -rn "tuacircles/tua-plugin" tua-plugin` finner alle) før steg 2.
 
 ---
 
@@ -120,11 +113,11 @@ git tag v0.4.0 tua-plugin-export && git push tua-plugin v0.4.0
 
 ---
 
-## 5. Opprett support@tuacircles.com
+## 5. Opprett tech@tuacircles.com
 
 Portalen sender alle beskjeder om vurderingen hit, og adressen står i `plugin.json`, `PRIVACY.md` og README. Den må finnes og leses **før** du sender inn.
 
-- Der tuacircles.com har e-post (Google Workspace, Microsoft 365, Domeneshop, One.com …): opprett `support@tuacircles.com` som **alias/videresending** til `erik@storelia.no`. Et alias koster vanligvis ingenting og trenger ingen egen innboks.
+- Der tuacircles.com har e-post (Google Workspace, Microsoft 365, Domeneshop, One.com …): opprett `tech@tuacircles.com` som **alias/videresending** til `erik@storelia.no`. Et alias koster vanligvis ingenting og trenger ingen egen innboks.
 - Send en testmelding fra en annen konto og bekreft at den kommer fram.
 - Svar på testmeldingen *fra* `support@` om leverandøren tillater det (ikke påkrevd, men fint for senere korrespondanse med Anthropic).
 
@@ -174,18 +167,18 @@ Repository `tuacircles/tua-plugin` · Plugin path **tomt** · Branch/tag **tomt*
 | Name may be confused with an existing listing | *mulig* | Svar: Tua er det registrerte produktet til Tua Circles Holding AS, tuacircles.com, live siden 2024. |
 
 ### Listing details
-Kontroller at portalen har lest fra `plugin.json`: navn **Tua**, author **Tua Circles Holding AS**, lisens **AGPL-3.0-only**. Last opp **`icon.png`** (ligger i rota av repoet; 512 × 512, 71 KB — det er Tua-appikonet fra tuacircles.com skalert opp fra 257 px; vil du ha skarpere, be designeren om originalfila og erstatt). Fyll inn fra tabellen *Listing materials* i SUBMISSION.md: Documentation URL, Privacy policy URL (`https://tuacircles.com/plugin-privacy` hvis steg 6A er gjort, ellers GitHub-adressen), Support contact `support@tuacircles.com`, kategorier, one-liner og detaljbeskrivelse (kopier teksten ordrett).
+Kontroller at portalen har lest fra `plugin.json`: navn **Tua**, author **Tua Circles Holding AS**, lisens **AGPL-3.0-only**. Last opp **`icon.png`** (ligger i rota av repoet; 512 × 512, 71 KB — det er Tua-appikonet fra tuacircles.com skalert opp fra 257 px; vil du ha skarpere, be designeren om originalfila og erstatt). Fyll inn fra tabellen *Listing materials* i SUBMISSION.md: Documentation URL, Privacy policy URL (`https://tuacircles.com/plugin-privacy` hvis steg 6A er gjort, ellers GitHub-adressen), Support contact `tech@tuacircles.com`, kategorier, one-liner og detaljbeskrivelse (kopier teksten ordrett).
 
 ### Data handling
 Svar nøyaktig som tabellen *Data handling step* i SUBMISSION.md: leser/lagrer persondata **ja — bare lokalt**; sender til andre tjenester **nei**; oppbevaring **så lenge brukeren beholder filene**; under 18 **nei**; helsedata/sponset **nei/nei**.
 
 ### Compliance
-Contact email `support@tuacircles.com` (steg 5 må være gjort). Huk av alle fire (eller sju) bekreftelsene — alle er sanne, se README «What the plugin runs, reads, writes and sends».
+Contact email `tech@tuacircles.com` (steg 5 må være gjort). Huk av alle fire (eller sju) bekreftelsene — alle er sanne, se README «What the plugin runs, reads, writes and sends».
 
 ### Review & submit
 *How new versions reach the directory:* **GitHub push webhook** (krever admin på repoet — det har du). *Auto-publish passing versions:* **på**. Lim «Instructions for the reviewer» fra SUBMISSION.md inn i notatfeltet. Trykk **Submit**.
 
-Deretter: følg med på `support@tuacircles.com`. Vurderer kan stille spørsmål; svar fra samme adresse.
+Deretter: følg med på `tech@tuacircles.com`. Vurderer kan stille spørsmål; svar fra samme adresse.
 
 ---
 
@@ -211,10 +204,10 @@ cd /Users/bruker/Documents/Claude/Projects/tua && git branch -D tua-plugin-expor
 
 ## Hva som mangler (krever deg)
 
-1. Beslutning om eiernavn (steg 1) — `tuacircles` er ledig.
+1. GitHub-organisasjonen `tuacircles` må opprettes (steg 1; navnet er avgjort).
 2. GitHub-konto/organisasjon og Personal Access Token (steg 0–1).
 3. Fletting av M15+M18 til `main`, så ny eksportgren (steg 2).
 4. Repo, push (steg 3–4).
-5. `support@tuacircles.com` (steg 5).
+5. `tech@tuacircles.com` (steg 5).
 6. Personvernsiden på tuacircles.com (steg 6, kan utsettes).
 7. GitHub-kobling på claude.ai og selve innsendingen (steg 7–8).

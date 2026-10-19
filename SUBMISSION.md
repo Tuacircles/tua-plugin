@@ -39,9 +39,9 @@ Listing materials, if the portal asks for them separately:
 |---|---|
 | Documentation URL | `https://github.com/tuacircles/tua-plugin#readme` |
 | Privacy policy URL | `https://tuacircles.com/plugin-privacy` once `docs/privacy-policy.html` is published there; until then `https://github.com/tuacircles/tua-plugin/blob/main/PRIVACY.md` |
-| Support contact | `support@tuacircles.com` |
+| Support contact | `tech@tuacircles.com` |
 | Company | Tua Circles Holding AS, Oslo, Norway · `https://tuacircles.com` |
-| Primary contact for review updates | Erik Teigen, `support@tuacircles.com` |
+| Primary contact for review updates | Erik Teigen, `tech@tuacircles.com` |
 | Icon | `icon.png` in the repository root — 512 × 512 PNG, 71 KB, the Tua app icon (favicon of tuacircles.com, upscaled from 257 px; replace with the designer's original for a sharper result) |
 | Categories | Productivity · Notes & knowledge management · Developer tools |
 | One-liner (≤ 200 chars) | The local-first archive for everything you make with AI: save with provenance, find it again across projects, bring in your Claude history — all as markdown files in your own folder. |
@@ -67,7 +67,7 @@ Listing materials, if the portal asks for them separately:
 
 ## Compliance step
 
-Contact email: `support@tuacircles.com` (make sure the mailbox exists and is read before submitting; the portal sends review updates there).
+Contact email: `tech@tuacircles.com` (make sure the mailbox exists and is read before submitting; the portal sends review updates there).
 
 The four acknowledgements (select all): the plugin complies with the Anthropic Software Directory Terms and Policy; the listing and README accurately describe what it does; Tua Circles will maintain its security and functionality and respond to security reports promptly; the plugin collects no conversation data beyond what its tools need and sends none to undeclared destinations. All four are true — see "What the plugin runs, reads, writes and sends" in the README.
 
@@ -96,7 +96,7 @@ If the portal shows the connector-style list of seven acknowledgements (director
 - [ ] `git ls-files | grep -ci "ds_store\|thumbs.db"` → 0; no `node_modules/`, `server/data/`, `dist/` committed
 - [ ] `claude plugin validate --strict` on a copy without `marketplace.json` → ✔
 - [ ] `node server/test-tools.mjs` and `node server/test-platform.mjs` → all green
-- [ ] `support@tuacircles.com` exists and is monitored
+- [ ] `tech@tuacircles.com` exists and is monitored
 - [ ] Privacy policy reachable over HTTPS at the URL you enter
 - [x] Icon PNG ready (`icon.png`)
 - [ ] Owner/URL `tuacircles/tua-plugin` matches the real repository everywhere (grep for it)

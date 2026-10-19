@@ -76,7 +76,7 @@ This section exists so that nothing Tua does is a surprise. It is the complete l
 
 *Also published as [PRIVACY.md](PRIVACY.md) in this repository and at <https://tuacircles.com/privacy-policy>. Last updated 19 October 2026.*
 
-**Who we are.** Tua Circles Holding AS, Oslo, Norway (org. no. in the Norwegian Register of Business Enterprises). Contact: <support@tuacircles.com>.
+**Who we are.** Tua Circles Holding AS, Oslo, Norway (org. no. in the Norwegian Register of Business Enterprises). Contact: <tech@tuacircles.com>.
 
 **Data collection.** The Tua plugin collects no data for us. It runs entirely on your computer. We receive nothing when you install, run or remove it — no usage statistics, no crash reports, no identifiers.
 
@@ -88,12 +88,12 @@ This section exists so that nothing Tua does is a surprise. It is the complete l
 
 **Data retention.** Data stays as long as you keep the files. Delete an atom by deleting its file; delete everything by deleting the folder and `~/.tua`. Previous versions live in `<archive>/.tua/versions/` and the delivery log in `<archive>/.tua/utlevering.jsonl` (metadata only: tool, atom id, level, time) until you delete them. Uninstalling the plugin removes the plugin's cache directory, never your archive.
 
-**Your rights.** Because we hold no data about you, there is nothing for us to access, correct or erase on request — you hold it all. For questions, or to report a security issue, write to <support@tuacircles.com>.
+**Your rights.** Because we hold no data about you, there is nothing for us to access, correct or erase on request — you hold it all. For questions, or to report a security issue, write to <tech@tuacircles.com>.
 
 ## Support and documentation
 
 - Documentation: this README and the [Norwegian section](#norsk) below; the skills describe the workflow in detail.
-- Support: <support@tuacircles.com> · Issues: the issue tracker of this repository.
+- Support: <tech@tuacircles.com> · Issues: the issue tracker of this repository.
 - Changes: [CHANGELOG.md](CHANGELOG.md). License: [AGPL-3.0](LICENSE).
 
 ## Norsk

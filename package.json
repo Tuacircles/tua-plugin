@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Tua — the local-first archive for everything you make with AI. Claude plugin: MCP server, skills and hooks. Every atom is a markdown file in your own folder; nothing leaves your machine.",
   "license": "AGPL-3.0-only",
-  "author": "Tua Circles Holding AS <support@tuacircles.com> (https://tuacircles.com)",
+  "author": "Tua Circles Holding AS <tech@tuacircles.com> (https://tuacircles.com)",
   "repository": { "type": "git", "url": "https://github.com/tuacircles/tua-plugin" },
   "engines": { "node": ">=22.15" },
   "scripts": {
