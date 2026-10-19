@@ -14,7 +14,7 @@
 | `ssh -T git@github.com` | «Host key verification failed» | Som ventet uten SSH-oppsett. Ignorer. |
 | GitHub CLI (`gh`) | ikke installert | Alt gjøres i nettleseren + vanlig `git`. |
 | Remote i Tua-repoet | ingen | Repoet ditt er bare lokalt; pluginen pushes til en ny, egen URL. |
-| `https://github.com/tuacircles` | **404 — navnet er ledig** | Du kan opprette «tuacircles» som organisasjon eller bruker. |
+| `https://github.com/tuacircles` | **Din egen brukerkonto** (visningsnavn «Tuacircles», ingen repoer før 19.10.2026) | Repoet legges rett på kontoen din. Ingen organisasjon trengs. |
 
 **Innlogging ved push:** GitHub godtar ikke kontopassord i Git. Når `git push` spør om *Password*, limer du inn et **Personal Access Token**. Lag det på <https://github.com/settings/tokens?type=beta> → *Generate new token* → navn «Tua plugin push», utløp 90 dager, *Repository access*: «Only select repositories» → `tua-plugin`, *Permissions → Contents: Read and write*. Kopier tokenet én gang; Nøkkelring lagrer det etter første push. Du kan trygt slette tokenet på GitHub når pushen er gjort — eller la det leve til neste versjon.
 
@@ -22,15 +22,15 @@
 
 ## 1. Eiernavn på GitHub — avgjort
 
-**Avgjort 19.10.2026:** organisasjonen heter `tuacircles` (firmaet, Tua Circles Holding AS) og repoet heter `tua-plugin` (produktet Tua). Adressen blir `https://github.com/tuacircles/tua-plugin`, som alle filene allerede peker på. Ingenting skal byttes.
+**Avgjort 19.10.2026:** GitHub-brukerkontoen din heter allerede `Tuacircles` (firmaet, Tua Circles Holding AS), og repoet heter `tua-plugin` (produktet Tua). Adressen er `https://github.com/tuacircles/tua-plugin`, som alle filene peker på. Ingen organisasjon ble opprettet — GitHub avviste navnet fordi det er din konto. Ingenting skal byttes.
 
-Opprett organisasjonen på <https://github.com/account/organizations/new> → *Free* → Organization name `tuacircles`, Contact email `tech@tuacircles.com`, «My personal account». Du trenger en vanlig GitHub-brukerkonto først (<https://github.com/signup>) hvis du ikke har en. Navnet var ledig 19.10.2026 — er det tatt i mellomtiden, prøv `tuacirclesapp` eller `tua-circles` og be Claude bytte `tuacircles/tua-plugin` i filene (`grep -rn "tuacircles/tua-plugin" tua-plugin` finner alle) før steg 2.
+*Senere, om ønskelig:* kontoen kan gjøres om til en organisasjon (Settings → *Transform account into an organization*) uten at adressen endres. Ikke nødvendig for innsendingen.
 
 ---
 
 ## 2. Lag eksportgrenen på nytt fra `main`
 
-> **Viktig:** Grenen `tua-plugin-export` som finnes i dag er laget fra arbeidsgrenen `claude/elastic-taussig-41b833` (commit 7083d22) og er en **prøve**. Den mangler `server/keychain.js` og `server/trust-scores.json` fra M15. Når M15 og M18 er flettet til `main`, lag den på nytt — det tar ti sekunder.
+> **Status 19.10.2026:** `tua-plugin-export` er laget fra `claude/elastic-taussig-41b833` **etter** at `claude/m18-merge` (M15 + M18) ble flettet inn der, så den inneholder `server/keychain.js` og `server/trust-scores.json`. Den er validert og klar til push (steg 4). Når `main` senere har fått de samme commitene, gir en ny split fra `main` samme historikk, og pushen blir en vanlig fast-forward. Oppskriften under er for neste gang.
 
 Kjør i Terminal, i hovedutsjekkingen:
 
@@ -74,7 +74,9 @@ git ls-tree -r --name-only tua-plugin-export | grep -c "server/keychain.js\|serv
 
 ---
 
-## 3. Opprett repoet på github.com
+## 3. Opprett repoet på github.com — gjort
+
+**Gjort 19.10.2026:** <https://github.com/tuacircles/tua-plugin> finnes, er public og tomt (ingen README, .gitignore eller lisens). Oppskriften står igjen for et eventuelt nytt repo:
 
 1. Logg inn på GitHub. Gå til <https://github.com/new>.
 2. **Owner:** `tuacircles` (eller navnet fra steg 1). **Repository name:** `tua-plugin`.
@@ -146,7 +148,7 @@ curl -sI https://tuacircles.com/plugin-privacy | head -1
 
 1. Logg inn på <https://claude.ai> med kontoen som er med i **Tua Circles**-organisasjonen (ikke en privat konto — innsendingen eies av organisasjonen).
 2. Gå til <https://claude.ai/directory/manage> → **Submit new** → **Plugin bundle**.
-3. I **Source**-steget: *Connect GitHub*. GitHub spør hvor Claude-appen skal installeres: velg **`tuacircles`** (organisasjonen) → *Only select repositories* → `tua-plugin` → *Install & Authorize*. Hvis repoet eies av din brukerkonto i stedet, velg den.
+3. I **Source**-steget: *Connect GitHub*. GitHub spør hvor Claude-appen skal installeres: velg brukerkontoen **Tuacircles** → *Only select repositories* → `tua-plugin` → *Install & Authorize*.
 
 ---
 
@@ -204,10 +206,9 @@ cd /Users/bruker/Documents/Claude/Projects/tua && git branch -D tua-plugin-expor
 
 ## Hva som mangler (krever deg)
 
-1. GitHub-organisasjonen `tuacircles` må opprettes (steg 1; navnet er avgjort).
-2. GitHub-konto/organisasjon og Personal Access Token (steg 0–1).
-3. Fletting av M15+M18 til `main`, så ny eksportgren (steg 2).
-4. Repo, push (steg 3–4).
+1. ~~GitHub-konto og repo~~ — gjort 19.10.2026 (kontoen Tuacircles, repoet tua-plugin).
+2. Personal Access Token (steg 0) og push (steg 4).
+3. Fletting av `claude/m18-merge` og `claude/elastic-taussig-41b833` til `main` (egen økt; eksportgrenen er allerede laget med alt innhold).
 5. `tech@tuacircles.com` (steg 5).
 6. Personvernsiden på tuacircles.com (steg 6, kan utsettes).
 7. GitHub-kobling på claude.ai og selve innsendingen (steg 7–8).
