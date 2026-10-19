@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Tua — kort</title>
+<style>
+  /* Strukturen bruker vertens tokens (lys/mørk følger automatisk); Tua-aksentene er korall og Georgia for titler (V12). */
+  :root {
+    --bg: var(--color-background-primary, #fff);
+    --bg2: var(--color-background-secondary, #F5F4ED);
+    --fg: var(--color-text-primary, #141413);
+    --fg2: var(--color-text-secondary, #3D3D3A);
+    --fg3: var(--color-text-tertiary, #73726C);
+    --line: var(--color-border-tertiary, rgba(31,30,29,.15));
+    --line2: var(--color-border-primary, rgba(31,30,29,.4));
+    --warn-bg: var(--color-background-warning, #F6EEDF);
+    --warn-fg: var(--color-text-warning, #5A4815);
+    --sans: var(--font-sans, -apple-system, "SF Pro Text", system-ui, sans-serif);
+    --serif: Georgia, "Times New Roman", serif;
+    --r: var(--border-radius-md, 8px);
+    --coral: #C04A38;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: transparent; color: var(--fg); font-family: var(--sans); font-size: 14px; line-height: 1.4; }
+  #root { padding: 12px 14px 10px; }
+  .eyebrow { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--coral); }
+  .eyebrow .meta { color: var(--fg3); letter-spacing: 0; text-transform: none; font-size: 12px; }
+  h1 { margin: 4px 0 6px; font-family: var(--serif); font-size: 19px; line-height: 1.2; font-weight: 700; color: var(--fg); }
+  h2 { margin: 2px 0 4px; font-family: var(--serif); font-size: 16px; line-height: 1.25; font-weight: 700; }
+  .s { margin: 0 0 8px; font-size: 14px; line-height: 1.45; color: var(--fg2); }
+  .why { margin: 0 0 8px; font-size: 12px; color: var(--fg3); }
+  .body { margin: 8px 0; font-family: var(--serif); font-size: 14px; line-height: 1.55; border-top: 1px solid var(--line); padding-top: 4px; }
+  .md p { margin: 6px 0; } .md h3 { margin: 10px 0 4px; font-size: 15px; } .md h4 { margin: 8px 0 2px; font-size: 14px; }
+  .md ul { margin: 4px 0; padding-left: 20px; } .md li { margin: 2px 0; } .md code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; background: var(--bg2); padding: 0 4px; border-radius: 3px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0 0; }
+  .seg { display: inline-flex; border: 1px solid var(--line2); border-radius: 999px; overflow: hidden; }
+  .seg button { min-height: 32px; min-width: 44px; padding: 0 12px; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: 13px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+  .seg button:disabled { color: var(--fg3); cursor: default; }
+  .btn { min-height: 32px; padding: 0 12px; border: 1px solid var(--line2); border-radius: 999px; background: transparent; color: var(--fg); font: inherit; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .btn:disabled { color: var(--fg3); border-color: var(--line); cursor: default; }
+  .btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--bg2); color: var(--fg2); border: 1px solid var(--line); }
+  .chip.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .chip.link { cursor: pointer; }
+  .lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--fg3); margin: 10px 0 2px; }
+  .hit { padding: 10px 0; border-top: 1px solid var(--line); }
+  .hit:first-of-type { border-top: 0; padding-top: 4px; }
+  .hit h2 a, .hit h2 { color: var(--fg); text-decoration: none; cursor: pointer; }
+  .hit .s { margin-bottom: 6px; }
+  .hit .inline { margin: 6px 0 0; padding: 8px 10px; background: var(--bg2); border-radius: var(--r); font-family: var(--serif); font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; }
+  .foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--fg3); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .addr { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; color: var(--fg3); word-break: break-all; }
+  .skel { height: 14px; border-radius: 4px; background: var(--bg2); margin: 8px 0; }
+  .err { color: var(--color-text-danger, #7F2C28); font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="root"><div class="skel" style="width:40%"></div><div class="skel" style="width:90%"></div><div class="skel" style="width:70%"></div></div>
+<script type="module">
+/*__BUNDLE__*/
+</script>
+<script>
+// Feil i kortet skal synes i kortet, ikke bare i en konsoll ingen ser (Desktop skjuler den).
+window.addEventListener('error', (e) => { const p = document.createElement('p'); p.className = 'err'; p.textContent = 'Feil i kortet: ' + (e.message || e.type); document.getElementById('root').append(p) })
+window.addEventListener('unhandledrejection', (e) => { const p = document.createElement('p'); p.className = 'err'; p.textContent = 'Feil i kortet: ' + (e.reason?.message || e.reason); document.getElementById('root').append(p) })
+</script>
+<script type="module">
+const { App } = window.McpApps
+const app = new App({ name: 'Tua kort', version: '0.1.0' })
+const root = document.getElementById('root')
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag)
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') n.className = v
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v)
+    else if (v != null) n.setAttribute(k, v)
+  }
+  for (const k of kids.flat()) if (k != null) n.append(k.nodeType ? k : document.createTextNode(String(k)))
+  return n
+}
+const LV = { S: 'ingress', M: 'sammendrag', L: 'alt' }
+let state = null        // siste structuredContent fra serveren
+let busy = false
+
+// ── størrelse: kortet skal passe innholdet, aldri rulle innvendig
+let connected = false
+const ro = new ResizeObserver(() => { if (connected) app.sendSizeChanged({ width: document.body.scrollWidth, height: document.body.scrollHeight }).catch(() => {}) })
+ro.observe(root)
+
+// ── vertens tema og stil-variabler (lys/mørk) legges på dokumentet
+const applyHost = (ctx) => {
+  if (!ctx) return
+  for (const [k, v] of Object.entries(ctx.styles?.variables || {})) document.documentElement.style.setProperty(k, v)
+  if (ctx.theme) document.documentElement.style.colorScheme = ctx.theme
+}
+
+// ── liten markdown-gjengivelse for M/L: overskrifter, lister, avsnitt, fet, kode. Tekst, aldri HTML inn.
+const inline = (s) => {
+  const frag = document.createDocumentFragment()
+  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g
+  let i = 0, m
+  while ((m = re.exec(s))) {
+    if (m.index > i) frag.append(s.slice(i, m.index))
+    const t = m[0]
+    frag.append(t.startsWith('`') ? el('code', {}, t.slice(1, -1)) : el('strong', {}, t.slice(2, -2)))
+    i = m.index + t.length
+  }
+  if (i < s.length) frag.append(s.slice(i))
+  return frag
+}
+const md = (text) => {
+  const out = el('div', { class: 'md' })
+  let list = null
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trimEnd()
+    if (!line.trim()) { list = null; continue }
+    const h = line.match(/^(#{1,6})\s+(.*)$/)
+    const li = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/)
+    if (h) { list = null; out.append(el(h[1].length <= 2 ? 'h3' : 'h4', {}, inline(h[2]))) }
+    else if (li) { if (!list) { list = el('ul', {}); out.append(list) } list.append(el('li', {}, inline(li[1]))) }
+    else { list = null; out.append(el('p', {}, inline(line))) }
+  }
+  return out
+}
+
+const call = async (args) => {
+  if (busy) return
+  busy = true
+  try { const r = await app.callServerTool({ name: 'tua_card', arguments: args }); render(r) }
+  catch (e) { root.append(el('p', { class: 'err' }, 'Tua svarte ikke: ' + (e?.message || e))) }
+  finally { busy = false }
+}
+// «Åpne i …»: bare verter som sier de kan åpne lenker (hostCapabilities.openLinks) får openLink; alle andre (bl.a. Code-appen)
+// går via serverens tua_open, som åpner lokalt med `open`. Feil fra serveren (f.eks. «kartet kjører ikke») vises i kortet.
+const open = async (target, atom) => {
+  try {
+    const canLink = !!app.getHostCapabilities?.()?.openLinks
+    if (canLink && target === 'kart' && atom.address) return await app.openLink({ url: atom.address })
+    if (canLink && target === 'claude' && atom.claudeProject) { try { return await app.openLink({ url: atom.claudeProject }) } catch {} }
+    const r = await app.callServerTool({ name: 'tua_open', arguments: { id: atom.id, target } })
+    if (r?.isError) root.append(el('p', { class: 'err' }, (r.content || []).map((c) => c.text).filter(Boolean).join(' ') || 'Kunne ikke åpne.'))
+  } catch (e) { root.append(el('p', { class: 'err' }, 'Kunne ikke åpne: ' + (e?.message || e))) }
+}
+const tellModel = (text) => { try { app.updateModelContext({ content: [{ type: 'text', text }] }) } catch {} }
+
+// ── ett atom (V12: S først, M/L på forespørsel, «Åpne i …»)
+function renderAtom(a) {
+  const seg = el('div', { class: 'seg', role: 'group', 'aria-label': 'Nivå' },
+    ...['S', 'M', 'L'].map((L) => el('button', {
+      type: 'button', 'aria-pressed': String(a.level === L),
+      disabled: (a.max && 'SML'.indexOf(L) > 'SML'.indexOf(a.max)) ? 'true' : null,
+      title: a.vault && L !== 'S' ? 'Vault: bare S utleveres' : LV[L],
+      onclick: () => { call({ id: a.id, level: L }); tellModel(`Brukeren åpnet ${L} (${LV[L]}) av atom ${a.id} «${a.name}» i Tua-kortet.`) },
+    }, L)))
+  const chips = (label, items, cls) => items?.length ? [el('div', { class: 'lbl' }, label), el('div', { class: 'chips' }, ...items.map((c) => el('span', { class: 'chip' + (c.warn ? ' warn' : '') + (c.id ? ' link' : ''), onclick: c.id ? () => call({ id: c.id, level: 'S' }) : null, title: c.title || null }, c.text)))] : []
+  root.replaceChildren(
+    el('div', { class: 'eyebrow' }, a.project, el('span', { class: 'meta' }, `· ${a.date} · v${a.version}${a.kind === 'leveranse' ? ' · leveranse' : ''}${a.source ? ' · ' + a.source : ''}`)),
+    el('h1', {}, a.name),
+    a.level !== 'S' && a.S ? el('p', { class: 's' }, a.S) : null,
+    a.why ? el('p', { class: 'why' }, 'Hvorfor: ' + a.why) : null,
+    el('div', { class: 'row' }, seg,
+      el('span', { class: 'meta', style: 'font-size:12px;color:var(--fg3)' },
+        a.level === 'S' ? `ingress · M ${a.hasM ? 'finnes' : 'mangler'} · L ${a.lengthL} tegn` : `${LV[a.level]}${a.stale ? ' · ⚠ fra v' + a.stale : ''}`)),
+    el('div', { class: 'body' }, md(a.text)),
+    ...chips('Bygget av', a.builtBy?.map((s) => ({ id: s.id, text: `${s.name} (v${s.version}, ${s.level})${s.missing ? ' · slettet' : s.stale ? ' · nå v' + s.now : ''}`, warn: s.stale || s.missing }))),
+    ...chips('Synlig for', a.share?.map((s) => ({ text: `${s.project} · ${s.level}` }))),
+    ...chips('Relaterte', a.related?.map((r) => ({ id: r.id, text: r.name, title: r.how }))),
+    a.tags?.length ? el('div', { class: 'chips' }, ...a.tags.map((t) => el('span', { class: 'chip' }, '#' + t))) : null,
+    el('div', { class: 'row' },
+      el('button', { class: 'btn primary', type: 'button', disabled: a.claudeProject ? null : 'true', title: a.claudeProject ? a.claudeProject : 'Desktop-prosjektet er ikke satt (sync-tua.js --claude-project)', onclick: () => open('claude', a) }, 'Åpne i Claude'),
+      el('button', { class: 'btn', type: 'button', disabled: a.file ? null : 'true', onclick: () => open('finder', a) }, 'Vis i Finder'),
+      el('button', { class: 'btn', type: 'button', disabled: a.repo ? null : 'true', onclick: () => open('code', a) }, 'Code'),
+      el('button', { class: 'btn', type: 'button', disabled: a.address ? null : 'true', onclick: () => open('kart', a) }, 'Kartet'),
+    ),
+    el('div', { class: 'foot' }, el('span', { class: 'addr' }, a.address || a.id), el('span', {}, a.convo ? `Samtale: ${a.convo}` : '')),
+  )
+}
+
+// ── treffliste (forsiden i miniatyr: ingresser, nyeste først)
+function renderList(d) {
+  root.replaceChildren(
+    el('div', { class: 'eyebrow' }, d.query ? `${d.total} treff på «${d.query}»` : `${d.total} atomer`, el('span', { class: 'meta' }, d.project ? `· ${d.project}` : '· alle prosjekter')),
+    ...d.items.map((a) => {
+      const box = el('div', { class: 'inline', hidden: 'true' })
+      const more = el('button', { class: 'btn', type: 'button', disabled: a.max === 'S' ? 'true' : null, onclick: async () => {
+        if (!box.hidden) { box.hidden = true; more.textContent = 'Les M'; return }
+        more.textContent = '…'
+        try {
+          const r = await app.callServerTool({ name: 'tua_card', arguments: { id: a.id, level: 'M', quiet: true } })
+          box.replaceChildren(md(r.structuredContent?.atom?.text || r.content?.[0]?.text || ''))
+          box.hidden = false; more.textContent = 'Skjul M'
+          tellModel(`Brukeren leste M (sammendrag) av atom ${a.id} «${a.name}» i Tua-kortet.`)
+        } catch (e) { box.textContent = 'Fikk ikke hentet M: ' + (e?.message || e); box.hidden = false }
+      } }, 'Les M')
+      return el('div', { class: 'hit' },
+        el('div', { class: 'eyebrow' }, a.project, el('span', { class: 'meta' }, `· ${a.date}${a.kind === 'leveranse' ? ' · leveranse' : ''}`)),
+        el('h2', {}, el('a', { onclick: () => call({ id: a.id, level: 'S' }) }, a.name)),
+        el('p', { class: 's' }, a.S || a.snippet || ''),
+        a.snippet && a.S ? el('p', { class: 'why' }, '… ' + a.snippet) : null,
+        el('div', { class: 'row' }, more, el('button', { class: 'btn', type: 'button', onclick: () => call({ id: a.id, level: 'S' }) }, 'Åpne kortet')),
+        box,
+      )
+    }),
+    el('div', { class: 'foot' }, el('span', {}, d.total > d.items.length ? `Viser ${d.items.length} av ${d.total} — be Claude om flere` : 'Alle treff vist'), el('span', {}, 'Tua · S i søk, M og L på forespørsel')),
+  )
+}
+
+function render(result) {
+  const sc = result?.structuredContent
+  if (!sc) { root.replaceChildren(el('p', { class: 'err' }, result?.content?.[0]?.text || 'Tomt svar fra Tua.')); return }
+  state = sc
+  if (sc.mode === 'atom') renderAtom(sc.atom)
+  else if (sc.mode === 'list') renderList(sc)
+  else root.replaceChildren(el('p', { class: 'err' }, sc.error || 'Ukjent svar.'))
+}
+
+app.ontoolresult = render
+app.ontoolinput = () => {}
+app.onhostcontextchanged = applyHost
+await app.connect()
+connected = true
+try { applyHost(app.getHostContext()) } catch {}
+</script>
+</body>
+</html>

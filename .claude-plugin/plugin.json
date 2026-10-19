@@ -1,21 +1,24 @@
 {
   "name": "tua",
   "displayName": "Tua",
-  "version": "0.3.0",
-  "description": "Tua er arkivet for det du lager med AI: lagre med proveniens, finn igjen på tvers av prosjekter (S/M/L), Innboks for Claude- og ChatGPT-eksport. Alt er markdown-filer i din egen mappe — ingen server, ingen nøkkel hos oss.",
-  "author": { "name": "Tua Circles Holding AS" },
-  "keywords": ["arkiv", "minne", "memory", "notater", "proveniens", "mcp"],
+  "version": "0.4.0",
+  "description": "Tua is the local-first archive for everything you make with AI: save with provenance, find it again across projects (S/M/L levels), bring in your history from Claude Code, Cowork and Claude Desktop without exports. Every atom is a markdown file in your own folder — no server, no account, nothing leaves your machine. Norwegian-language product.",
+  "author": { "name": "Tua Circles Holding AS", "email": "support@tuacircles.com", "url": "https://tuacircles.com" },
+  "homepage": "https://github.com/tuacircles/tua-plugin#readme",
+  "repository": "https://github.com/tuacircles/tua-plugin",
+  "license": "AGPL-3.0-only",
+  "keywords": ["archive", "memory", "notes", "provenance", "local-first", "markdown", "arkiv", "minne", "mcp"],
   "userConfig": {
     "arkivmappe": {
       "type": "directory",
-      "title": "Arkivmappe",
-      "description": "Mappa der atomene dine ligger som markdown-filer. La stå tom, så velger Tua: iCloud Drive/Tua, Dropbox/Tua eller ~/Tua (den som finnes).",
+      "title": "Arkivmappe / Archive folder",
+      "description": "Mappa der atomene dine ligger som markdown-filer. La stå tom, så spør Tua første gang (iCloud Drive, Dropbox, OneDrive, Google Drive eller lokalt). · The folder where your atoms live as markdown files. Leave empty and Tua asks on first use.",
       "required": false
     },
     "auto_lagring": {
       "type": "boolean",
-      "title": "Automatisk fangst i Claude Code",
-      "description": "Lagre lange svar, dokumenter du skriver (.md/.txt) og økt-sammendrag som atomer uten å spørre. Slå av om du bare vil lagre når du sier «lagre dette til Tua».",
+      "title": "Automatisk fangst i Claude Code / Auto-capture in Claude Code",
+      "description": "Lagre lange svar, dokumenter du skriver (.md/.txt) og økt-sammendrag som atomer uten å spørre. Slå av om du bare vil lagre når du sier «lagre dette til Tua». · Save long answers, text documents you write and session summaries automatically. Turn off to save only on request.",
       "default": true
     }
   }

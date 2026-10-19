@@ -14,17 +14,19 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
+const mod = (f) => pathToFileURL(path.join(HERE, '..', 'server', f)).href     // M18: dynamisk import må være en file://-URL på Windows
 const mode = process.argv[2]
 const auto = String(process.env.CLAUDE_PLUGIN_OPTION_AUTO_LAGRING).toLowerCase() !== 'false'
 if (!auto && mode !== 'start') process.exit(0)
 // Samme arkiv som serveren: innstillingen «arkivmappe» → TUA_FILES_ROOT; cache i plugin-data, ikke i plugin-mappa
 if (!process.env.TUA_FILES_ROOT && process.env.CLAUDE_PLUGIN_OPTION_ARKIVMAPPE) process.env.TUA_FILES_ROOT = process.env.CLAUDE_PLUGIN_OPTION_ARKIVMAPPE
 if (!process.env.TUA_DATA_DIR && process.env.CLAUDE_PLUGIN_DATA) process.env.TUA_DATA_DIR = path.join(process.env.CLAUDE_PLUGIN_DATA, 'data')
-const store = await import(path.join(HERE, '..', 'server', 'store.js'))
-const imp = await import(path.join(HERE, '..', 'server', 'import.js'))
+const store = await import(mod('store.js'))
+const imp = await import(mod('import.js'))
+const { posix, insideTmp } = await import(mod('platform.js'))
 const { load, save, upsert, FILES_ROOT, filesMode, S_MAX, SHORT_L, importState } = store
 const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts } = imp
 
@@ -79,7 +81,8 @@ try {
   } else if (mode === 'fil') {
     const fp = input.tool_input?.file_path
     // bare tekstdokumenter; ikke kode, ikke avhengigheter, ikke Claude-oppsett (men worktree-mapper under .claude/worktrees/ er ekte arbeid), ikke temp, ikke arkivet selv
-    if (!fp || !/\.(md|markdown|txt|rst)$/i.test(fp) || /\/(node_modules|\.tua|\.git)\//.test(fp) || /\/\.claude\/(?!worktrees\/)/.test(fp) || /^\/(private\/)?tmp\//.test(fp) || /\/CLAUDE\.md$/.test(fp) || insideArchive(fp)) { log({ skipped: 'filtype/sti', file: fp }); process.exit(0) }
+    const fq = posix(fp)                                            // M18: Windows-stier testes i posix-form
+    if (!fp || !/\.(md|markdown|txt|rst)$/i.test(fq) || /\/(node_modules|\.tua|\.git)\//.test(fq) || /\/\.claude\/(?!worktrees\/)/.test(fq) || (!process.env.TUA_HOOK_ALLOW_TMP && insideTmp(fp)) || /\/CLAUDE\.md$/.test(fq) || insideArchive(fp)) { log({ skipped: 'filtype/sti', file: fp }); process.exit(0) }
     let content = ''
     try { content = fs.readFileSync(fp, 'utf8') } catch { process.exit(0) }
     if (content.trim().length < SHORT_L) { log({ skipped: 'kort', file: fp }); process.exit(0) }

@@ -1,0 +1,13 @@
+# Dependencies (installed by Claude Code from package-lock.json, or by `npm ci`) — also when node_modules is a symlink
+node_modules
+
+# Local, machine-specific state: derived index cache, Desktop-cache and Finder scan state. Never the archive itself.
+server/data/
+
+# Build output from pakk.mjs (zip + .mcpb)
+dist/
+
+# OS files — the directory validator rejects these
+.DS_Store
+Thumbs.db
+desktop.ini
