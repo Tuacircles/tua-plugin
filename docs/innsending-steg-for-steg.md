@@ -87,7 +87,9 @@ git ls-tree -r --name-only tua-plugin-export | grep -c "server/keychain.js\|serv
 
 ---
 
-## 4. Push grenen til det nye repoet
+## 4. Push grenen til det nye repoet — gjort
+
+**Gjort 19.10.2026:** `main` på GitHub = commit `8eee3dc` (M15 + M18 + ikon, docs, tech@), tag `v0.4.0` på samme commit. Tokenet «Tua plugin push» (bare repoet tua-plugin, Contents: Read and write, utløper 18.11.2026) ligger i Nøkkelring, så senere push spør ikke. Remoten `tua-plugin` er lagt inn i worktreen `elastic-taussig-41b833`; i hovedutsjekkingen må den legges inn én gang (kommandoen under). Oppskriften står igjen for neste versjon:
 
 ```bash
 cd /Users/bruker/Documents/Claude/Projects/tua
@@ -119,9 +121,13 @@ git tag v0.4.0 tua-plugin-export && git push tua-plugin v0.4.0
 
 Portalen sender alle beskjeder om vurderingen hit, og adressen står i `plugin.json`, `PRIVACY.md` og README. Den må finnes og leses **før** du sender inn.
 
-- Der tuacircles.com har e-post (Google Workspace, Microsoft 365, Domeneshop, One.com …): opprett `tech@tuacircles.com` som **alias/videresending** til `erik@storelia.no`. Et alias koster vanligvis ingenting og trenger ingen egen innboks.
-- Send en testmelding fra en annen konto og bekreft at den kommer fram.
-- Svar på testmeldingen *fra* `support@` om leverandøren tillater det (ikke påkrevd, men fint for senere korrespondanse med Anthropic).
+E-posten for tuacircles.com ligger i **Microsoft 365** (MX peker på `tuacircles-com.mail.protection.outlook.com`, sjekket 19.10.2026). DNS ligger hos AWS Route 53.
+
+- Logg inn på <https://admin.microsoft.com> med en administratorkonto for tuacircles.com.
+- Billigst: **Teams og grupper → Delte postbokser → Legg til en delt postboks**, navn «Tua tech», e-post `tech@tuacircles.com`. Delte postbokser er gratis og trenger ingen lisens. Legg til deg selv som medlem, og slå på «Send kopi av mottatt e-post til medlemmene» så den dukker opp i din vanlige innboks.
+- Alternativt: legg `tech@tuacircles.com` til som **alias** på din egen postboks (Brukere → Aktive brukere → din bruker → Administrer e-postaliaser). Da kan du også svare fra adressen.
+- Vent 5–15 minutter, send en testmelding fra en annen konto og bekreft at den kommer fram.
+- Svar på testmeldingen *fra* `tech@` om du valgte alias (ikke påkrevd, men fint for senere korrespondanse med Anthropic).
 
 ---
 
@@ -129,7 +135,7 @@ Portalen sender alle beskjeder om vurderingen hit, og adressen står i `plugin.j
 
 Fila [`docs/privacy-policy.html`](privacy-policy.html) er en selvstendig side (ingen eksterne filer, Georgia, Tua-fargene) med nøyaktig innholdet i `PRIVACY.md`. Målet er at <https://tuacircles.com/plugin-privacy> svarer med denne.
 
-tuacircles.com kjører på **Framer** (bildene lastes fra framerusercontent.com). To veier:
+tuacircles.com kjører på **Framer** (bildene lastes fra framerusercontent.com). Status 19.10.2026: `/plugin-privacy` gir 404 (etter omdirigering til www), mens `/privacy-policy` finnes og gir 200. To veier:
 
 - **A — i Framer:** *Pages → +* → ny side, sett *slug* til `plugin-privacy`. Legg inn et **Embed**-element (Insert → Utility → Embed, type *HTML*), strekk det til full bredde, og lim inn alt fra `<main>` til og med `</main>` **pluss** hele `<style>`-blokken fra fila. Publiser. (Framer-sider har allerede `<html>`/`<head>`, så bare kroppen trengs.)
 - **B — hopp over for nå:** Portalen godtar GitHub-adressen `https://github.com/tuacircles/tua-plugin/blob/main/PRIVACY.md`. Siden kan legges ut senere; `SUBMISSION.md` lister begge.
@@ -199,16 +205,15 @@ cd /Users/bruker/Documents/Claude/Projects/tua && git branch -D tua-plugin-expor
 
 ## Hva som er klart (gjort 19.10.2026, uten dine kontoer)
 
-- **Eksportgren `tua-plugin-export`** finnes lokalt (prøve fra 7083d22, 4 commits). Rota har `.claude-plugin/plugin.json`, `LICENSE`, `README.md`; ingen `.DS_Store`, `node_modules` eller `server/data`. `claude plugin validate --strict` bestått både med og uten `marketplace.json`. **Må lages på nytt fra `main`** når M15+M18 er flettet (steg 2).
+- **Repoet <https://github.com/tuacircles/tua-plugin>** er public, med `main` = `8eee3dc` og tag `v0.4.0`: M15 + M18 + ikon, docs og tech@. Rota har `.claude-plugin/plugin.json`, `LICENSE`, `README.md`; ingen `.DS_Store`, `node_modules` eller `server/data`. `claude plugin validate --strict` bestått både med og uten `marketplace.json`; `test-tools.mjs` og `test-platform.mjs` grønne. Eksportgrenen ble laget fra `claude/elastic-taussig-41b833` etter fletting av `claude/m18-merge`; `main` i Tua-repoet har ennå ikke disse commitene.
 - **`icon.png`** 512 × 512 PNG, 71 KB, i `tua-plugin/`.
 - **`docs/privacy-policy.html`** klar til å legges på tuacircles.com/plugin-privacy.
 - **`SUBMISSION.md`** oppdatert med ikon- og personvern-URL.
 
 ## Hva som mangler (krever deg)
 
-1. ~~GitHub-konto og repo~~ — gjort 19.10.2026 (kontoen Tuacircles, repoet tua-plugin).
-2. Personal Access Token (steg 0) og push (steg 4).
-3. Fletting av `claude/m18-merge` og `claude/elastic-taussig-41b833` til `main` (egen økt; eksportgrenen er allerede laget med alt innhold).
-5. `tech@tuacircles.com` (steg 5).
-6. Personvernsiden på tuacircles.com (steg 6, kan utsettes).
-7. GitHub-kobling på claude.ai og selve innsendingen (steg 7–8).
+1. ~~GitHub-konto, repo, token og push~~ — gjort 19.10.2026.
+2. Fletting av `claude/m18-merge` og `claude/elastic-taussig-41b833` til `main` i Tua-repoet (egen økt; GitHub-repoet har allerede alt innhold).
+3. `tech@tuacircles.com` i Microsoft 365 (steg 5).
+4. Personvernsiden på tuacircles.com (steg 6, kan utsettes).
+5. GitHub-kobling på claude.ai og selve innsendingen (steg 7–8).

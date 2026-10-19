@@ -92,11 +92,11 @@ If the portal shows the connector-style list of seven acknowledgements (director
 
 ## Checklist before you press Submit
 
-- [ ] Repository public (or private with the Claude GitHub App installed for scanning; must be public before publishing)
-- [ ] `git ls-files | grep -ci "ds_store\|thumbs.db"` → 0; no `node_modules/`, `server/data/`, `dist/` committed
-- [ ] `claude plugin validate --strict` on a copy without `marketplace.json` → ✔
-- [ ] `node server/test-tools.mjs` and `node server/test-platform.mjs` → all green
+- [x] Repository public — https://github.com/tuacircles/tua-plugin, `main` = 8eee3dc, tag v0.4.0 (19 Oct 2026)
+- [x] `git ls-files | grep -ci "ds_store\|thumbs.db"` → 0; no `node_modules/`, `server/data/`, `dist/` committed (checked 19 Oct 2026)
+- [x] `claude plugin validate --strict` on a copy without `marketplace.json` → ✔ (19 Oct 2026, also with it)
+- [x] `node server/test-tools.mjs` and `node server/test-platform.mjs` → all green (19 Oct 2026)
 - [ ] `tech@tuacircles.com` exists and is monitored
 - [ ] Privacy policy reachable over HTTPS at the URL you enter
 - [x] Icon PNG ready (`icon.png`)
-- [ ] Owner/URL `tuacircles/tua-plugin` matches the real repository everywhere (grep for it)
+- [x] Owner/URL `tuacircles/tua-plugin` matches the real repository (personal account Tuacircles)
