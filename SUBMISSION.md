@@ -49,10 +49,10 @@ Holds that were **removed before submission**: "Image or font file that the plug
 
 Answers given: **Data handling** — Reads and stores (locally) · No · Not retained · No. **Compliance** — contact `erik@storelia.no` (change to `tech@tuacircles.com` in the plugin's settings once that mailbox exists), all four acknowledgements ticked. **Review & submit** — auto-publish passing versions **on**; new versions via **scheduled check** (about every 6 hours; a GitHub push webhook can be added later from the plugin's settings).
 
-Open points the portal surfaced:
+Open points the portal surfaced, and what was decided for 0.4.1 (Erik, 19 Oct 2026):
 
-1. **Cowork:** "An MCP server needs a user setting this surface can't collect, so it won't start here." Cause: `.mcp.json` sets `TUA_FILES_ROOT` from `${user_config.arkivmappe}`. The server already falls back to `~/.tua/config.json` and asks on first use (`tua_setup`), so dropping that env line (and the `arkivmappe` entry in `userConfig`) would make Cowork start the server; Claude Code users would then choose the folder through `tua_setup` instead of the plugin setting. Decision for Erik before 0.4.1.
-2. **`userConfig.auto_lagring`** is declared in `plugin.json` but nothing in `hooks/` or the server reads it (`grep auto_lagring` finds no use). Either wire it into the hook or remove it from the manifest.
+1. **Cowork:** "An MCP server needs a user setting this surface can't collect, so it won't start here." Cause: `.mcp.json` sets `TUA_FILES_ROOT` from `${user_config.arkivmappe}`. The server already falls back to `~/.tua/config.json` and asks on first use (`tua_setup`), so dropping that env line (and the `arkivmappe` entry in `userConfig`) would make Cowork start the server. **Decision: keep the setting** (alternative B). Claude Code users keep the plugin setting; in Cowork only the skills load. Noted in `CHANGELOG.md` 0.4.1; revisit if Cowork matters.
+2. **`userConfig.auto_lagring`** looked unused because `grep auto_lagring` finds nothing, but the hook reads it as `CLAUDE_PLUGIN_OPTION_AUTO_LAGRING` — the documented way Claude Code hands every `userConfig` option to hook processes. **Decision: keep it**, with a new `hook-av` case in `server/test-platform.mjs` that proves `false` turns the capture off.
 
 ## Listing details step
 

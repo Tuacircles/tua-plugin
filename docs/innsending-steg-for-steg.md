@@ -201,8 +201,8 @@ Valg gjort i portalen: listet på **Claude Code og Cowork** (ikke «Claude apps�
 **Oppfølging etter innsendingen:**
 
 1. Svar på e-post fra Anthropic (vurderer kan spørre om navnet og om «credential»-funnene).
-2. **Cowork-merknad:** portalen sier serveren ikke starter i Cowork fordi `.mcp.json` henter `TUA_FILES_ROOT` fra `${user_config.arkivmappe}`, og Cowork samler ikke inn plugin-innstillinger. Serveren klarer seg uten (spør via `tua_setup` første gang). Beslutning: fjerne den linja og `arkivmappe` i `userConfig` i 0.4.1?
-3. **`auto_lagring`** i `userConfig` leses ikke av noe i `hooks/` eller serveren. Koble den til hooken, eller fjern den.
+2. **Cowork-merknad:** portalen sier serveren ikke starter i Cowork fordi `.mcp.json` henter `TUA_FILES_ROOT` fra `${user_config.arkivmappe}`, og Cowork samler ikke inn plugin-innstillinger. Serveren klarer seg uten (spør via `tua_setup` første gang). **Avgjort 19.10.2026 (0.4.1): innstillingen beholdes** (alternativ B). I Cowork lastes bare skills; tas opp igjen om Cowork blir viktig.
+3. **`auto_lagring`** så ubrukt ut, men hooken leser den som `CLAUDE_PLUGIN_OPTION_AUTO_LAGRING` (slik Claude Code gir alle plugin-innstillinger til hooks). **Avgjort 19.10.2026 (0.4.1): beholdes**, med en ny test (`hook-av` i `server/test-platform.mjs`) som viser at «false» slår av fangsten.
 4. `tech@tuacircles.com` (steg 5), så bytt kontaktadresse i portalen.
 5. Personvernsiden på tuacircles.com (steg 6), så bytt `privacyPolicyUrl` i plugin.json.
 6. Flett `claude/elastic-taussig-41b833` (som nå inneholder `claude/m18-merge`) til `main` i Tua-repoet.
@@ -220,6 +220,8 @@ cd /Users/bruker/Documents/Claude/Projects/tua && git branch -D tua-plugin-expor
 ```
 
 3. Med tag-styring: `git tag v0.5.0 tua-plugin-export && git push tua-plugin v0.5.0`, og flytt portalen til den nye taggen.
+
+**0.4.1 (forberedt 19.10.2026, ikke pushet):** versjon hevet i de tre filene, `CHANGELOG.md` har avsnittet, testene er grønne. Push skjer først når Erik sier ja, med kommandoen i punkt 2 og deretter `git tag v0.4.1 tua-plugin-export && git push tua-plugin v0.4.1`. Den innsendte versjonen (`main @ e946abb`) står i ro til da.
 
 ---
 
