@@ -136,7 +136,8 @@ server.registerTool(
     if (!sted && !sti) {
       return text(
         `Arkiv: ${filesMode() ? `${FILES_ROOT} (${rootLabel()})` : 'ikke valgt ennå'}\nSteder på denne maskinen: ${optionLines()}\n` +
-        (filesMode() ? 'Vil brukeren flytte arkivet: det er en Finder-jobb (flytt mappa) + tua_setup(sti=ny sti); Tua kopierer ikke filer selv.' : 'Spør brukeren hvor arkivet skal ligge, og kall tua_setup(sted=…).'),
+        (filesMode() ? 'Vil brukeren flytte arkivet: det er en Finder-jobb (flytt mappa) + tua_setup(sti=ny sti); Tua kopierer ikke filer selv.' : 'Spør brukeren hvor arkivet skal ligge, og kall tua_setup(sted=…).') +
+        '\nInnstillinger-siden (M15): http://127.0.0.1:5274/innstillinger — arkivsted, skytjenester, AI-nøkler i Keychain og Finder-mapper, med Trust Score (krever at kartet kjører: npm run kart i tua-plugin).',
       )
     }
     const before = filesMode() ? FILES_ROOT : null

@@ -1,0 +1,89 @@
+{
+  "_merk": "anslag 19.10.2026 — verifiser mot leverandørens DPA",
+  "_om": "Trust Score 1–5 per connector (CLAUDE.md §2.3). Fire parametre: metadata-eksponering, innholds-eksponering, mining (trening/produktutvikling/reklame), retensjon og jurisdiksjon. Tallene og tekstene her er anslag fra generell kunnskap om vilkårene — ikke juridisk verifisert. Rett i denne fila, ingen kode trengs. Vises på innstillinger-siden (M15) og i «Spør»-raden (M20).",
+  "sky": {
+    "icloud": {
+      "label": "iCloud Drive",
+      "score": 3,
+      "metadata": "Filnavn, mappestruktur, størrelse og tidsstempler leses av Apple.",
+      "innhold": "Lesbart av Apple som standard (nøkler hos Apple). Med Advanced Data Protection slått på er innholdet ende-til-ende-kryptert — da 5/5.",
+      "mining": "Apples vilkår utelukker trening og reklameprofilering på iCloud-innhold.",
+      "retensjon": "Slettet innhold holdes ~30 dager. Datasentre i USA og EU; Apple Inc. er CLOUD Act-eksponert.",
+      "anbefaling": "Slå på Advanced Data Protection (Innstillinger › Apple-konto › iCloud) — da er iCloud Drive det tryggeste skyvalget."
+    },
+    "dropbox": {
+      "label": "Dropbox",
+      "score": 2,
+      "metadata": "Filnavn, struktur, størrelse, deling og enhetsliste leses av Dropbox.",
+      "innhold": "Lesbart av Dropbox (forhåndsvisning, søk, Dropbox Dash/AI-funksjoner). Ingen ende-til-ende-kryptering.",
+      "mining": "Vilkårene sier at innholdet ikke brukes til å trene generelle modeller uten samtykke, men AI-funksjonene leser innholdet når de er på.",
+      "retensjon": "Slettet innhold i 30 dager (lenger på betalte planer). USA; CLOUD Act-eksponert.",
+      "anbefaling": "Greit for arbeidsdokumenter. Hold Vault-merkede atomer utenfor, og slå av Dash/AI-funksjoner i Dropbox-innstillingene."
+    },
+    "onedrive": {
+      "label": "OneDrive",
+      "score": 3,
+      "metadata": "Filnavn, struktur, størrelse og aktivitet leses av Microsoft (Graph).",
+      "innhold": "Lesbart av Microsoft (søk, Copilot, forhåndsvisning). Personal Vault gir ekstra lås, ikke ende-til-ende-kryptering.",
+      "mining": "Microsoft 365-vilkår utelukker trening på kundeinnhold; personlige kontoer dekkes av Microsofts personvernerklæring (ikke like eksplisitt).",
+      "retensjon": "Papirkurv 30 dager (93 for jobbkontoer). EU Data Boundary finnes for jobbkontoer; personlige kontoer kan lagres i USA.",
+      "anbefaling": "Best med jobb-/skolekonto i EU Data Boundary. Personlig konto: regn som 2/5."
+    },
+    "googledrive": {
+      "label": "Google Drive",
+      "score": 2,
+      "metadata": "Filnavn, struktur, størrelse og aktivitet leses av Google.",
+      "innhold": "Lesbart av Google (forhåndsvisning, spam-/misbrukssjekk, Gemini i Drive). Ingen ende-til-ende-kryptering uten klientsidekryptering (Workspace Enterprise).",
+      "mining": "Workspace-vilkår utelukker trening; personlige kontoer er ikke like eksplisitt utelukket.",
+      "retensjon": "Papirkurv 30 dager. USA; CLOUD Act-eksponert.",
+      "anbefaling": "Flytt følsomme ting til iCloud (Advanced Data Protection) eller Tua Vault. Slå av Gemini i Drive hvis du ikke bruker det."
+    }
+  },
+  "ai": {
+    "claude": {
+      "label": "Claude (Anthropic)",
+      "score": 4,
+      "metadata": "Ser teksten som sendes (S+M) og kontonavn/API-nøkkel. Tua sender ikke frontmatter, prosjektnavn eller tagger.",
+      "innhold": "Det du sender — S+M som standard, L bare når du ber om det (V15).",
+      "mining": "API-trafikk brukes ikke til trening som standard (Commercial Terms). Gjelder ikke forbrukerappen uten valg.",
+      "retensjon": "Inndata og utdata slettes innen 30 dager som standard; zero-data-retention på avtale. USA; CLOUD Act-eksponert.",
+      "anbefaling": "Bruk egen API-nøkkel (console.anthropic.com), ikke abonnementet — da gjelder API-vilkårene."
+    },
+    "openai": {
+      "label": "OpenAI (GPT)",
+      "score": 3,
+      "metadata": "Ser teksten som sendes og organisasjons-id/API-nøkkel.",
+      "innhold": "Det du sender — S+M som standard.",
+      "mining": "API-trafikk brukes ikke til trening som standard (kan velges til). ChatGPT-appen trener som standard på forbrukerkontoer.",
+      "retensjon": "30 dagers misbrukslogg som standard; zero-data-retention for godkjente kontoer. Et rettspålegg i 2025 krevde lagring av forbrukersamtaler ut over 30 dager. USA; CLOUD Act-eksponert.",
+      "anbefaling": "Søk om zero-data-retention på platform.openai.com hvis du sender forretningsdata regelmessig."
+    },
+    "gemini": {
+      "label": "Gemini (Google)",
+      "score": 2,
+      "metadata": "Ser teksten som sendes, prosjekt-id og API-nøkkel.",
+      "innhold": "Det du sender — S+M som standard.",
+      "mining": "Gratisnivået (AI Studio uten fakturering) brukes til å forbedre produktene og kan leses av mennesker. Betalt nivå (fakturering på) brukes ikke til trening.",
+      "retensjon": "Betalt: logg i 55 dager for misbruk. Gratis: ubestemt. USA; CLOUD Act-eksponert.",
+      "anbefaling": "Slå på fakturering i Google Cloud før du legger inn nøkkelen — ellers er innholdet treningsdata. Vurder 3/5 med betalt nivå."
+    },
+    "mistral": {
+      "label": "Mistral",
+      "score": 4,
+      "metadata": "Ser teksten som sendes og API-nøkkel.",
+      "innhold": "Det du sender — S+M som standard.",
+      "mining": "La Plateforme (API) trener ikke på kundedata som standard; zero-data-retention kan velges.",
+      "retensjon": "30 dager som standard, 0 med ZDR. Paris, EU — GDPR, ikke CLOUD Act.",
+      "anbefaling": "Første skymodell å prøve for europeiske forretningsdata."
+    },
+    "ollama": {
+      "label": "Ollama (lokal)",
+      "score": 5,
+      "metadata": "Ingen — modellen kjører på denne maskinen (127.0.0.1:11434).",
+      "innhold": "Forlater aldri maskinen. Den eneste modellen som får lese L av Vault-merkede atomer.",
+      "mining": "Ingen.",
+      "retensjon": "Ingen logg utover det Tua selv skriver (utlevering.jsonl, bare metadata). Jurisdiksjon: din egen maskin.",
+      "anbefaling": "Installer fra ollama.com og kjør «ollama pull» på en modell. Tua oppdager den av seg selv."
+    }
+  }
+}

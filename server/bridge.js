@@ -20,6 +20,12 @@
 //        target = 'code'   → `open claude-cli://open?cwd=<repo>&q=…`  (repo må være en repo-lenke på atomet / i prosjektregisteret)
 //        Ingen andre programmer, ingen shell, ingen frie stier. `claude://`-lenker (Desktop-prosjekt) åpnes
 //        rett fra nettleseren og går aldri via broen.
+//   GET  /innstillinger          → innstillinger-siden (M15): arkivsted, sky-connectors, AI-connectors (BYOK), Finder-mapper
+//   GET  /api/settings           → { arkiv, steder, sky, ai, finder, trust } — aldri nøkkelverdier, bare «satt / ikke satt»
+//   POST /api/settings {arkiv: {sted|sti}} | {finder: {folders}}  → velger arkivsted (flytter ingenting, V9) / Finder-mapper. Samme ~/.tua/config.json som tua_setup.
+//   POST /api/keychain {provider, key}   → nøkkelen inn i macOS Keychain (security, uten shell, via stdin — aldri fil, aldri logg)
+//   DELETE /api/keychain {provider}      → nøkkelen ut av Keychain
+//   Trust Score per connector leses fra trust-scores.json (anslag — rettes der, uten kode).
 //
 // Lytter kun på 127.0.0.1, og slipper bare kartets origin inn (CORS).
 // Kjør: npm run bridge   (i tua-plugin/). Ingen avhengigheter.
@@ -30,13 +36,38 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { openSpawn, FILE_MANAGER } from './platform.js'   // M18: «Åpne i …» på macOS, Windows og Linux
+import os from 'node:os'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { load, save, setShare, upsert, search, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive } from './store.js'
+import { load, save, setShare, upsert, search, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive, archiveOptions, archiveInfo, chooseArchive, finderFolders, FINDER_DEFAULTS, setFinderFolders, CONFIG_FILE } from './store.js'
 import { watchInbox, watchDesktop } from './import.js'      // M14: Innboks — eksporter som legges i mappa blir atomer · M17: Desktop-cachen
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
+import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
+// M15: Trust Score per connector — én JSON-fil, leses ved hvert kall så rettelser virker uten omstart.
+const TRUST_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'trust-scores.json')
+const trustScores = () => { try { return JSON.parse(fs.readFileSync(TRUST_FILE, 'utf8')) } catch (e) { return { _merk: `trust-scores.json kunne ikke leses: ${e.message}`, sky: {}, ai: {} } } }
+const countMd = (dir, depth = 2) => {   // hvor mange atomer (.md) ligger i en mappe — for «hva ville skjedd» ved bytte av arkivsted
+  let n = 0
+  try { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (e.name.startsWith('.') || e.name === 'Innboks') continue; if (e.isFile() && e.name.endsWith('.md')) n++; else if (e.isDirectory() && depth > 0) n += countMd(path.join(dir, e.name), depth - 1) } } catch {}
+  return n
+}
+async function settingsView() {
+  const ts = trustScores()
+  const info = archiveInfo()
+  const steder = archiveOptions().map((o) => ({ id: o.id, label: o.label, path: o.path, base: o.base, available: o.available, exists: o.exists, current: !!info.root && info.root === o.path, atomer: o.exists ? countMd(o.path) : 0 }))
+  const sky = ['icloud', 'dropbox', 'onedrive', 'googledrive'].map((id) => { const s = steder.find((x) => x.id === id); return { id, label: s.label, available: s.available, isArchive: s.current, trust: ts.sky?.[id] || null } })
+  const keys = keyStatus(), ollama = await ollamaStatus()
+  const ai = PROVIDERS.map((p) => ({ id: p.id, label: p.label, hint: p.hint, local: !!p.local, satt: p.local ? ollama.running : !!keys[p.id], ...(p.local ? { ollama } : {}), trust: ts.ai?.[p.id] || null }))
+  return {
+    arkiv: { ...info, atomer: info.exists ? countMd(info.root) : 0, config: CONFIG_FILE },
+    steder, sky, ai,
+    finder: { folders: finderFolders(), standard: FINDER_DEFAULTS(), home: os.homedir() },
+    trust: { merk: ts._merk || '', om: ts._om || '' },
+    platform: process.platform,
+  }
+}
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // npm run build:kart. Kartet bygges fra tua2-sandbox i Tua-repoet (ved siden av tua-plugin/); utenfor repoet: sett TUA_KART_DIST.
 const DIST = process.env.TUA_KART_DIST || [path.join(HERE, '..', '..', 'tua2-sandbox', 'dist'), path.join(HERE, '..', 'tua2-sandbox', 'dist')].find((p) => fs.existsSync(p)) || path.join(HERE, '..', '..', 'tua2-sandbox', 'dist')
@@ -49,7 +80,7 @@ const same = (x, y) => String(x).toLowerCase() === String(y).toLowerCase()
 
 const cors = {
   'Access-Control-Allow-Origin': ORIGIN,
-  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Allow-Credentials': 'true',
 }
@@ -178,7 +209,7 @@ function openTarget(a, target, href) {
 
 // Statisk: kartet og sandkassen fra dist/. Ingen stier utenfor dist (realpath-sjekk).
 function serveStatic(res, pathname) {
-  let rel = pathname === '/' || pathname === '/kart' ? '/kart.html' : pathname === '/sandkasse' ? '/index.html' : pathname
+  let rel = pathname === '/' || pathname === '/kart' ? '/kart.html' : pathname === '/sandkasse' ? '/index.html' : pathname === '/innstillinger' ? '/innstillinger.html' : pathname === '/forside' ? '/forside.html' : pathname
   const abs = path.normalize(path.join(DIST, rel))
   if (!abs.startsWith(DIST + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
     if (!fs.existsSync(path.join(DIST, 'kart.html'))) {
@@ -262,6 +293,31 @@ http
           return json(res, 403, { error: e.message })
         }
       }
+      // ── M15: innstillinger ──
+      if (req.method === 'GET' && url.pathname === '/api/settings') return json(res, 200, await settingsView())
+      if (req.method === 'POST' && url.pathname === '/api/settings') {
+        const b = await readBody(req)
+        if (b.arkiv && (b.arkiv.sted || b.arkiv.sti)) {
+          // Bytte av arkivsted: valget lagres og mappa lages om den ikke finnes. INGEN filer flyttes (V9) — det gjør brukeren i Finder.
+          const before = archiveInfo().root
+          let r
+          try { r = chooseArchive(b.arkiv.sti || b.arkiv.sted) } catch (e) { return json(res, 400, { error: e.message }) }
+          console.error(`[tua-bro] arkivsted ${r.created ? 'opprettet' : 'valgt'}: ${r.root} (${r.label})${before && before !== r.root ? ` — før: ${before}; ingenting flyttet` : ''}`)
+          return json(res, 200, { ok: true, arkiv: archiveInfo(), created: r.created, before, restart: before !== r.root })
+        }
+        if (b.finder && Array.isArray(b.finder.folders)) {
+          try { const list = setFinderFolders(b.finder.folders); console.error(`[tua-bro] Finder-mapper: ${list.join(' · ')}`); return json(res, 200, { ok: true, folders: list, restart: true }) } catch (e) { return json(res, 400, { error: e.message }) }
+        }
+        return json(res, 400, { error: 'send {arkiv: {sted|sti}} eller {finder: {folders: [...]}}' })
+      }
+      if (url.pathname === '/api/keychain' && (req.method === 'POST' || req.method === 'DELETE')) {
+        const { provider, key } = await readBody(req)
+        if (!isProvider(provider)) return json(res, 400, { error: `ukjent leverandør — en av ${PROVIDERS.filter((p) => !p.local).map((p) => p.id).join(', ')}` })
+        if (req.method === 'DELETE') { const ok = deleteKey(provider); console.error(`[tua-bro] keychain ${provider}: ${ok ? 'fjernet' : 'fantes ikke'}`); return json(res, 200, { ok, provider, satt: false }) }
+        try { await setKey(provider, key) } catch (e) { return json(res, 400, { error: e.message }) }   // nøkkelen logges aldri — bare leverandøren
+        console.error(`[tua-bro] keychain ${provider}: satt`)
+        return json(res, 200, { ok: true, provider, satt: true })
+      }
       const isLink = url.pathname === '/api/link'
       if (req.method === 'POST' && (isLink || url.pathname === '/api/unlink')) {
         const { id, project, level } = await readBody(req)
@@ -291,7 +347,7 @@ http
   })
   .listen(PORT, '127.0.0.1', () => {
     const built = fs.existsSync(path.join(DIST, 'kart.html'))
-    console.error(`[tua-bro] kartet: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
+    console.error(`[tua-bro] kartet: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} · innstillinger: http://127.0.0.1:${PORT}/innstillinger · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
     const log = (m) => console.error(`[tua-bro] ${m}`)
     watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log })     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
   })

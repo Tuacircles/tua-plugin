@@ -40,7 +40,17 @@ export function archiveOptions() {
   ]
   return opts.map((o) => ({ ...o, path: o.base ? path.join(o.base, 'Tua') : '', available: !!o.base && fs.existsSync(o.base), exists: !!o.base && fs.existsSync(path.join(o.base, 'Tua')) }))
 }
-const readConfig = () => { try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')) } catch { return {} } }
+// M15: ~/.tua/config.json er ÉN fil som MCP-serveren (tua_setup), broen (innstillinger-siden) og Finder-connectoren leser.
+// Felter: root, sted, valgt (arkivstedet, M14) · finder.folders (mappene Finder-connectoren leser, M17/M15).
+// writeConfig fletter inn — et felt den ene skriver, sletter aldri det den andre har skrevet.
+export const CONFIG_FILE = CONFIG
+export const readConfig = () => { try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')) } catch { return {} } }
+export function writeConfig(patch) {
+  const next = { ...readConfig(), ...patch }
+  fs.mkdirSync(path.dirname(CONFIG), { recursive: true })
+  fs.writeFileSync(CONFIG, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 })
+  return next
+}
 function chooseRoot() {
   if (process.env.TUA_FILES_ROOT) return process.env.TUA_FILES_ROOT
   const c = readConfig()
@@ -51,7 +61,25 @@ function chooseRoot() {
 export let FILES_ROOT = chooseRoot()
 export let INBOX_DIR = FILES_ROOT ? path.join(FILES_ROOT, 'Innboks') : null   // M14: eksporter legges her, flyttes til Innboks/Ferdig
 export const rootLabel = () => archiveOptions().find((o) => FILES_ROOT && o.base && (FILES_ROOT === o.path || FILES_ROOT.startsWith(o.base + path.sep)))?.label || 'egen mappe'
+// Hvor arkivet bor og HVORFOR: miljøvariabel, brukerens valg i config, funnet automatisk, eller ikke valgt. Innstillinger-siden viser dette.
+export function archiveInfo() {
+  const c = readConfig()
+  const kilde = process.env.TUA_FILES_ROOT ? 'miljøvariabel' : c.root && FILES_ROOT === c.root ? 'valgt' : FILES_ROOT ? 'funnet' : 'ikke valgt'
+  return { root: FILES_ROOT, label: rootLabel(), kilde, valgt: kilde === 'valgt' ? c.valgt || null : null, exists: filesMode() }
+}
+// Finder-mappene (M17) — standard Nedlastinger/Dokumenter/Skrivebord, brukeren velger på innstillinger-siden (M15). finder.js leser samme felt.
+export const FINDER_DEFAULTS = () => ['Downloads', 'Documents', 'Desktop'].map((d) => path.join(os.homedir(), d))
+export const finderFolders = () => { const c = readConfig(); return Array.isArray(c.finder?.folders) && c.finder.folders.length ? c.finder.folders : FINDER_DEFAULTS() }
+export function setFinderFolders(folders) {
+  const list = [...new Set((Array.isArray(folders) ? folders : []).map((f) => path.resolve(String(f).replace(/^~(?=$|\/)/, HOME))))]
+  const bad = list.find((f) => { try { return !fs.statSync(f).isDirectory() } catch { return true } })
+  if (bad) throw new Error(`«${bad}» er ikke en mappe som finnes`)
+  if (FILES_ROOT && list.some((f) => f === FILES_ROOT || FILES_ROOT.startsWith(f + path.sep))) throw new Error('arkivet selv kan ikke være en Finder-mappe (Finder-connectoren leser aldri arkivet)')
+  writeConfig({ finder: { ...(readConfig().finder || {}), folders: list } })
+  return list
+}
 // Brukerens valg (M14): id fra archiveOptions() eller en absolutt sti. Lagres i ~/.tua/config.json og arkivet lages.
+// Flytter aldri filer (V9: mappa er sannheten — flytting er en Finder-jobb). Andre felt i config (finder) beholdes.
 export function chooseArchive(idOrPath) {
   const opt = archiveOptions().find((o) => o.id === idOrPath)
   const root = opt ? opt.path : path.resolve(String(idOrPath || '').replace(/^~(?=$|\/)/, HOME))
@@ -59,8 +87,7 @@ export function chooseArchive(idOrPath) {
   if (opt && !opt.available) throw new Error(`${opt.label} finnes ikke på denne maskinen (${opt.base})`)
   FILES_ROOT = root
   INBOX_DIR = path.join(root, 'Innboks')
-  fs.mkdirSync(path.dirname(CONFIG), { recursive: true })
-  fs.writeFileSync(CONFIG, JSON.stringify({ root, sted: opt ? opt.label : 'egen mappe', valgt: new Date().toISOString() }, null, 2) + '\n')
+  writeConfig({ root, sted: opt ? opt.label : 'egen mappe', valgt: new Date().toISOString() })
   return { ...ensureArchive(), label: rootLabel() }
 }
 const tuaFile = (name) => path.join(FILES_ROOT, '.tua', name)
