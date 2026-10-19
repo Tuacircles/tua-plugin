@@ -150,7 +150,7 @@ curl -sI https://tuacircles.com/plugin-privacy | head -1
 
 ---
 
-## 7. Koble GitHub til claude.ai
+## 7. Koble GitHub til claude.ai — gjort
 
 1. Logg inn på <https://claude.ai> med kontoen som er med i **Tua Circles**-organisasjonen (ikke en privat konto — innsendingen eies av organisasjonen).
 2. Gå til <https://claude.ai/directory/manage> → **Submit new** → **Plugin bundle**.
@@ -158,7 +158,7 @@ curl -sI https://tuacircles.com/plugin-privacy | head -1
 
 ---
 
-## 8. Portalen, steg for steg
+## 8. Portalen, steg for steg — gjort 19.10.2026
 
 Alle verdiene står i [SUBMISSION.md](../SUBMISSION.md). Her er rekkefølgen og hva du skal forvente.
 
@@ -190,6 +190,26 @@ Deretter: følg med på `tech@tuacircles.com`. Vurderer kan stille spørsmål; s
 
 ---
 
+## 8b. Slik gikk det (19.10.2026)
+
+**Sendt inn til vurdering** fra claude.ai/directory/manage på `main @ e946abb`. Portalen svarte «Plugin submitted for review» og holder innsendingen for manuell vurdering, som ventet. Statussiden er <https://claude.ai/directory/manage/plugins/a081400a-5855-4fa5-8cd6-f540583a622f> (Submitted → Security scan → In review → Live); e-post om vurderingen går til `erik@storelia.no` (bytt til `tech@tuacircles.com` i pluginens innstillinger når postboksen finnes).
+
+Validering: bestått, **4 varsler · 8 hold**. Holdene: (1) lockfile — ventet; (2) «Uses a credential from the user's machine», 6 funn — en heuristikk som parer ord som *passwordSet*, *~/.config/Claude* og miljøvariabler med en URL i samme fil, pluss at en testfil leser hele `process.env` og denne fila nevner `ssh`; ingenting sendes ut, og vurderer bekrefter det; (3) navnet «tua» ligner «tula» (plugin `daxgoon/tula`) — svar: Tua er Tua Circles Holding AS sitt registrerte produkt, tuacircles.com, live siden 2024. Varslene: tre «ukjente» felt i plugin.json (`documentationUrl`, `supportUrl`, `privacyPolicyUrl` — de virker likevel, Links gikk fra 3 til 5 av 6), og et «download-and-run»-varsel på `server/import.js` (henting av delt lenke; utpakkingen ble flyttet til `server/unzip.js` før innsending). Et hold om ikon-fila forsvant da dokumentene sluttet å nevne filnavnet. Hele tabellen står i `SUBMISSION.md` → *Outcome*.
+
+Valg gjort i portalen: listet på **Claude Code og Cowork** (ikke «Claude apps», der bare skills ville blitt installert, uten server og hooks); Data handling: *Reads and stores · No · Not retained · No*; alle fire bekreftelser; **auto-publish på**; nye versjoner via **planlagt sjekk** hver 6. time (webhook kan legges til senere i pluginens innstillinger).
+
+**Oppfølging etter innsendingen:**
+
+1. Svar på e-post fra Anthropic (vurderer kan spørre om navnet og om «credential»-funnene).
+2. **Cowork-merknad:** portalen sier serveren ikke starter i Cowork fordi `.mcp.json` henter `TUA_FILES_ROOT` fra `${user_config.arkivmappe}`, og Cowork samler ikke inn plugin-innstillinger. Serveren klarer seg uten (spør via `tua_setup` første gang). Beslutning: fjerne den linja og `arkivmappe` i `userConfig` i 0.4.1?
+3. **`auto_lagring`** i `userConfig` leses ikke av noe i `hooks/` eller serveren. Koble den til hooken, eller fjern den.
+4. `tech@tuacircles.com` (steg 5), så bytt kontaktadresse i portalen.
+5. Personvernsiden på tuacircles.com (steg 6), så bytt `privacyPolicyUrl` i plugin.json.
+6. Flett `claude/elastic-taussig-41b833` (som nå inneholder `claude/m18-merge`) til `main` i Tua-repoet.
+7. Dokument-endringene etter innsendingen (denne fila og `SUBMISSION.md` → *Outcome*) ligger lokalt på grenen og er **ikke pushet** til GitHub, så den innsendte versjonen står i ro under vurderingen. Push dem sammen med neste versjon (steg 9).
+
+---
+
 ## 9. Senere versjoner (til neste gang)
 
 1. Hev `version` i `tua-plugin/.claude-plugin/plugin.json`, `tua-plugin/package.json` og `tua-plugin/server/server.js`; nytt avsnitt i `tua-plugin/CHANGELOG.md`. Commit på vanlig måte i Tua-repoet.
@@ -216,4 +236,4 @@ cd /Users/bruker/Documents/Claude/Projects/tua && git branch -D tua-plugin-expor
 2. Fletting av `claude/m18-merge` og `claude/elastic-taussig-41b833` til `main` i Tua-repoet (egen økt; GitHub-repoet har allerede alt innhold).
 3. `tech@tuacircles.com` i Microsoft 365 (steg 5).
 4. Personvernsiden på tuacircles.com (steg 6, kan utsettes).
-5. GitHub-kobling på claude.ai og selve innsendingen (steg 7–8).
+5. ~~GitHub-kobling på claude.ai og selve innsendingen~~ — gjort 19.10.2026; se 8b for oppfølging.

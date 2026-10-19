@@ -29,6 +29,31 @@ Then **Validate**. Expected findings and what they mean:
 | Credentials in files | ✔ none | Tua uses no API keys. `userConfig` has only a folder and a boolean. |
 | Marketplace file | *possible warning* | `.claude-plugin/marketplace.json` lists this one plugin with `source: "./"` so people can install straight from GitHub. If the portal objects ("Pick one plugin first"), delete that file and push. |
 
+## Outcome — submitted 19 October 2026
+
+**Submitted for review** from <https://claude.ai/directory/manage> at `main @ e946abb` (repository `tuacircles/tua-plugin`, personal GitHub account *Tuacircles*). Portal result: "Plugin submitted for review" — held for policy review, which was expected. Status page: <https://claude.ai/directory/manage/plugins/a081400a-5855-4fa5-8cd6-f540583a622f> (Submitted → Security scan → In review → Live; "Waiting for review" at 22:50 CEST). Review mail goes to the contact address below.
+
+What the portal actually reported (validation passed, **4 warnings · 8 policy holds**):
+
+| Finding | Kind | What it is | Action |
+|---|---|---|---|
+| Dependencies install from a lockfile | hold | `package-lock.json` installs the MCP SDK on install | None — reviewer clears it (as predicted). |
+| Uses a credential from the user's machine · 6 findings | hold | Heuristic pairs a "credential-looking" word with a URL host per file: `bridge.js` (`passwordSet` + host "local"), `desktop.js` (`~/.config/Claude` + "claude"), `platform.js` and `server.js` (env var read at run time + a URL), `test-platform.mjs` (`example.invalid`), and across files: `server/apps/test-apps.mjs` reads `process.env` while `docs/innsending-steg-for-steg.md` mentions `ssh`. | None required; a reviewer confirms nothing leaves the machine (README "What the plugin runs, reads, writes and sends"). To clear it mechanically later: drop the test files from the published tree, avoid reading the whole `process.env`, and avoid the word `ssh` in docs. The real credential code (`keychain.js`, the user's own API keys in macOS Keychain) was *not* what it flagged. |
+| Name may be confused with an existing listing | hold | "tua" is one letter from plugin `daxgoon/tula`. | Answer the reviewer: Tua is the registered product of Tua Circles Holding AS, tuacircles.com, live since 2024. |
+| Unrecognized field in plugin.json · 3 | warning | `documentationUrl`, `supportUrl`, `privacyPolicyUrl` are not in the manifest schema the linter knows — yet the Listing step *does* read them (Links went from 3/6 to 5/6 filled). | Keep them. |
+| Contains a download-and-run command · `server/import.js` | warning | Heuristic on the share-link `fetch()` in that file. The zip extraction (`spawnSync` unzip/tar) was moved to `server/unzip.js` before submission; the warning stayed, so it is the fetch alone. | None — shown to reviewers as an install-time note. |
+| Local MCP server: not on claude.ai | note | stdio server runs in Claude Code and Cowork only. | Listed on **Claude Code and Cowork** only; "Claude apps (web, desktop, mobile)" was unticked because only the skills would install there, without the server and hooks. |
+| Images and fonts passed without a code check | note | the 512 × 512 PNG icon. | None. |
+
+Holds that were **removed before submission**: "Image or font file that the plugin's code could run" (2 findings) — the validator holds any plugin whose text files name an image by filename; `SUBMISSION.md` and the Norwegian step-by-step no longer spell the icon's filename.
+
+Answers given: **Data handling** — Reads and stores (locally) · No · Not retained · No. **Compliance** — contact `erik@storelia.no` (change to `tech@tuacircles.com` in the plugin's settings once that mailbox exists), all four acknowledgements ticked. **Review & submit** — auto-publish passing versions **on**; new versions via **scheduled check** (about every 6 hours; a GitHub push webhook can be added later from the plugin's settings).
+
+Open points the portal surfaced:
+
+1. **Cowork:** "An MCP server needs a user setting this surface can't collect, so it won't start here." Cause: `.mcp.json` sets `TUA_FILES_ROOT` from `${user_config.arkivmappe}`. The server already falls back to `~/.tua/config.json` and asks on first use (`tua_setup`), so dropping that env line (and the `arkivmappe` entry in `userConfig`) would make Cowork start the server; Claude Code users would then choose the folder through `tua_setup` instead of the plugin setting. Decision for Erik before 0.4.1.
+2. **`userConfig.auto_lagring`** is declared in `plugin.json` but nothing in `hooks/` or the server reads it (`grep auto_lagring` finds no use). Either wire it into the hook or remove it from the manifest.
+
 ## Listing details step
 
 Read from `plugin.json` and the README. Check: name **Tua**, description (from `plugin.json`), author **Tua Circles Holding AS**, homepage/repository links, license **AGPL-3.0-only**, keywords. The listing description is the README; the English intro is written for that.
