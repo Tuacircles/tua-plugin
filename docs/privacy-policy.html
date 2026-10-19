@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Tua plugin for Claude</title>
+<meta name="description" content="Privacy policy for the Tua plugin for Claude (MCP server, skills and hooks) by Tua Circles Holding AS. The plugin runs entirely on your computer and sends no data to anyone.">
+<link rel="canonical" href="https://tuacircles.com/plugin-privacy">
+<style>
+  :root {
+    --navy: #1F3864;
+    --coral: #C04A38;
+    --ink: #1A1A1A;
+    --grey: #595959;
+    --soft: #8C8C8C;
+    --paper: #F5F3EE;
+    --hairline: #BFBFBF;
+    --bg: #FFFFFF;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 56px 20px 80px;
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin: 0 0 14px;
+  }
+  h1 {
+    color: var(--navy);
+    font-size: 34px;
+    line-height: 1.15;
+    font-weight: 700;
+    margin: 0 0 14px;
+  }
+  .meta {
+    color: var(--grey);
+    font-size: 15px;
+    font-style: italic;
+    margin: 0 0 8px;
+  }
+  .meta a { color: var(--grey); }
+  .rule {
+    border: none;
+    border-top: 1px solid var(--coral);
+    width: 32px;
+    margin: 22px 0 28px;
+  }
+  .scope {
+    background: var(--paper);
+    border-left: 2px solid var(--coral);
+    padding: 14px 18px;
+    margin: 0 0 36px;
+    font-size: 16px;
+    color: var(--grey);
+  }
+  h2 {
+    color: var(--navy);
+    font-size: 22px;
+    line-height: 1.2;
+    font-weight: 700;
+    margin: 40px 0 10px;
+  }
+  h2 .num { color: var(--coral); margin-right: 10px; font-weight: 400; }
+  p { margin: 0 0 14px; }
+  ul { margin: 0 0 14px; padding-left: 22px; }
+  li { margin: 0 0 8px; }
+  li::marker { color: var(--coral); }
+  a { color: var(--navy); text-decoration: underline; text-underline-offset: 2px; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--paper);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .summary {
+    font-size: 19px;
+    color: var(--ink);
+  }
+  footer {
+    margin-top: 56px;
+    padding-top: 18px;
+    border-top: 1px solid var(--hairline);
+    color: var(--soft);
+    font-size: 14px;
+  }
+  footer a { color: var(--soft); }
+  @media (max-width: 480px) {
+    body { font-size: 16px; }
+    main { padding: 36px 16px 60px; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Tua Circles · Privacy</p>
+  <h1>Privacy Policy — Tua plugin for Claude</h1>
+  <p class="meta">Tua Circles Holding AS · Oslo, Norway · Last updated 19 October 2026 · Contact: <a href="mailto:support@tuacircles.com">support@tuacircles.com</a></p>
+  <hr class="rule">
+
+  <div class="scope">
+    This policy covers the <strong>Tua plugin</strong> (MCP server, skills and hooks) distributed through Anthropic's directory and from <a href="https://github.com/tuacircles/tua-plugin">github.com/tuacircles/tua-plugin</a>. The Tua apps and website have their own policy at <a href="https://tuacircles.com/privacy-policy">tuacircles.com/privacy-policy</a>.
+  </div>
+
+  <h2 id="summary"><span class="num">1</span>Summary</h2>
+  <p class="summary">The Tua plugin runs entirely on your computer. It collects no data for Tua Circles, sends no data to Tua Circles or to any third party, and needs no account or credentials. Everything it stores is in a folder you chose and can delete.</p>
+
+  <h2 id="collection"><span class="num">2</span>Data collection</h2>
+  <p>We collect nothing. Installing, running or removing the plugin sends no usage statistics, crash reports, identifiers or content to us. There is no telemetry, no analytics and no update check in the plugin.</p>
+
+  <h2 id="processing"><span class="num">3</span>What the plugin processes on your machine</h2>
+  <p>When you ask it to (a tool call, a hook you left enabled, or a file you place in <code>Innboks</code>), the plugin reads your own content and writes it as markdown files (“atoms”) into your archive folder:</p>
+  <ul>
+    <li>text you ask Claude to save, and deliverables Claude composes from your atoms;</li>
+    <li>in Claude Code, when auto-capture is on: long answers from Claude, text documents Claude writes for you, and a session summary (prompts, files written, last answer);</li>
+    <li>on request (“ta med historikken”): your Claude Code sessions (<code>~/.claude/projects</code>), your Cowork sessions and Claude Desktop conversations as they are stored by the Claude apps on this machine (Claude Desktop's cache is copied to a temporary file before decoding and never modified), documents in Downloads/Documents/Desktop that originate from an AI service (identified from download metadata or by matching their hash to something Claude wrote), and conversation exports you place in <code>Innboks</code>;</li>
+    <li>a public <code>https://claude.ai/share/&lt;id&gt;</code> page, only when you paste such a link; fetched with one plain request, no cookies, no login.</li>
+  </ul>
+  <p>Conversation content may contain personal data about you and about people mentioned in it. It stays in your folder.</p>
+
+  <h2 id="storage"><span class="num">4</span>Usage and storage</h2>
+  <ul>
+    <li><strong>Archive folder</strong> — chosen by you on first use: <code>~/Tua</code>, or a folder synced by iCloud Drive, Dropbox, OneDrive or Google Drive. If you choose a synced folder, that provider's terms apply to the sync, exactly as for any other file there. Tua Circles has no access.</li>
+    <li><strong><code>~/.tua/config.json</code></strong> — the archive location.</li>
+    <li><strong><code>&lt;archive&gt;/.tua/</code></strong> — index, previous versions of atoms, a delivery log (which atom was fetched at which level, when — metadata only, never content) and a hook log.</li>
+    <li><strong>Plugin data directory</strong> (<code>TUA_DATA_DIR</code>, set by Claude Code) — a machine-local cache: derived index and the state of the last Desktop-cache and Finder scans.</li>
+  </ul>
+  <p>The plugin never deletes a file. Files you drop in <code>Innboks</code> are moved to <code>Innboks/Ferdig</code> after import.</p>
+
+  <h2 id="sharing"><span class="num">5</span>Third-party sharing</h2>
+  <p>None. The plugin sends no data to Tua Circles, and no data to Anthropic beyond what the Claude client itself exchanges when it calls a tool (tool arguments and results, governed by Anthropic's terms). The only outbound network requests are the share-link fetch described above and a loopback check (<code>HEAD http://127.0.0.1:5274/</code>) to see whether your local map is running. Neither carries your content. The plugin never calls claude.ai's internal API and never uses your cookies or tokens.</p>
+
+  <h2 id="retention"><span class="num">6</span>Data retention</h2>
+  <p>Your data stays as long as you keep the files. To delete one atom, delete its file. To delete everything, delete the archive folder and <code>~/.tua</code>. Previous versions and logs under <code>&lt;archive&gt;/.tua/</code> remain until you delete them. Uninstalling the plugin removes the plugin's own cache directory; it never touches your archive.</p>
+
+  <h2 id="rights"><span class="num">7</span>Your rights and contact</h2>
+  <p>Because Tua Circles holds no data about you, there is nothing for us to access, correct, export or erase on request — you hold it all, as plain files. Questions about this policy, or security reports, go to <strong><a href="mailto:support@tuacircles.com">support@tuacircles.com</a></strong>. We answer within five working days.</p>
+
+  <h2 id="changes"><span class="num">8</span>Changes</h2>
+  <p>Changes to this policy are published on this page, in the plugin's <code>PRIVACY.md</code> and README, with the date at the top and an entry in the plugin's <code>CHANGELOG.md</code>.</p>
+
+  <footer>
+    Tua Circles Holding AS · Oslo, Norway · <a href="https://tuacircles.com">tuacircles.com</a> · Source: <a href="https://github.com/tuacircles/tua-plugin/blob/main/PRIVACY.md">PRIVACY.md in the plugin repository</a>
+  </footer>
+</main>
+</body>
+</html>
