@@ -6,6 +6,9 @@
   "author": { "name": "Tua Circles Holding AS", "email": "tech@tuacircles.com", "url": "https://tuacircles.com" },
   "homepage": "https://github.com/tuacircles/tua-plugin#readme",
   "repository": "https://github.com/tuacircles/tua-plugin",
+  "documentationUrl": "https://github.com/tuacircles/tua-plugin#readme",
+  "supportUrl": "https://github.com/tuacircles/tua-plugin/issues",
+  "privacyPolicyUrl": "https://github.com/tuacircles/tua-plugin/blob/main/PRIVACY.md",
   "license": "AGPL-3.0-only",
   "keywords": ["archive", "memory", "notes", "provenance", "local-first", "markdown", "arkiv", "minne", "mcp"],
   "userConfig": {

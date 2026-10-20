@@ -27,6 +27,8 @@ if (!mode) {
     ['unzip-tar', { TUA_NO_UNZIP: '1', TUA_HOME: path.join(scratch, 'ziphome'), TUA_FILES_ROOT: path.join(scratch, 'ziparkiv'), TUA_DATA_DIR: path.join(scratch, 'zip-data') }],
     // TUA_HOOK_ALLOW_TMP: testdokumentet ligger i os.tmpdir(), som hooken ellers (riktig) hopper over
     ['hook-winpath', { TUA_PLATFORM: 'win32', TUA_HOME: path.join(scratch, 'hookhome'), TUA_FILES_ROOT: path.join(scratch, 'hookarkiv'), TUA_DATA_DIR: path.join(scratch, 'hook-data'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'true', TUA_HOOK_ALLOW_TMP: '1' }],
+    // 0.4.1: plugin-innstillingen «Automatisk fangst» av (Claude Code eksporterer userConfig til hooks som CLAUDE_PLUGIN_OPTION_<NAVN>)
+    ['hook-av', { TUA_HOME: path.join(scratch, 'avhome'), TUA_FILES_ROOT: path.join(scratch, 'avarkiv'), TUA_DATA_DIR: path.join(scratch, 'av-data'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'false', TUA_HOOK_ALLOW_TMP: '1' }],
   ]
   let failed = 0
   for (const [name, env] of cases) {
@@ -149,4 +151,28 @@ if (mode === 'hook-winpath') {
   assert.equal(log[1].skipped, 'filtype/sti', 'node_modules med omvendt skråstrek skal hoppes over: ' + JSON.stringify(log[1]))
   assert.equal(log[2].skipped, 'filtype/sti', 'filer i temp-mappa skal hoppes over: ' + JSON.stringify(log[2]))
   say('hook: dokument lagret · Windows-sti med node_modules hoppet over · temp-fil hoppet over')
+}
+
+if (mode === 'hook-av') {
+  // «Automatisk fangst» = false: svar, fil og økt lagrer ingenting og logger ingenting; påminnelsen (start) kjører likevel
+  const S = await imp('store.js'); S.chooseArchive(process.env.TUA_FILES_ROOT)
+  const hook = path.join(HERE, '..', 'hooks', 'tua-hook.mjs')
+  const run = (m, input, env = process.env) => spawnSync(process.execPath, [hook, m], { input: JSON.stringify(input), encoding: 'utf8', env })
+  const doc = path.join(home, 'Notater', 'plan.md'); fs.mkdirSync(path.dirname(doc), { recursive: true })
+  fs.writeFileSync(doc, '# Plan\n\n' + 'Dette er et dokument som hooken IKKE skal lagre når fangst er av. '.repeat(20))
+  const base = { cwd: home, session_id: 'av123456' }
+  assert.equal(run('fil', { ...base, tool_name: 'Write', tool_input: { file_path: doc } }).status, 0)
+  assert.equal(run('svar', { ...base, last_assistant_message: 'Et langt svar. '.repeat(200) }).status, 0)
+  assert.equal(run('okt', { ...base, hook_event_name: 'SessionEnd' }).status, 0)
+  const logFile = path.join(process.env.TUA_FILES_ROOT, '.tua', 'hooks.jsonl')
+  assert.ok(!fs.existsSync(logFile), 'med fangst av skal hooken avslutte før den logger noe')
+  assert.equal(S.load().filter((a) => a.key !== 'velkommen').length, 0, 'ingen atomer skal lagres når fangst er av')
+  // samme fil med fangst på → lagres (viser at det var innstillingen, ikke filteret, som stoppet den)
+  assert.equal(run('fil', { ...base, tool_name: 'Write', tool_input: { file_path: doc } }, { ...process.env, CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'true' }).status, 0)
+  assert.equal(S.load().filter((a) => a.key === `fil:${doc}`).length, 1, 'med fangst på skal samme fil lagres')
+  // påminnelsen går uansett og logger
+  assert.equal(run('start', base).status, 0)
+  const log = fs.readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  assert.deepEqual(log.map((l) => l.mode), ['fil', 'start'], 'bare fangst-på-lagringen og påminnelsen skal stå i loggen: ' + JSON.stringify(log.map((l) => l.mode)))
+  say('fangst av: fil/svar/økt lagret ingenting · samme fil lagret med fangst på · påminnelsen kjørte')
 }

@@ -8,6 +8,13 @@ All notable changes to the Tua plugin. Versions follow `version` in `.claude-plu
 - **SessionStart hook** now points to `/tua_start` when nothing has ever been imported, and offers `/tua_auto` once per repository (per 30 days, remembered in `<archive>/.tua/auto-tilbudt.json`) when the repository has no `.tua-sync.json`. Still a reminder only: nothing runs without a yes.
 - Decision (V20): skills mirror what the user wants, not the tool surface — four skills is the ceiling; the eleven MCP tools stay tools.
 
+## 0.4.1 — 2026-10-19 (after the directory submission)
+
+- **Zip extraction in its own module.** The `unzip`/`tar` call that unpacks exports in `Innboks` moved from `server/import.js` to `server/unzip.js`, so the file that fetches a shared link no longer also spawns a process (one of the directory validator's heuristics). Behaviour unchanged.
+- **Directory listing links.** `documentationUrl`, `supportUrl` and `privacyPolicyUrl` in `plugin.json` fill the Links section of the directory listing. Claude Code ignores them at load time; `claude plugin validate` before v2.1.281 reports them as unknown fields, which is expected.
+- **"Automatisk fangst" is tested.** The hook has read the plugin setting since 0.3.0 (Claude Code exports every `userConfig` option to hook processes as `CLAUDE_PLUGIN_OPTION_<KEY>`); `test-platform.mjs` now proves that `false` stops the Stop, Write/Edit and session hooks from saving or logging anything while the SessionStart reminder still runs.
+- **Known and kept: no MCP server in Cowork.** `.mcp.json` takes `TUA_FILES_ROOT` from the `arkivmappe` setting, and Cowork does not collect plugin settings, so the server does not start there (skills still load). The setting stays because Claude Code users can point Tua at an existing folder without a first-run dialog; Cowork support is a later decision.
+
 ## 0.4.0 — 2026-10-19 (M18: directory submission)
 
 - **Self-contained plugin folder.** The server (`server/`), both skills and the hooks are real files in this folder; no symlinks. `package.json` + `package-lock.json` at the root so Claude Code installs the three dependencies (`@modelcontextprotocol/sdk`, `@modelcontextprotocol/ext-apps`, `zod`) on install.

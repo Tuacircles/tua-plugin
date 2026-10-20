@@ -2,7 +2,7 @@
 
 Everything to paste into the developer portal at <https://claude.ai/directory/manage> (Submit new → **Plugin bundle**). Written 19 October 2026 against the docs read the same day (`/docs/plugins/submit`, `/docs/plugins/pre-submission-checklist`, `/docs/connectors/building/submission`, `/docs/connectors/building/review-criteria`). Re-read them before submitting; they change.
 
-> **Before you start:** (1) create the public GitHub repository `tuacircles/tua-plugin` (or another owner — then replace `tuacircles/tua-plugin` in `plugin.json`, `package.json`, `pakk.mjs`, `README.md`, `PRIVACY.md` and this file) with the contents of this folder at the repository **root** (plugin path empty — that avoids the "scripts the validator couldn't follow" hold for sub-folder plugins); (2) connect that GitHub account on claude.ai in the Tua Circles organization; (3) publish `PRIVACY.md` at an HTTPS URL you control — `docs/privacy-policy.html` is a ready-made standalone page for <https://tuacircles.com/plugin-privacy> — or keep the GitHub URL; (4) the icon is `icon.png` in this folder (512 × 512 PNG, 71 KB, the Tua app icon from tuacircles.com).
+> **Before you start:** (1) create the public GitHub repository `tuacircles/tua-plugin` (or another owner — then replace `tuacircles/tua-plugin` in `plugin.json`, `package.json`, `pakk.mjs`, `README.md`, `PRIVACY.md` and this file) with the contents of this folder at the repository **root** (plugin path empty — that avoids the "scripts the validator couldn't follow" hold for sub-folder plugins); (2) connect that GitHub account on claude.ai in the Tua Circles organization; (3) publish `PRIVACY.md` at an HTTPS URL you control — `docs/privacy-policy.html` is a ready-made standalone page for <https://tuacircles.com/plugin-privacy> — or keep the GitHub URL; (4) the icon is the 512 × 512 PNG in this folder's root (71 KB, the Tua app icon from tuacircles.com) — upload it in the Listing step.
 >
 > The Norwegian step-by-step for everything that needs Erik's accounts (GitHub, claude.ai, e-mail, website) is in `docs/innsending-steg-for-steg.md`.
 
@@ -29,6 +29,31 @@ Then **Validate**. Expected findings and what they mean:
 | Credentials in files | ✔ none | Tua uses no API keys. `userConfig` has only a folder and a boolean. |
 | Marketplace file | *possible warning* | `.claude-plugin/marketplace.json` lists this one plugin with `source: "./"` so people can install straight from GitHub. If the portal objects ("Pick one plugin first"), delete that file and push. |
 
+## Outcome — submitted 19 October 2026
+
+**Submitted for review** from <https://claude.ai/directory/manage> at `main @ e946abb` (repository `tuacircles/tua-plugin`, personal GitHub account *Tuacircles*). Portal result: "Plugin submitted for review" — held for policy review, which was expected. Status page: <https://claude.ai/directory/manage/plugins/a081400a-5855-4fa5-8cd6-f540583a622f> (Submitted → Security scan → In review → Live; "Waiting for review" at 22:50 CEST). Review mail goes to the contact address below.
+
+What the portal actually reported (validation passed, **4 warnings · 8 policy holds**):
+
+| Finding | Kind | What it is | Action |
+|---|---|---|---|
+| Dependencies install from a lockfile | hold | `package-lock.json` installs the MCP SDK on install | None — reviewer clears it (as predicted). |
+| Uses a credential from the user's machine · 6 findings | hold | Heuristic pairs a "credential-looking" word with a URL host per file: `bridge.js` (`passwordSet` + host "local"), `desktop.js` (`~/.config/Claude` + "claude"), `platform.js` and `server.js` (env var read at run time + a URL), `test-platform.mjs` (`example.invalid`), and across files: `server/apps/test-apps.mjs` reads `process.env` while `docs/innsending-steg-for-steg.md` mentions `ssh`. | None required; a reviewer confirms nothing leaves the machine (README "What the plugin runs, reads, writes and sends"). To clear it mechanically later: drop the test files from the published tree, avoid reading the whole `process.env`, and avoid the word `ssh` in docs. The real credential code (`keychain.js`, the user's own API keys in macOS Keychain) was *not* what it flagged. |
+| Name may be confused with an existing listing | hold | "tua" is one letter from plugin `daxgoon/tula`. | Answer the reviewer: Tua is the registered product of Tua Circles Holding AS, tuacircles.com, live since 2024. |
+| Unrecognized field in plugin.json · 3 | warning | `documentationUrl`, `supportUrl`, `privacyPolicyUrl` are not in the manifest schema the linter knows — yet the Listing step *does* read them (Links went from 3/6 to 5/6 filled). | Keep them. |
+| Contains a download-and-run command · `server/import.js` | warning | Heuristic on the share-link `fetch()` in that file. The zip extraction (`spawnSync` unzip/tar) was moved to `server/unzip.js` before submission; the warning stayed, so it is the fetch alone. | None — shown to reviewers as an install-time note. |
+| Local MCP server: not on claude.ai | note | stdio server runs in Claude Code and Cowork only. | Listed on **Claude Code and Cowork** only; "Claude apps (web, desktop, mobile)" was unticked because only the skills would install there, without the server and hooks. |
+| Images and fonts passed without a code check | note | the 512 × 512 PNG icon. | None. |
+
+Holds that were **removed before submission**: "Image or font file that the plugin's code could run" (2 findings) — the validator holds any plugin whose text files name an image by filename; `SUBMISSION.md` and the Norwegian step-by-step no longer spell the icon's filename.
+
+Answers given: **Data handling** — Reads and stores (locally) · No · Not retained · No. **Compliance** — contact `erik@storelia.no` (change to `tech@tuacircles.com` in the plugin's settings once that mailbox exists), all four acknowledgements ticked. **Review & submit** — auto-publish passing versions **on**; new versions via **scheduled check** (about every 6 hours; a GitHub push webhook can be added later from the plugin's settings).
+
+Open points the portal surfaced, and what was decided for 0.4.1 (Erik, 19 Oct 2026):
+
+1. **Cowork:** "An MCP server needs a user setting this surface can't collect, so it won't start here." Cause: `.mcp.json` sets `TUA_FILES_ROOT` from `${user_config.arkivmappe}`. The server already falls back to `~/.tua/config.json` and asks on first use (`tua_setup`), so dropping that env line (and the `arkivmappe` entry in `userConfig`) would make Cowork start the server. **Decision: keep the setting** (alternative B). Claude Code users keep the plugin setting; in Cowork only the skills load. Noted in `CHANGELOG.md` 0.4.1; revisit if Cowork matters.
+2. **`userConfig.auto_lagring`** looked unused because `grep auto_lagring` finds nothing, but the hook reads it as `CLAUDE_PLUGIN_OPTION_AUTO_LAGRING` — the documented way Claude Code hands every `userConfig` option to hook processes. **Decision: keep it**, with a new `hook-av` case in `server/test-platform.mjs` that proves `false` turns the capture off.
+
 ## Listing details step
 
 Read from `plugin.json` and the README. Check: name **Tua**, description (from `plugin.json`), author **Tua Circles Holding AS**, homepage/repository links, license **AGPL-3.0-only**, keywords. The listing description is the README; the English intro is written for that.
@@ -42,7 +67,7 @@ Listing materials, if the portal asks for them separately:
 | Support contact | `tech@tuacircles.com` |
 | Company | Tua Circles Holding AS, Oslo, Norway · `https://tuacircles.com` |
 | Primary contact for review updates | Erik Teigen, `tech@tuacircles.com` |
-| Icon | `icon.png` in the repository root — 512 × 512 PNG, 71 KB, the Tua app icon (favicon of tuacircles.com, upscaled from 257 px; replace with the designer's original for a sharper result) |
+| Icon | the PNG in the repository root — 512 × 512, 71 KB, the Tua app icon (favicon of tuacircles.com, upscaled from 257 px; replace with the designer's original for a sharper result) |
 | Categories | Productivity · Notes & knowledge management · Developer tools |
 | One-liner (≤ 200 chars) | The local-first archive for everything you make with AI: save with provenance, find it again across projects, bring in your Claude history — all as markdown files in your own folder. |
 
@@ -92,11 +117,11 @@ If the portal shows the connector-style list of seven acknowledgements (director
 
 ## Checklist before you press Submit
 
-- [ ] Repository public (or private with the Claude GitHub App installed for scanning; must be public before publishing)
-- [ ] `git ls-files | grep -ci "ds_store\|thumbs.db"` → 0; no `node_modules/`, `server/data/`, `dist/` committed
-- [ ] `claude plugin validate --strict` on a copy without `marketplace.json` → ✔
-- [ ] `node server/test-tools.mjs` and `node server/test-platform.mjs` → all green
+- [x] Repository public — https://github.com/tuacircles/tua-plugin, `main` = 8eee3dc, tag v0.4.0 (19 Oct 2026)
+- [x] `git ls-files | grep -ci "ds_store\|thumbs.db"` → 0; no `node_modules/`, `server/data/`, `dist/` committed (checked 19 Oct 2026)
+- [x] `claude plugin validate --strict` on a copy without `marketplace.json` → ✔ (19 Oct 2026, also with it)
+- [x] `node server/test-tools.mjs` and `node server/test-platform.mjs` → all green (19 Oct 2026)
 - [ ] `tech@tuacircles.com` exists and is monitored
 - [ ] Privacy policy reachable over HTTPS at the URL you enter
-- [x] Icon PNG ready (`icon.png`)
-- [ ] Owner/URL `tuacircles/tua-plugin` matches the real repository everywhere (grep for it)
+- [x] Icon PNG ready (512 × 512, repository root)
+- [x] Owner/URL `tuacircles/tua-plugin` matches the real repository (personal account Tuacircles)
