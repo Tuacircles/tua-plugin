@@ -82,6 +82,8 @@ const el = (tag, attrs = {}, ...kids) => {
   return n
 }
 const LV = { S: 'ingress', M: 'sammendrag', L: 'alt' }
+// replaceChildren er nativ og gjør null til teksten «null»; put() filtrerer som el() gjør
+const put = (...kids) => root.replaceChildren(...kids.flat().filter((k) => k != null))
 let state = null        // siste structuredContent fra serveren
 let busy = false
 
@@ -156,7 +158,7 @@ function renderAtom(a) {
       onclick: () => { call({ id: a.id, level: L }); tellModel(`Brukeren åpnet ${L} (${LV[L]}) av atom ${a.id} «${a.name}» i Tua-kortet.`) },
     }, L)))
   const chips = (label, items, cls) => items?.length ? [el('div', { class: 'lbl' }, label), el('div', { class: 'chips' }, ...items.map((c) => el('span', { class: 'chip' + (c.warn ? ' warn' : '') + (c.id ? ' link' : ''), onclick: c.id ? () => call({ id: c.id, level: 'S' }) : null, title: c.title || null }, c.text)))] : []
-  root.replaceChildren(
+  put(
     el('div', { class: 'eyebrow' }, a.project, el('span', { class: 'meta' }, `· ${a.date} · v${a.version}${a.kind === 'leveranse' ? ' · leveranse' : ''}${a.source ? ' · ' + a.source : ''}`)),
     el('h1', {}, a.name),
     a.level !== 'S' && a.S ? el('p', { class: 's' }, a.S) : null,
@@ -181,7 +183,7 @@ function renderAtom(a) {
 
 // ── treffliste (forsiden i miniatyr: ingresser, nyeste først)
 function renderList(d) {
-  root.replaceChildren(
+  put(
     el('div', { class: 'eyebrow' }, d.query ? `${d.total} treff på «${d.query}»` : `${d.total} atomer`, el('span', { class: 'meta' }, d.project ? `· ${d.project}` : '· alle prosjekter')),
     ...d.items.map((a) => {
       const box = el('div', { class: 'inline', hidden: 'true' })
