@@ -2,6 +2,14 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.1 — 2026-10-20 (the MCP server starts in Cowork)
+
+- **`.mcp.json` no longer references `${user_config.arkivmappe}`.** Cowork ignores an MCP server whose definition references a plugin setting without a default, and does not collect settings at all, so since 0.3.0 a directory install gave Cowork the skills but no tools. The server now gets only `TUA_DATA_DIR` from `${CLAUDE_PLUGIN_DATA}` and finds the archive the way it always could: `TUA_FILES_ROOT` (standalone installs), then `~/.tua/config.json`, then an existing Tua folder, else it asks.
+- **The *Arkivmappe* setting still works in Claude Code.** Claude Code exports it to hook processes; the SessionStart hook now writes it to `~/.tua/config.json` through the same `chooseArchive` that `tua_setup` uses (same fields: `root`, `sted`, `valgt`), only when it is set and differs from what the file says, and logs the write in `hooks.jsonl`. An empty setting never overwrites a choice made with `tua_setup`. The server re-reads the file at the first tool call if it had no archive at startup, so the setting takes effect in the same session.
+- **Unreplaced `${…}` in `TUA_DATA_DIR`/`TUA_FILES_ROOT` is ignored** (a host that passes the raw variable gets the default data folder instead of a folder literally named `${CLAUDE_PLUGIN_DATA}`).
+- **Honest limits, per surface** (README): claude.ai chat = skills only; Cowork = server + skills from the plugin, and Tua shows twice if a Desktop connector named `tua` is also on; Claude Code = server + skills + hooks.
+- Test: `test-platform.mjs` case `hook-konfig` proves the hook writes the setting, a server started without `TUA_FILES_ROOT` and with a raw `${CLAUDE_PLUGIN_DATA}/data` finds the archive from the file, and an empty setting leaves the file alone.
+
 ## 0.5.0 — 2026-10-20 (M24: skills as intents)
 
 - **Two new skills.** `/tua_start` — onboarding in one go: `tua_import(kilde=alt)` with a dry run first, then the real import, confirms auto-capture is on, and sets up `tua_auto` for the repository you are in. `/tua_status` — read-only: atoms per project, what is still outside Tua (Code, Cowork, Desktop cache, documents, Innboks), whether the hooks have saved anything lately, and whether this repository is mirrored.

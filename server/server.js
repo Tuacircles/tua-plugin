@@ -55,7 +55,7 @@ const INSTRUCTIONS =
   '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt. ' +
   'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen.'
 
-const server = new McpServer({ name: 'tua', version: '0.5.0' }, { instructions: INSTRUCTIONS })
+const server = new McpServer({ name: 'tua', version: '0.5.1' }, { instructions: INSTRUCTIONS })
 
 // M14: er arkivet ikke valgt, stoppes hvert verktøykall med et spørsmål om sted — via elicitation når klienten støtter det
 // (Code gjør det), ellers som en «oppsett:»-linje modellen skal stille brukeren. Pakket rundt registerTool, så det gjelder

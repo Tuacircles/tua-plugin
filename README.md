@@ -38,6 +38,8 @@ Tua needs **Node.js 22.15 or newer** (24 recommended) on the `PATH`. Dependencie
 
 **From the directory (once listed):** add Tua from claude.ai › Customize › Plugins. It syncs to Claude Code and Cowork.
 
+**Per surface.** Claude Code: MCP server, skills and hooks (the hooks capture answers and documents, and carry the *Arkivmappe* setting into `~/.tua/config.json`). Cowork: the MCP server starts from the plugin (since 0.5.1 — `.mcp.json` no longer references a plugin setting, which Cowork does not collect) plus the skills; the archive is whatever `~/.tua/config.json` says, or the first run asks. If you also installed the standalone `.mcpb` or a JSON connector named `tua` in Claude Desktop, Tua appears twice in Cowork — turn one of them off. Chat on claude.ai (web/mobile): skills only, no local server.
+
 **From this repository:**
 
 ```bash
@@ -57,7 +59,7 @@ The first tool call asks where the archive should live — iCloud Drive, Dropbox
 
 | Setting | Effect |
 |---|---|
-| **Arkivmappe** | Overrides the archive location (`TUA_FILES_ROOT`). Leave empty to be asked on first use. |
+| **Arkivmappe** | Points Tua at an existing archive folder. Claude Code hands the setting to the SessionStart hook, which writes it to `~/.tua/config.json` — the same file `tua_setup` writes — so the server finds the folder on every surface. Takes effect from the first tool call after the session starts. Leave empty to be asked on first use. |
 | **Automatisk fangst i Claude Code** | On by default. Off = hooks save nothing; you save only when you say "lagre dette til Tua". The SessionStart reminder stays. |
 
 ## What the plugin runs, reads, writes and sends
@@ -110,4 +112,4 @@ This section exists so that nothing Tua does is a surprise. It is the complete l
 
 **Installere lokalt:** `claude plugin marketplace add ./tua-plugin` og `claude plugin install tua@tua-lokal`, eller `claude --plugin-dir ./tua-plugin` for én økt. `node pakk.mjs` lager `dist/tua-plugin.zip` (claude.ai › Customize › Plugins › Upload) og `dist/tua.mcpb` (Claude Desktop). Tester: `npm test` (MCP over stdio), `node server/test-tools.mjs` (alle elleve verktøy én gang), `node server/test-platform.mjs` (Windows/Linux-grenene simulert på macOS) — alle mot en tom scratch-mappe, aldri mot arkivet ditt.
 
-**Ærlige grenser.** Chat på claude.ai (web/mobil) kjører ikke lokale servere — der virker bare skillene. Hooks finnes bare i Claude Code (og Cowork), ikke i Desktop-chat; Desktop-samtaler fanges i stedet fra appens cache. Finder-tagger settes bare på macOS; på Windows og Linux står taggene i fila. Plugins forutsetter betalt Claude-plan. Node 22.15 eller nyere kreves (zstd-dekoding av Desktop-cachen).
+**Ærlige grenser.** Chat på claude.ai (web/mobil) kjører ikke lokale servere — der virker bare skillene (uten .mcpb finnes ingen vei til verktøyene der). Cowork får fra 0.5.1 serveren fra selve pluginen: `.mcp.json` refererer ikke lenger innstillingen «arkivmappe» (Cowork samler ikke inn plugin-innstillinger og lot derfor serveren stå), og arkivet finnes fra `~/.tua/config.json`, som SessionStart-hooken i Claude Code skriver innstillingen til. Har du også Desktop-connectoren «tua» (JSON eller .mcpb), vises Tua to ganger i Cowork — slå av den ene. Hooks finnes bare i Claude Code (og Cowork), ikke i Desktop-chat; Desktop-samtaler fanges i stedet fra appens cache. Finder-tagger settes bare på macOS; på Windows og Linux står taggene i fila. Plugins forutsetter betalt Claude-plan. Node 22.15 eller nyere kreves (zstd-dekoding av Desktop-cachen).

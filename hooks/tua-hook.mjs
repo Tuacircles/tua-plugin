@@ -13,6 +13,7 @@
 // Slås av med plugin-innstillingen «Automatisk fangst» (CLAUDE_PLUGIN_OPTION_AUTO_LAGRING=false) — påminnelsen (start) går uansett.
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -22,14 +23,29 @@ const mod = (f) => pathToFileURL(path.join(HERE, '..', 'server', f)).href     //
 const mode = process.argv[2]
 const auto = String(process.env.CLAUDE_PLUGIN_OPTION_AUTO_LAGRING).toLowerCase() !== 'false'
 if (!auto && mode !== 'start') process.exit(0)
-// Samme arkiv som serveren: innstillingen «arkivmappe» → TUA_FILES_ROOT; cache i plugin-data, ikke i plugin-mappa
-if (!process.env.TUA_FILES_ROOT && process.env.CLAUDE_PLUGIN_OPTION_ARKIVMAPPE) process.env.TUA_FILES_ROOT = process.env.CLAUDE_PLUGIN_OPTION_ARKIVMAPPE
+// Samme arkiv som serveren: innstillingen «arkivmappe» → TUA_FILES_ROOT; cache i plugin-data, ikke i plugin-mappa.
+// Innstillingen kommer bare hit (CLAUDE_PLUGIN_OPTION_<NAVN>); MCP-serveren får den ikke, og .mcp.json kan ikke referere
+// ${user_config.…} uten at Cowork lar serveren stå (0.5.1). Derfor fører start-modus den inn i ~/.tua/config.json under.
+const arkivmappe = String(process.env.CLAUDE_PLUGIN_OPTION_ARKIVMAPPE || '').trim()
+if (!process.env.TUA_FILES_ROOT && arkivmappe) process.env.TUA_FILES_ROOT = path.resolve(arkivmappe.replace(/^~(?=$|\/)/, process.env.TUA_HOME || os.homedir()))
 if (!process.env.TUA_DATA_DIR && process.env.CLAUDE_PLUGIN_DATA) process.env.TUA_DATA_DIR = path.join(process.env.CLAUDE_PLUGIN_DATA, 'data')
 const store = await import(mod('store.js'))
 const imp = await import(mod('import.js'))
 const { posix, insideTmp } = await import(mod('platform.js'))
-const { load, save, upsert, FILES_ROOT, filesMode, S_MAX, SHORT_L, importState } = store
+const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState } = store
 const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts } = imp
+
+// 0.5.1: innstillingen «arkivmappe» → ~/.tua/config.json, samme fil og samme skrivemåte som tua_setup (store.chooseArchive),
+// så serveren finner arkivet uten TUA_FILES_ROOT — også i Cowork, der innstillingen aldri når serveren. Bare når innstillingen
+// er satt og peker et annet sted enn config alt gjør; en tom innstilling rører aldri et valg brukeren har tatt med tua_setup.
+let konfigurert = null
+if (mode === 'start' && arkivmappe) {
+  const want = process.env.TUA_FILES_ROOT, before = store.readConfig().root || null
+  if (before !== want) {
+    try { const known = store.archiveOptions().find((o) => o.path === want); store.chooseArchive(known ? known.id : want); konfigurert = { root: want, before } } catch {}
+  }
+}
+const { FILES_ROOT } = store
 
 if (!filesMode()) process.exit(0)                                   // arkivet er ikke valgt ennå — serveren spør ved første verktøykall
 
@@ -78,6 +94,7 @@ try {
     if (root && !fs.existsSync(path.join(root, '.tua-sync.json')) && !insideArchive(root) && offerOnce(root)) extra.push(`repoet «${path.basename(root)}» speiles ikke til Tua ennå (ingen .tua-sync.json) — tilby /tua_auto én gang hvis det passer: node "${path.join(HERE, '..', 'server', 'sync-tua.js')}" --project "${path.basename(root)}" --install-hook`)
     if (parts.length || extra.length) process.stdout.write(`Tua: ${[...parts, ...extra].join('. ')}. ${parts.length ? 'Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. ' : ''}Ikke kjør noe uten at brukeren sier ja.\n`)
     log({ pending, pendingCw, desktop: hc?.desktopNew, dokumenter: hc?.dokumenter, inbox: inbox.length, days, daysCw, first: !st.last, repoOffer: extra.length > (st.last ? 0 : 1) })
+    if (konfigurert) log({ arkivmappe: konfigurert.root, before: konfigurert.before, note: 'innstillingen «arkivmappe» skrevet til ~/.tua/config.json' })
   } else if (mode === 'svar') {
     const msg = String(input.last_assistant_message || '').trim()
     if (msg.length < MIN_SVAR) { log({ skipped: 'kort', len: msg.length }); process.exit(0) }

@@ -18,7 +18,10 @@ import { serialize, parse, fileNameFor, safeName } from './files.js'
 import { HOME, IS_MAC, cloudBases } from './platform.js'   // M18: alt OS-spesifikt bor der
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-export const DATA_DIR = process.env.TUA_DATA_DIR || path.join(HERE, 'data')
+// 0.5.1: en plugin-vert som ikke erstatter «${…}» i .mcp.json (Cowork uten CLAUDE_PLUGIN_DATA) sender variabelen rå —
+// en sti som fortsatt inneholder «${» er ikke en sti, og ignoreres som om den var tom.
+const envPath = (name) => { const v = process.env[name]; return v && !v.includes('${') ? v : '' }
+export const DATA_DIR = envPath('TUA_DATA_DIR') || path.join(HERE, 'data')
 export const FILE = path.join(DATA_DIR, 'atoms.json')            // avledet indeks
 
 // M14: hvor arkivet bor. TUA_FILES_ROOT vinner alltid. Ellers valget brukeren har tatt (~/.tua/config.json),
@@ -52,7 +55,7 @@ export function writeConfig(patch) {
   return next
 }
 function chooseRoot() {
-  if (process.env.TUA_FILES_ROOT) return process.env.TUA_FILES_ROOT
+  if (envPath('TUA_FILES_ROOT')) return envPath('TUA_FILES_ROOT')
   const c = readConfig()
   if (c.root && fs.existsSync(c.root)) return c.root
   const existing = archiveOptions().find((o) => o.exists)
@@ -64,7 +67,7 @@ export const rootLabel = () => archiveOptions().find((o) => FILES_ROOT && o.base
 // Hvor arkivet bor og HVORFOR: miljøvariabel, brukerens valg i config, funnet automatisk, eller ikke valgt. Innstillinger-siden viser dette.
 export function archiveInfo() {
   const c = readConfig()
-  const kilde = process.env.TUA_FILES_ROOT ? 'miljøvariabel' : c.root && FILES_ROOT === c.root ? 'valgt' : FILES_ROOT ? 'funnet' : 'ikke valgt'
+  const kilde = envPath('TUA_FILES_ROOT') ? 'miljøvariabel' : c.root && FILES_ROOT === c.root ? 'valgt' : FILES_ROOT ? 'funnet' : 'ikke valgt'
   return { root: FILES_ROOT, label: rootLabel(), kilde, valgt: kilde === 'valgt' ? c.valgt || null : null, exists: filesMode() }
 }
 // Finder-mappene (M17) — standard Nedlastinger/Dokumenter/Skrivebord, brukeren velger på innstillinger-siden (M15). finder.js leser samme felt.
@@ -713,6 +716,9 @@ export function noteImport(kind, info = {}) {
 // Lager arkivet hvis det ikke finnes. Rører aldri et arkiv som finnes. Returnerer { created, root }.
 // Er roten ikke valgt ennå (ny bruker, ingen Tua-mappe funnet), gjøres ingenting: { needsChoice: true }.
 export function ensureArchive() {
+  // 0.5.1: var ingen rot valgt ved oppstart, sjekk config igjen — SessionStart-hooken kan ha skrevet «arkivmappe» dit etter at
+  // serveren startet (begge starter samtidig i Claude Code). Samme regel som chooseRoot(); ingen gjetting utover den.
+  if (!FILES_ROOT) { const r = chooseRoot(); if (r) { FILES_ROOT = r; INBOX_DIR = path.join(r, 'Innboks') } }
   if (!FILES_ROOT) return { created: false, root: null, needsChoice: true }
   if (fs.existsSync(FILES_ROOT)) {
     try { fs.mkdirSync(INBOX_DIR, { recursive: true }) } catch {}

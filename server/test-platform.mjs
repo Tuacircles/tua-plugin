@@ -29,6 +29,8 @@ if (!mode) {
     ['hook-winpath', { TUA_PLATFORM: 'win32', TUA_HOME: path.join(scratch, 'hookhome'), TUA_FILES_ROOT: path.join(scratch, 'hookarkiv'), TUA_DATA_DIR: path.join(scratch, 'hook-data'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'true', TUA_HOOK_ALLOW_TMP: '1' }],
     // 0.4.1: plugin-innstillingen «Automatisk fangst» av (Claude Code eksporterer userConfig til hooks som CLAUDE_PLUGIN_OPTION_<NAVN>)
     ['hook-av', { TUA_HOME: path.join(scratch, 'avhome'), TUA_FILES_ROOT: path.join(scratch, 'avarkiv'), TUA_DATA_DIR: path.join(scratch, 'av-data'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'false', TUA_HOOK_ALLOW_TMP: '1' }],
+    // 0.5.1: innstillingen «arkivmappe» når bare hooken; start-modus skriver den til ~/.tua/config.json så serveren finner arkivet uten TUA_FILES_ROOT
+    ['hook-konfig', { TUA_HOME: path.join(scratch, 'konfighome'), TUA_DATA_DIR: path.join(scratch, 'konfig-data'), CLAUDE_PLUGIN_OPTION_ARKIVMAPPE: path.join(scratch, 'konfigarkiv'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'true' }],
   ]
   let failed = 0
   for (const [name, env] of cases) {
@@ -175,4 +177,37 @@ if (mode === 'hook-av') {
   const log = fs.readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
   assert.deepEqual(log.map((l) => l.mode), ['fil', 'start'], 'bare fangst-på-lagringen og påminnelsen skal stå i loggen: ' + JSON.stringify(log.map((l) => l.mode)))
   say('fangst av: fil/svar/økt lagret ingenting · samme fil lagret med fangst på · påminnelsen kjørte')
+}
+
+if (mode === 'hook-konfig') {
+  // SessionStart med «arkivmappe» satt og ingen TUA_FILES_ROOT: hooken skriver innstillingen til ~/.tua/config.json (som tua_setup),
+  // og en server startet uten TUA_FILES_ROOT (slik Cowork og pluginens .mcp.json gjør) finner arkivet derfra. En uerstattet
+  // «${CLAUDE_PLUGIN_DATA}/data» i TUA_DATA_DIR ignoreres. En tom innstilling rører ikke valget.
+  const hook = path.join(HERE, '..', 'hooks', 'tua-hook.mjs')
+  const arkiv = process.env.CLAUDE_PLUGIN_OPTION_ARKIVMAPPE
+  const configFile = path.join(home, '.tua', 'config.json')
+  const run = (env) => spawnSync(process.execPath, [hook, 'start'], { input: JSON.stringify({ cwd: home, session_id: 'konfig01' }), encoding: 'utf8', env })
+  assert.ok(!fs.existsSync(configFile), 'ingen config før hooken')
+  assert.equal(run(process.env).status, 0)
+  const cfg = JSON.parse(fs.readFileSync(configFile, 'utf8'))
+  assert.equal(cfg.root, arkiv, 'config.root skal være innstillingen')
+  assert.equal(cfg.sted, 'egen mappe'); assert.ok(cfg.valgt, 'valgt-tidsstempel som tua_setup')
+  assert.ok(fs.existsSync(path.join(arkiv, 'Innboks')), 'arkivet opprettes som ved tua_setup')
+  const logFile = path.join(arkiv, '.tua', 'hooks.jsonl')
+  const logs = () => fs.readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  assert.equal(logs().filter((l) => l.arkivmappe === arkiv && l.before === null).length, 1, 'skrivingen skal logges én gang')
+  // serveren uten TUA_FILES_ROOT og med rå ${…} i TUA_DATA_DIR (Cowork): config vinner, DATA_DIR faller tilbake
+  const probe = spawnSync(process.execPath, ['--input-type=module', '-e', `import * as S from ${JSON.stringify(pathToFileURL(path.join(HERE, 'store.js')).href)}; console.log(JSON.stringify({ root: S.FILES_ROOT, kilde: S.archiveInfo().kilde, data: S.DATA_DIR }))`],
+    { encoding: 'utf8', env: { ...process.env, TUA_FILES_ROOT: '', TUA_DATA_DIR: '${CLAUDE_PLUGIN_DATA}/data', CLAUDE_PLUGIN_OPTION_ARKIVMAPPE: '' } })
+  assert.equal(probe.status, 0, probe.stderr)
+  const got = JSON.parse(probe.stdout.trim())
+  assert.equal(got.root, arkiv, 'serveren skal finne arkivet fra config uten TUA_FILES_ROOT')
+  assert.equal(got.kilde, 'valgt')
+  assert.equal(got.data, path.join(HERE, 'data'), 'uerstattet ${…} i TUA_DATA_DIR skal ignoreres')
+  // samme innstilling igjen → ingen ny skriving; tom innstilling → valget står
+  assert.equal(run(process.env).status, 0)
+  assert.equal(run({ ...process.env, CLAUDE_PLUGIN_OPTION_ARKIVMAPPE: '' }).status, 0)
+  assert.equal(JSON.parse(fs.readFileSync(configFile, 'utf8')).root, arkiv, 'tom innstilling skal ikke overskrive valget')
+  assert.equal(logs().filter((l) => l.arkivmappe).length, 1, 'uendret innstilling skal ikke skrives igjen')
+  say('arkivmappe → config.json · server fant arkivet uten TUA_FILES_ROOT · rå ${…} i TUA_DATA_DIR ignorert · tom innstilling rørte ikke valget')
 }
