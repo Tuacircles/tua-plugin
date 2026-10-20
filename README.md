@@ -15,7 +15,9 @@ Tua is a Norwegian-language product (tool descriptions, skills and answers are i
 | **MCP server** `tua` | Eleven tools: `tua_save`, `tua_search`, `tua_get`, `tua_list`, `tua_link`, `tua_unlink`, `tua_compose`, `tua_setup`, `tua_import`, `tua_card`, `tua_open`. Every tool has a title and `readOnlyHint`/`destructiveHint`; no tool ever deletes anything. |
 | **Skill** `tua` | How to save, find and share atoms: short ingress (S) always, summary (M) for long content, fetch M before L, offer before writing. |
 | **Skill** `tua_auto` | Mirror a git project (commit log, manifest, decision log, PDF-backed documents) into Tua after every commit. |
-| **Hooks** (Claude Code only) | `SessionStart` reminder when history is waiting to be imported · `Stop` saves long answers · `PostToolUse Write/Edit` saves text documents you write · `PreCompact`/`SessionEnd` saves a session summary. All can be turned off with the plugin setting **Automatisk fangst**. |
+| **Skill** `tua_start` | Onboarding in one go: bring in all history (dry run first), confirm auto-capture, set up `tua_auto` for the repository you are in. |
+| **Skill** `tua_status` | Read-only overview: atoms per project, what is still outside Tua, whether the hooks are saving, whether this repository is mirrored. |
+| **Hooks** (Claude Code only) | `SessionStart` reminder when history is waiting to be imported (points to `tua_start` the first time, offers `tua_auto` once per repository) · `Stop` saves long answers · `PostToolUse Write/Edit` saves text documents you write · `PreCompact`/`SessionEnd` saves a session summary. All can be turned off with the plugin setting **Automatisk fangst**. |
 | **The Tua card** | An MCP App (`ui://tua/kort`) that renders a hit list or one atom inside Claude Desktop, claude.ai, Cursor and VS Code, with S → M → L on demand and "Open in …" buttons. |
 
 ### How an atom works

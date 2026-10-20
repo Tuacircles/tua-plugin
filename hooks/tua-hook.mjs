@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // tua-hook.mjs — Claude Code-hooks for Tua-pluginen (M14). Ett skript, fire moduser:
 //
-//   start  SessionStart  → påminnelse (som kontekst) når Innboks har filer eller Code-økter ikke er importert på en stund
+//   start  SessionStart  → påminnelse (som kontekst) når Innboks har filer eller Code-økter ikke er importert på en stund;
+//                          M24: peker på /tua_start første gang, og tilbyr /tua_auto når repoet mangler .tua-sync.json
 //   svar   Stop          → lagre siste substansielle svar (≥ 1 500 tegn) som atom
 //   fil    PostToolUse   → Write|Edit på et tekstdokument (.md/.txt/…) → atom med file-lenke; samme fil = ny versjon
 //   okt    PreCompact/SessionEnd → økt-sammendrag (oppgaver, filer, siste svar) som atom, key per økt
@@ -38,6 +39,10 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s)
 const log = (entry) => { try { fs.mkdirSync(path.join(FILES_ROOT, '.tua'), { recursive: true }); fs.appendFileSync(path.join(FILES_ROOT, '.tua', 'hooks.jsonl'), JSON.stringify({ at: Date.now(), mode, ...entry }) + '\n') } catch {} }
 const insideArchive = (p) => { const r = path.relative(FILES_ROOT, p); return r && !r.startsWith('..') && !path.isAbsolute(r) }
 const DAYS = 864e5
+// M24: git-rota for cwd (worktree → hovedrepoet), eller '' utenfor et repo. .git kan være mappe (repo) eller fil (worktree).
+const gitRootOf = (c) => { let d = repoRootOf(c); for (let i = 0; i < 8 && d; i++) { if (fs.existsSync(path.join(d, '.git'))) return d; const up = path.dirname(d); if (up === d) break; d = up } return '' }
+// M24: tilbudet om /tua_auto gis én gang per repo per 30 dager — ellers maser hooken i hver økt
+const offerOnce = (root) => { const f = path.join(FILES_ROOT, '.tua', 'auto-tilbudt.json'); let s = {}; try { s = JSON.parse(fs.readFileSync(f, 'utf8')) } catch {}; if (s[root] && Date.now() - s[root] < 30 * DAYS) return false; s[root] = Date.now(); try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(s, null, 2) + '\n') } catch {}; return true }
 
 try {
   const cwd = input.cwd || process.cwd()
@@ -65,8 +70,14 @@ try {
     const lastDesk = st.desktop?.at || 0, daysDesk = lastDesk ? Math.floor((Date.now() - lastDesk) / DAYS) : null
     if (hc?.desktopNew && (daysDesk === null || daysDesk >= 7)) parts.push(`${hc.desktopNew} Desktop-samtale${hc.desktopNew === 1 ? '' : 'r'} i Claude Desktops cache er ikke tatt med — tua_import(kilde=desktop); leses ellers av seg selv når serveren kjører`)
     if (hc?.dokumenter && !st.finder) parts.push(`${hc.dokumenter} dokument${hc.dokumenter === 1 ? '' : 'er'} med AI-opphav i Nedlastinger/Dokumenter/Skrivebord er ikke i Tua — tua_import(kilde=finder)`)
-    if (parts.length) process.stdout.write(`Tua: ${parts.join('. ')}. Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. Ikke kjør noe uten at brukeren sier ja.\n`)
-    log({ pending, pendingCw, desktop: hc?.desktopNew, dokumenter: hc?.dokumenter, inbox: inbox.length, days, daysCw })
+    // M24: aldri importert → pek på /tua_start (alt inn + automatikken på). Et git-repo uten .tua-sync.json → tilby /tua_auto,
+    // én gang per repo per 30 dager (husket i <arkiv>/.tua/auto-tilbudt.json). Begge er tilbud; ingenting kjøres uten ja.
+    const extra = []
+    if (!st.last) extra.push('ingen historikk er tatt med ennå — /tua_start tar med alt og slår på automatikken; nevn det én gang hvis det passer')
+    const root = gitRootOf(cwd)
+    if (root && !fs.existsSync(path.join(root, '.tua-sync.json')) && !insideArchive(root) && offerOnce(root)) extra.push(`repoet «${path.basename(root)}» speiles ikke til Tua ennå (ingen .tua-sync.json) — tilby /tua_auto én gang hvis det passer: node "${path.join(HERE, '..', 'server', 'sync-tua.js')}" --project "${path.basename(root)}" --install-hook`)
+    if (parts.length || extra.length) process.stdout.write(`Tua: ${[...parts, ...extra].join('. ')}. ${parts.length ? 'Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. ' : ''}Ikke kjør noe uten at brukeren sier ja.\n`)
+    log({ pending, pendingCw, desktop: hc?.desktopNew, dokumenter: hc?.dokumenter, inbox: inbox.length, days, daysCw, first: !st.last, repoOffer: extra.length > (st.last ? 0 : 1) })
   } else if (mode === 'svar') {
     const msg = String(input.last_assistant_message || '').trim()
     if (msg.length < MIN_SVAR) { log({ skipped: 'kort', len: msg.length }); process.exit(0) }

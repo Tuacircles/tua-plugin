@@ -2,6 +2,12 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.0 — 2026-10-20 (M24: skills as intents)
+
+- **Two new skills.** `/tua_start` — onboarding in one go: `tua_import(kilde=alt)` with a dry run first, then the real import, confirms auto-capture is on, and sets up `tua_auto` for the repository you are in. `/tua_status` — read-only: atoms per project, what is still outside Tua (Code, Cowork, Desktop cache, documents, Innboks), whether the hooks have saved anything lately, and whether this repository is mirrored.
+- **SessionStart hook** now points to `/tua_start` when nothing has ever been imported, and offers `/tua_auto` once per repository (per 30 days, remembered in `<archive>/.tua/auto-tilbudt.json`) when the repository has no `.tua-sync.json`. Still a reminder only: nothing runs without a yes.
+- Decision (V20): skills mirror what the user wants, not the tool surface — four skills is the ceiling; the eleven MCP tools stay tools.
+
 ## 0.4.0 — 2026-10-19 (M18: directory submission)
 
 - **Self-contained plugin folder.** The server (`server/`), both skills and the hooks are real files in this folder; no symlinks. `package.json` + `package-lock.json` at the root so Claude Code installs the three dependencies (`@modelcontextprotocol/sdk`, `@modelcontextprotocol/ext-apps`, `zod`) on install.
