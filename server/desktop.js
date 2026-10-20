@@ -378,5 +378,17 @@ export function countDesktopConversations({ quick = false } = {}) {
 }
 // Hvilke samtaler (uuid → updated_at) er importert fra cachen før — for idempotens
 export const importedDesktop = () => readState().imported || {}
+// Stillhetsvakt (20.10.2026): leseren var blind fra 15.09 til 20.10 uten at noen merket det. Desktop er i bruk når
+// IndexedDB-mappa eller cachen er endret siste to døgn; er likevel ingen importert samtale nyere enn 14 dager, er noe galt
+// (Desktop har trolig flyttet samtalene igjen). Brukes av SessionStart-hooken, vakten og importrapporten. Bare lesing.
+const DAY = 24 * 60 * 60 * 1000
+export function desktopStaleness({ maxDays = 14 } = {}) {
+  let newest = 0
+  for (const [k, v] of Object.entries(importedDesktop())) if (!k.startsWith('share:') && Number(v) > newest) newest = Number(v)
+  const mtime = (p) => { try { return fs.statSync(p).mtimeMs } catch { return 0 } }
+  const active = Math.max(mtime(IDB_DIR), mtime(CACHE_DIR)) > Date.now() - 2 * DAY
+  const days = newest ? Math.floor((Date.now() - newest) / DAY) : null
+  return { newest, days, active, stale: active && newest > 0 && days >= maxDays }
+}
 export function noteImportedDesktop(map) { const s = readState(); s.imported = { ...(s.imported || {}), ...map }; writeState(s) }
 export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex')

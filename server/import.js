@@ -35,7 +35,7 @@ import {
   load, save, upsert, FILES_ROOT, INBOX_DIR, ensureArchive, registerProject, projectOf as registeredProject, claudeProjectHref,
   finishOnboarding, noteImport, importState, S_MAX, SHORT_L, filesMode,
 } from './store.js'
-import { collectDesktop, countDesktopConversations, importedDesktop, noteImportedDesktop, cacheAvailable, CACHE_DIR, desktopFolderGrants } from './desktop.js'   // M17 · 20.10: samtalelageret
+import { collectDesktop, countDesktopConversations, importedDesktop, noteImportedDesktop, cacheAvailable, CACHE_DIR, desktopFolderGrants, desktopStaleness } from './desktop.js'   // M17 · 20.10: samtalelageret + stillhetsvakt
 import { scanFinder, countFinderCandidates, DEFAULT_FOLDERS } from './finder.js'                                                         // M17
 import { CLAUDE_APP_DIR, posix } from './platform.js'                                                                                     // M18: Windows/Linux
 
@@ -84,6 +84,20 @@ export const titleOf = (md, fallback) => {
   return pick.replace(/^#+\s*/, '').replace(/[*_`]/g, '').trim().slice(0, 80) || fallback
 }
 export const firstPara = (md) => flat((String(md || '').split(/\n\s*\n/).map((p) => p.replace(/^#+\s*/, '').trim()).filter((p) => p && !/^[-*|`>]/.test(p))[1] || String(md || '').split(/\n\s*\n/)[0] || ''))
+
+// 20.10.2026: Tua-prat om Tua skal ikke bli atomer — den forurenser søket («brygge»: 5 → 54 treff på seks dager).
+// To former: (1) en samtale som starter med en Tua-kommando (/tua_card brygge, /tua …) er en test av Tua, ikke arbeid;
+// (2) et svar som bare gjengir et Tua-søk eller -kort («Fem treff på «brygge» …», lister med [a_…]-id-er) er et ekko av
+// arkivet, ikke nytt innhold. Begge hoppes over i hooks og importer, og telles som «tua-prat» i rapportene.
+export const isTuaCommand = (s) => /^\s*\/tua(_[a-z_]+)?(\s|$)/i.test(String(s || ''))
+export function isTuaEcho(text) {
+  const t = String(text || '')
+  if (isTuaCommand(t)) return true
+  const head = t.slice(0, 400)
+  if (/(^|\n)\s*[*#>\s]*(\d+|ett|én|en|to|tre|fire|fem|seks|sju|syv|åtte|ni|ti|ingen)\s+treff\s+på\s+«/i.test(head)) return true
+  const ids = (t.match(/\[a_[a-z0-9]{8}_[a-z0-9]{6}\]/g) || []).length
+  return ids >= 2 && t.length < 3000 && /\btreff\b|\bTua\b/.test(head)
+}
 
 // Prosjektnavn for en Code-økt: .tua-sync.json i cwd (eller en forelder) vinner, ellers repo-mappenavnet (worktrees → repoet).
 export const repoRootOf = (cwd) => { const m = String(cwd || '').match(/^(.*)\/\.claude\/worktrees\/[^/]+/); return m ? m[1] : String(cwd || '') }
@@ -220,6 +234,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
       if (project && proj.toLowerCase() !== project.toLowerCase()) { stats.filtrert++; continue }
       if (afterMs && (s.last || 0) < afterMs) { stats.filtrert++; continue }
       if (s.chars < minChars || !s.prompts.length) { stats.korte++; continue }
+      if (isTuaCommand(s.prompts[0])) { stats.tuaprat = (stats.tuaprat || 0) + 1; continue }   // økta er en test av Tua (/tua_card …), ikke arbeid
       const repo = over.repo !== undefined ? over.repo : repoRootOf(s.cwd)
       const links = repo ? [{ kind: 'repo', href: repo, label: `Repo — ${proj}` }] : []
       const header = `# ${s.convo}\n\n_${srcLabel} · ${s.turns} oppgaver · ${iso(s.first)}${s.last && iso(s.last) !== iso(s.first) ? ` – ${iso(s.last)}` : ''} · ${proj}${repo ? ` · ${repo}` : ''} · øktfil ${path.basename(file)}_\n\n`
@@ -258,7 +273,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
     `# ${title}`, '',
     `${srcRoot} · ${list.length} øktfiler · ${new Date().toLocaleString('no-NO')}${dryRun ? ' · **dry-run, ingenting skrevet**' : ''}`, '',
     `- **Økter:** ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret`,
-    `- **Hoppet over:** ${stats.korte} under ${minChars} tegn${stats.filtrert ? ` · ${stats.filtrert} utenfor filter` : ''}`,
+    `- **Hoppet over:** ${stats.korte} under ${minChars} tegn${stats.filtrert ? ` · ${stats.filtrert} utenfor filter` : ''}${stats.tuaprat ? ` · ${stats.tuaprat} Tua-prat om Tua (samtaler som starter med /tua…)` : ''}`,
     `- **Egne atomer:** ${stats.svar} substansielle svar (≥ ${MIN_SVAR} tegn) · ${stats.filer} tekstdokumenter skrevet i øktene${stats.datadump ? ` · ${stats.datadump} data-dumper (mest tall) hoppet over` : ''}`,
     `- **Prosjekter:** ${projLine}`,
     `- **Filter:** ${filters}`,
@@ -573,6 +588,7 @@ export function importParsed(data, {
       if (project && proj.toLowerCase() !== project.toLowerCase()) { stats.filtrert++; continue }
       if (afterMs && (c.updated || 0) < afterMs) { stats.filtrert++; continue }
       if (chars < minChars || !c.messages) { stats.korte++; continue }
+      if (isTuaCommand(c.firstUser)) { stats.tuaprat = (stats.tuaprat || 0) + 1; continue }   // samtalen er en test av Tua (/tua_card …), ikke arbeid
       const isClaude = /^Claude/.test(c.source)
       const links = [c.href ? { kind: /^claude:\/\//.test(c.href) ? 'claude-chat' : 'url', href: c.href, label: `Samtalen i ${c.source}` } : null,
         c.projectUuid && isClaude ? { kind: 'claude-project', href: claudeProjectHref(c.projectUuid), label: `Claude-prosjekt — ${proj}` } : null,
@@ -631,7 +647,7 @@ export function importParsed(data, {
     `# ${reportName || `Import: ${name}`}`, '',
     `${label} · ${data.convs.length} samtaler${f ? ' i fila' : ''} · ${new Date().toLocaleString('no-NO')}${dryRun ? ' · **dry-run, ingenting skrevet**' : ''}`, '',
     `- **Samtaler:** ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret${stats.flyttet ? ` · ${stats.flyttet} flyttet fra «${defaultProject}» til prosjektmappa` : ''}`,
-    `- **Hoppet over:** ${stats.korte} under ${minChars} tegn${stats.filtrert ? ` · ${stats.filtrert} utenfor filter` : ''}`,
+    `- **Hoppet over:** ${stats.korte} under ${minChars} tegn${stats.filtrert ? ` · ${stats.filtrert} utenfor filter` : ''}${stats.tuaprat ? ` · ${stats.tuaprat} Tua-prat om Tua (samtaler som starter med /tua…)` : ''}`,
     `- **Egne atomer:** ${stats.dokumenter} prosjektdokumenter · ${stats.artifacts} artifacts/filer · ${stats.vedlegg} vedlegg${kind === 'claude' && f ? ` · ${stats.minner} Claude-minner (kind minne)` : ''}`,
     kind === 'claude' && data.memoryFiles?.length ? `- **Venter:** ${data.memoryFiles.length} minne-filer (memory_files, markdown-notater Claude har skrevet om deg) — blir atomer i en senere milepæl` : null,
     `- **Prosjekter:** ${projLine}`,
@@ -735,7 +751,11 @@ export function importDesktop({ dryRun = false, project = null, minChars = DEFAU
 // Overvåker: ved start og hvert 10. minutt — alt brukeren åpner i Desktop fanges av seg selv. Aldri skriv til cachen.
 export function watchDesktop({ log = () => {}, everyMs = 10 * 60 * 1000, delayMs = 4000 } = {}) {
   if (ensureArchive().needsChoice || !cacheAvailable()) return () => {}
-  const run = () => { try { const r = importDesktop({ log: () => {} }); if (r.stats.nye || r.stats.oppdatert || r.stats.flyttet) log(`Desktop-cache: ${r.stats.nye} nye · ${r.stats.oppdatert} oppdaterte · ${r.stats.flyttet} flyttet (av ${r.stats.samtaler} i cachen)`) } catch (e) { log(`Desktop-cache: ${e.message}`) } }
+  let warned = 0
+  const run = () => {
+    try { const r = importDesktop({ log: () => {} }); if (r.stats.nye || r.stats.oppdatert || r.stats.flyttet) log(`Desktop-cache: ${r.stats.nye} nye · ${r.stats.oppdatert} oppdaterte · ${r.stats.flyttet} flyttet (av ${r.stats.samtaler} i cachen)`) } catch (e) { log(`Desktop-cache: ${e.message}`) }
+    try { const ds = desktopStaleness(); if (ds.stale && Date.now() - warned > 24 * 60 * 60 * 1000) { warned = Date.now(); log(`VARSEL: Desktop-leseren har ikke sett noen ny samtale på ${ds.days} dager selv om Claude Desktop er i bruk — har Desktop flyttet samtalene igjen? (se STATUS.md «Desktop-leseren»)`) } } catch {}
+  }
   const first = setTimeout(run, delayMs)
   const timer = setInterval(run, everyMs)
   timer.unref?.(); first.unref?.()

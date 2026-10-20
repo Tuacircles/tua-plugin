@@ -30920,6 +30920,21 @@ function countDesktopConversations({ quick = false } = {}) {
   return ids.size;
 }
 var importedDesktop = () => readState().imported || {};
+var DAY = 24 * 60 * 60 * 1e3;
+function desktopStaleness({ maxDays = 14 } = {}) {
+  let newest = 0;
+  for (const [k2, v2] of Object.entries(importedDesktop())) if (!k2.startsWith("share:") && Number(v2) > newest) newest = Number(v2);
+  const mtime = (p2) => {
+    try {
+      return fs6.statSync(p2).mtimeMs;
+    } catch {
+      return 0;
+    }
+  };
+  const active = Math.max(mtime(IDB_DIR), mtime(CACHE_DIR)) > Date.now() - 2 * DAY;
+  const days = newest ? Math.floor((Date.now() - newest) / DAY) : null;
+  return { newest, days, active, stale: active && newest > 0 && days >= maxDays };
+}
 function noteImportedDesktop(map2) {
   const s = readState();
   s.imported = { ...s.imported || {}, ...map2 };
@@ -31376,6 +31391,7 @@ var titleOf = (md, fallback) => {
   return pick2.replace(/^#+\s*/, "").replace(/[*_`]/g, "").trim().slice(0, 80) || fallback;
 };
 var firstPara = (md) => flat2(String(md || "").split(/\n\s*\n/).map((p2) => p2.replace(/^#+\s*/, "").trim()).filter((p2) => p2 && !/^[-*|`>]/.test(p2))[1] || String(md || "").split(/\n\s*\n/)[0] || "");
+var isTuaCommand = (s) => /^\s*\/tua(_[a-z_]+)?(\s|$)/i.test(String(s || ""));
 var repoRootOf = (cwd) => {
   const m2 = String(cwd || "").match(/^(.*)\/\.claude\/worktrees\/[^/]+/);
   return m2 ? m2[1] : String(cwd || "");
@@ -31569,6 +31585,10 @@ function importCode({ files = null, source = "code", dryRun = false, project = n
         stats2.korte++;
         continue;
       }
+      if (isTuaCommand(s.prompts[0])) {
+        stats2.tuaprat = (stats2.tuaprat || 0) + 1;
+        continue;
+      }
       const repo = over.repo !== void 0 ? over.repo : repoRootOf(s.cwd);
       const links = repo ? [{ kind: "repo", href: repo, label: `Repo \u2014 ${proj}` }] : [];
       const header = `# ${s.convo}
@@ -31654,7 +31674,7 @@ _${srcLabel} \xB7 ${s.turns} oppgaver \xB7 ${iso2(s.first)}${s.last && iso2(s.la
     `${srcRoot} \xB7 ${list.length} \xF8ktfiler \xB7 ${(/* @__PURE__ */ new Date()).toLocaleString("no-NO")}${dryRun ? " \xB7 **dry-run, ingenting skrevet**" : ""}`,
     "",
     `- **\xD8kter:** ${stats2.nye} nye \xB7 ${stats2.oppdatert} oppdatert \xB7 ${stats2.uendret} uendret`,
-    `- **Hoppet over:** ${stats2.korte} under ${minChars} tegn${stats2.filtrert ? ` \xB7 ${stats2.filtrert} utenfor filter` : ""}`,
+    `- **Hoppet over:** ${stats2.korte} under ${minChars} tegn${stats2.filtrert ? ` \xB7 ${stats2.filtrert} utenfor filter` : ""}${stats2.tuaprat ? ` \xB7 ${stats2.tuaprat} Tua-prat om Tua (samtaler som starter med /tua\u2026)` : ""}`,
     `- **Egne atomer:** ${stats2.svar} substansielle svar (\u2265 ${MIN_SVAR} tegn) \xB7 ${stats2.filer} tekstdokumenter skrevet i \xF8ktene${stats2.datadump ? ` \xB7 ${stats2.datadump} data-dumper (mest tall) hoppet over` : ""}`,
     `- **Prosjekter:** ${projLine}`,
     `- **Filter:** ${filters}`,
@@ -32083,6 +32103,10 @@ function importParsed(data, {
         stats2.korte++;
         continue;
       }
+      if (isTuaCommand(c.firstUser)) {
+        stats2.tuaprat = (stats2.tuaprat || 0) + 1;
+        continue;
+      }
       const isClaude = /^Claude/.test(c.source);
       const links = [
         c.href ? { kind: /^claude:\/\//.test(c.href) ? "claude-chat" : "url", href: c.href, label: `Samtalen i ${c.source}` } : null,
@@ -32190,7 +32214,7 @@ _${c.source} \xB7 ${c.messages} meldinger \xB7 ${iso2(c.created)}${c.updated && 
     `${label} \xB7 ${data.convs.length} samtaler${f2 ? " i fila" : ""} \xB7 ${(/* @__PURE__ */ new Date()).toLocaleString("no-NO")}${dryRun ? " \xB7 **dry-run, ingenting skrevet**" : ""}`,
     "",
     `- **Samtaler:** ${stats2.nye} nye \xB7 ${stats2.oppdatert} oppdatert \xB7 ${stats2.uendret} uendret${stats2.flyttet ? ` \xB7 ${stats2.flyttet} flyttet fra \xAB${defaultProject}\xBB til prosjektmappa` : ""}`,
-    `- **Hoppet over:** ${stats2.korte} under ${minChars} tegn${stats2.filtrert ? ` \xB7 ${stats2.filtrert} utenfor filter` : ""}`,
+    `- **Hoppet over:** ${stats2.korte} under ${minChars} tegn${stats2.filtrert ? ` \xB7 ${stats2.filtrert} utenfor filter` : ""}${stats2.tuaprat ? ` \xB7 ${stats2.tuaprat} Tua-prat om Tua (samtaler som starter med /tua\u2026)` : ""}`,
     `- **Egne atomer:** ${stats2.dokumenter} prosjektdokumenter \xB7 ${stats2.artifacts} artifacts/filer \xB7 ${stats2.vedlegg} vedlegg${kind === "claude" && f2 ? ` \xB7 ${stats2.minner} Claude-minner (kind minne)` : ""}`,
     kind === "claude" && data.memoryFiles?.length ? `- **Venter:** ${data.memoryFiles.length} minne-filer (memory_files, markdown-notater Claude har skrevet om deg) \u2014 blir atomer i en senere milep\xE6l` : null,
     `- **Prosjekter:** ${projLine}`,
@@ -32332,6 +32356,7 @@ function watchDesktop({ log = () => {
 }, everyMs = 10 * 60 * 1e3, delayMs = 4e3 } = {}) {
   if (ensureArchive().needsChoice || !cacheAvailable()) return () => {
   };
+  let warned = 0;
   const run2 = () => {
     try {
       const r2 = importDesktop({ log: () => {
@@ -32339,6 +32364,14 @@ function watchDesktop({ log = () => {
       if (r2.stats.nye || r2.stats.oppdatert || r2.stats.flyttet) log(`Desktop-cache: ${r2.stats.nye} nye \xB7 ${r2.stats.oppdatert} oppdaterte \xB7 ${r2.stats.flyttet} flyttet (av ${r2.stats.samtaler} i cachen)`);
     } catch (e) {
       log(`Desktop-cache: ${e.message}`);
+    }
+    try {
+      const ds = desktopStaleness();
+      if (ds.stale && Date.now() - warned > 24 * 60 * 60 * 1e3) {
+        warned = Date.now();
+        log(`VARSEL: Desktop-leseren har ikke sett noen ny samtale p\xE5 ${ds.days} dager selv om Claude Desktop er i bruk \u2014 har Desktop flyttet samtalene igjen? (se STATUS.md \xABDesktop-leseren\xBB)`);
+      }
+    } catch {
     }
   };
   const first3 = setTimeout(run2, delayMs);

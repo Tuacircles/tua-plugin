@@ -31,6 +31,7 @@ if (!process.env.TUA_FILES_ROOT && arkivmappe) process.env.TUA_FILES_ROOT = path
 if (!process.env.TUA_DATA_DIR && process.env.CLAUDE_PLUGIN_DATA) process.env.TUA_DATA_DIR = path.join(process.env.CLAUDE_PLUGIN_DATA, 'data')
 const store = await import(mod('store.js'))
 const imp = await import(mod('import.js'))
+const desk = await import(mod('desktop.js'))
 const { posix, insideTmp } = await import(mod('platform.js'))
 const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState } = store
 const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts } = imp
@@ -86,6 +87,8 @@ try {
     const lastDesk = st.desktop?.at || 0, daysDesk = lastDesk ? Math.floor((Date.now() - lastDesk) / DAYS) : null
     if (hc?.desktopNew && (daysDesk === null || daysDesk >= 7)) parts.push(`${hc.desktopNew} Desktop-samtale${hc.desktopNew === 1 ? '' : 'r'} i Claude Desktops cache er ikke tatt med — tua_import(kilde=desktop); leses ellers av seg selv når serveren kjører`)
     if (hc?.dokumenter && !st.finder) parts.push(`${hc.dokumenter} dokument${hc.dokumenter === 1 ? '' : 'er'} med AI-opphav i Nedlastinger/Dokumenter/Skrivebord er ikke i Tua — tua_import(kilde=finder)`)
+    // 20.10: stillhetsvakt — leseren var blind fra 15.09 til 20.10 uten at noen merket det. Desktop i bruk, men ingen ny samtale sett på 14 dager → si fra.
+    try { const ds = desk.desktopStaleness(); if (ds.stale) parts.push(`VARSEL: Desktop-leseren har ikke sett noen ny samtale på ${ds.days} dager selv om Claude Desktop er i bruk — Desktop kan ha flyttet samtalene igjen (som 15.09.2026, se STATUS.md «Desktop-leseren»). Si det til brukeren`) } catch {}
     // M24: aldri importert → pek på /tua_start (alt inn + automatikken på). Et git-repo uten .tua-sync.json → tilby /tua_auto,
     // én gang per repo per 30 dager (husket i <arkiv>/.tua/auto-tilbudt.json). Begge er tilbud; ingenting kjøres uten ja.
     const extra = []
@@ -99,6 +102,7 @@ try {
     const msg = String(input.last_assistant_message || '').trim()
     if (msg.length < MIN_SVAR) { log({ skipped: 'kort', len: msg.length }); process.exit(0) }
     if (isDataDump(msg)) { log({ skipped: 'data-dump', len: msg.length }); process.exit(0) }
+    if (imp.isTuaEcho(msg)) { log({ skipped: 'tua-ekko', len: msg.length }); process.exit(0) }   // 20.10: et svar som bare gjengir et Tua-søk/-kort er ikke nytt innhold
     const atoms = load()
     const sha = crypto.createHash('sha1').update(msg).digest('hex').slice(0, 8)
     const { atom, status } = upsert(atoms, {
