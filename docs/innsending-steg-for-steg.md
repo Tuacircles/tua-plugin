@@ -221,7 +221,7 @@ cd /Users/bruker/Documents/Claude/Projects/tua && git branch -D tua-plugin-expor
 
 3. Med tag-styring: `git tag v0.5.0 tua-plugin-export && git push tua-plugin v0.5.0`, og flytt portalen til den nye taggen.
 
-**0.4.1 (forberedt 19.10.2026, ikke pushet):** versjon hevet i de tre filene, `CHANGELOG.md` har avsnittet, testene er grønne. Push skjer først når Erik sier ja, med kommandoen i punkt 2 og deretter `git tag v0.4.1 tua-plugin-export && git push tua-plugin v0.4.1`. Den innsendte versjonen (`main @ e946abb`) står i ro til da.
+**0.4.1 → 0.5.0 (pushet 20.10.2026):** 0.4.1-forberedelsene ble aldri pushet for seg; de ble flettet inn i main sammen med M24 (skills `/tua_start` og `/tua_status`) og pushet som 0.5.0 med kommandoen i punkt 2 og `git tag v0.5.0 tua-plugin-export && git push tua-plugin v0.5.0`. Portalen peker fortsatt på den innsendte versjonen (`main @ e946abb`) til Erik flytter den til `v0.5.0`.
 
 ---
 
