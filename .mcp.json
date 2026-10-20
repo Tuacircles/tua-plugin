@@ -2,7 +2,7 @@
   "mcpServers": {
     "tua": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/server/server.js"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/tua-server.bundle.mjs"],
       "env": {
         "TUA_DATA_DIR": "${CLAUDE_PLUGIN_DATA}/data"
       }

@@ -30,8 +30,10 @@ let htmlCache = null
 export function kortHtml() {
   if (htmlCache && !process.env.TUA_APPS_DEV) return htmlCache
   const tpl = fs.readFileSync(path.join(HERE, 'apps', 'kort.html'), 'utf8')
-  // M18: avhengighetene ligger i plugin-rota (../node_modules), ikke ved siden av serveren — finn bunten via Node selv
-  let bundle = fs.readFileSync(fileURLToPath(import.meta.resolve('@modelcontextprotocol/ext-apps/app-with-deps')), 'utf8')
+  // 0.5.3: kortets klientbibliotek ligger ved siden av malen (apps/app-with-deps.js, lagt dit av bygg.mjs), så kortet virker
+  // også når pluginen kjører uten node_modules (konto-pluginen fra katalogen). Finnes ikke kopien, hentes fila fra node_modules (dev).
+  const vendored = path.join(HERE, 'apps', 'app-with-deps.js')
+  let bundle = fs.existsSync(vendored) ? fs.readFileSync(vendored, 'utf8') : fs.readFileSync(fileURLToPath(import.meta.resolve('@modelcontextprotocol/ext-apps/app-with-deps')), 'utf8')
   const m = bundle.match(/export\s*\{([^}]*)\};?\s*$/)
   if (!m) throw new Error('fant ikke export-lista i app-with-deps.js')
   const appName = (m[1].match(/(\w+)\s+as\s+App\b/) || [])[1] || 'App'

@@ -2,6 +2,13 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.3 — 2026-10-20 (the server ships as one file — no install step anywhere)
+
+- **Why.** Claude Desktop downloads an account-enabled plugin from the directory as a plain copy of the repository and never runs `npm install`. With 0.5.0–0.5.2 the server crashed there with `Cannot find package '@modelcontextprotocol/sdk'` — in Cowork and in Claude Code sessions started from Desktop, where the account plugin shadows a locally installed copy of the same name. The 0.5.1 fix (no `${user_config}` in `.mcp.json`) was necessary but not sufficient.
+- **The server is bundled.** `node bygg.mjs` (esbuild) writes `server/tua-server.bundle.mjs` (~1.2 MB: server + `@modelcontextprotocol/sdk`, `ext-apps`, `zod`) and copies the card's client library to `server/apps/app-with-deps.js`. `.mcp.json` and the `.mcpb` manifest point at the bundle; `server/*.js` remains the source for development, tests, hooks and the command-line tools (none of which need an external package). `apps.js` reads the vendored client library when present, else `node_modules` (dev).
+- **Proof.** New test `bundle` in `test-platform.mjs` copies the plugin without `node_modules` and talks real MCP to the bundle: initialize, 11 tools, `ui://tua/kort` with the client library inlined, `tua_save` and `tua_search`. It also fails if the bundle is older than `server/*.js` or carries another version than `plugin.json`.
+- **Rule.** Run `node bygg.mjs` after every change in `server/`, before commit and push.
+
 ## 0.5.2 — 2026-10-20 (two fixes found on 14 October that never reached main)
 
 Both were made and tested in the M14 session on 14 October but stayed uncommitted in that session's worktree; recovered 20 October.

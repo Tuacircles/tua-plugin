@@ -33,6 +33,8 @@ if (!mode) {
     ['hook-konfig', { TUA_HOME: path.join(scratch, 'konfighome'), TUA_DATA_DIR: path.join(scratch, 'konfig-data'), CLAUDE_PLUGIN_OPTION_ARKIVMAPPE: path.join(scratch, 'konfigarkiv'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'true' }],
     // 0.5.2: fil slettet i Finder kommer ikke tilbake fra indeks-cachen; data-dumper (mest tall) blir ikke atomer i hooken
     ['finder-slett', { TUA_HOME: path.join(scratch, 'sletthome'), TUA_FILES_ROOT: path.join(scratch, 'slettarkiv'), TUA_DATA_DIR: path.join(scratch, 'slett-data'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'true', TUA_HOOK_ALLOW_TMP: '1' }],
+    // 0.5.3: bundelen (server/tua-server.bundle.mjs) kjører fra en kopi av pluginen UTEN node_modules — slik katalogen/Desktop leverer den
+    ['bundle', { TUA_HOME: path.join(scratch, 'bundlehome'), TUA_FILES_ROOT: path.join(scratch, 'bundlearkiv'), TUA_DATA_DIR: path.join(scratch, 'bundle-data'), TUA_OPEN_DRYRUN: '1' }],
   ]
   let failed = 0
   for (const [name, env] of cases) {
@@ -242,4 +244,32 @@ if (mode === 'finder-slett') {
   assert.deepEqual(log.map((l) => l.skipped), ['data-dump', 'data-dump'], 'begge hookene skal hoppe over data-dumpen: ' + JSON.stringify(log))
   assert.equal(S.load().filter((a) => a.key !== 'velkommen').length, 0, 'ingen atomer av data-dumpene')
   say('fil slettet i Finder kom ikke tilbake · data-dump hoppet over i svar- og fil-hooken')
+}
+
+if (mode === 'bundle') {
+  // Kopi av pluginen uten node_modules (rsync-fri: kopier alt unntatt node_modules/dist/server/data), så bundelen over ekte MCP/stdio.
+  const root = path.join(HERE, '..')
+  const bundle = path.join(HERE, 'tua-server.bundle.mjs'), vendored = path.join(HERE, 'apps', 'app-with-deps.js')
+  assert.ok(fs.existsSync(bundle) && fs.existsSync(vendored), 'bundelen mangler — kjør node bygg.mjs')
+  // ferskhet: bundelen må være nyere enn kildefilene den er bygd av (ellers er den glemt etter en endring i server/)
+  const newest = fs.readdirSync(HERE).filter((f) => /\.js$/.test(f) && !/^test-/.test(f)).map((f) => fs.statSync(path.join(HERE, f)).mtimeMs).reduce((a, b) => Math.max(a, b), 0)
+  assert.ok(fs.statSync(bundle).mtimeMs >= newest - 1000, 'bundelen er eldre enn server/*.js — kjør node bygg.mjs før commit')
+  const version = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8')).version
+  const copy = path.join(home, 'plugin-uten-node_modules')
+  const skip = (p) => /(^|\/)(node_modules|dist|data)$/.test(p)
+  const copyDir = (from, to) => { fs.mkdirSync(to, { recursive: true }); for (const e of fs.readdirSync(from, { withFileTypes: true })) { const f = path.join(from, e.name), t = path.join(to, e.name); if (skip(f)) continue; e.isDirectory() ? copyDir(f, t) : fs.copyFileSync(f, t) } }
+  copyDir(root, copy)
+  assert.ok(!fs.existsSync(path.join(copy, 'node_modules')), 'kopien skal ikke ha node_modules')
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
+  const client = new Client({ name: 'bundle-test', version: '0' })
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.join(copy, 'server', 'tua-server.bundle.mjs')], env: { ...process.env }, stderr: 'pipe' }))
+  const sv = client.getServerVersion(); assert.equal(sv.version, version, `bundelen sier ${sv.version}, plugin.json ${version} — kjør node bygg.mjs`)
+  const tools = (await client.listTools()).tools; assert.ok(tools.length >= 11, 'alle verktøyene skal finnes i bundelen')
+  const kort = await client.readResource({ uri: 'ui://tua/kort' }); assert.ok(String(kort.contents[0].text).includes('window.McpApps'), 'kortet skal ha klientbiblioteket inlinet uten node_modules')
+  const saved = await client.callTool({ name: 'tua_save', arguments: { content: 'Atom lagret gjennom bundelen uten node_modules.', short: 'Bundel-atom', project: 'Test', convo: 'bundle-test' } })
+  assert.ok(/Lagret/.test(saved.content[0].text), saved.content[0].text)
+  const found = await client.callTool({ name: 'tua_search', arguments: { query: 'bundelen' } }); assert.ok(/Bundel-atom|bundelen/.test(found.content[0].text), found.content[0].text)
+  await client.close()
+  say(`bundelen ${version} svarte uten node_modules: ${tools.length} verktøy · kortet med klientbibliotek · lagret og søkte`)
 }

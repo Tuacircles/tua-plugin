@@ -925,7 +925,8 @@ export function watchInbox({ log = () => {} } = {}) {
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Kommandolinje — ikke når fila er buntet inn i serveren (server/tua-server.bundle.mjs setter __TUA_BUNDLE; der er import.meta.url bundelen selv)
+if (!globalThis.__TUA_BUNDLE && process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2)
   const flag = (f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : null }
   const opts = { dryRun: args.includes('--dry-run'), project: flag('--project'), minChars: Number(flag('--min-tegn')) || DEFAULT_MIN, after: flag('--etter'), log: (m) => console.error(m) }

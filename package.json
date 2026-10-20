@@ -1,13 +1,18 @@
 {
   "name": "tua-plugin",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "type": "module",
   "description": "Tua — the local-first archive for everything you make with AI. Claude plugin: MCP server, skills and hooks. Every atom is a markdown file in your own folder; nothing leaves your machine.",
   "license": "AGPL-3.0-only",
   "author": "Tua Circles Holding AS <tech@tuacircles.com> (https://tuacircles.com)",
-  "repository": { "type": "git", "url": "https://github.com/tuacircles/tua-plugin" },
-  "engines": { "node": ">=22.15" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tuacircles/tua-plugin"
+  },
+  "engines": {
+    "node": ">=22.15"
+  },
   "scripts": {
     "start": "node server/server.js",
     "bridge": "node server/bridge.js",
@@ -15,7 +20,8 @@
     "kart": "npm run build:kart && node server/bridge.js",
     "test": "node server/test-client.js",
     "test:platform": "node server/test-platform.mjs",
-    "pakk": "node pakk.mjs"
+    "pakk": "node pakk.mjs",
+    "bygg": "node bygg.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.7.5",
