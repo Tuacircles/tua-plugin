@@ -216,7 +216,8 @@ Valg gjort i portalen: listet på **Claude Code og Cowork** (ikke «Claude apps�
 2. Lag grenen på nytt og push:
 
 ```bash
-cd /Users/bruker/Documents/Claude/Projects/tua && git branch -D tua-plugin-export && git subtree split --prefix=tua-plugin -b tua-plugin-export && git push tua-plugin tua-plugin-export:main
+cd /Users/bruker/Documents/Claude/Projects/tua && cd tua-plugin && node bygg.mjs && cd .. && git status --short   # bundelen må være bygd og committet først (0.5.3) — se CHANGELOG
+git branch -D tua-plugin-export && git subtree split --prefix=tua-plugin -b tua-plugin-export && git push tua-plugin tua-plugin-export:main
 ```
 
 3. Med tag-styring: `git tag v0.5.0 tua-plugin-export && git push tua-plugin v0.5.0`, og flytt portalen til den nye taggen.
