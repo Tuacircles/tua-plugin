@@ -141,7 +141,8 @@ const open = async (target, atom) => {
   try {
     const canLink = !!app.getHostCapabilities?.()?.openLinks
     if (canLink && target === 'kart' && atom.address) return await app.openLink({ url: atom.address })
-    if (canLink && target === 'claude' && atom.claudeProject) { try { return await app.openLink({ url: atom.claudeProject }) } catch {} }
+    // «claude» går alltid via serveren: vertens openLink sier «ok» for claude://-adresser uten å åpne noe
+    // (sett i Code-fanen 20.10.2026), så tua_open åpner Desktop-prosjektet lokalt med `open` i stedet.
     const r = await app.callServerTool({ name: 'tua_open', arguments: { id: atom.id, target } })
     if (r?.isError) root.append(el('p', { class: 'err' }, (r.content || []).map((c) => c.text).filter(Boolean).join(' ') || 'Kunne ikke åpne.'))
   } catch (e) { root.append(el('p', { class: 'err' }, 'Kunne ikke åpne: ' + (e?.message || e))) }
