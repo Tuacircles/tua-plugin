@@ -162,10 +162,9 @@ export function load() {
       atoms.push(a)
     } catch { /* ulesbar fil — hopp over, slett aldri */ }
   }
-  // Sikkerhetsnett: atomer som bare finnes i indeksen (skrevet av en prosess med
-  // gammel kode, eller før mappa fantes) tas med, så neste save() gjør dem til filer.
-  const have = new Set(atoms.map((a) => a.id))
-  for (const c of loadCache()) if (c && c.id && !have.has(c.id)) atoms.push(c)
+  // Mappa er sannheten — også for sletting (V9/V12: «rydding skjer i Finder»). Det gamle sikkerhetsnettet som la inn igjen
+  // atomer fra indeks-cachen (atoms.json) når fila manglet, gjenopprettet filer brukeren nettopp hadde slettet i Finder.
+  // Fjernet (funnet 14.10.2026 i M14-økta, kom først til main i 0.5.2). Cachen brukes nå bare når mappa ikke finnes (annen maskin).
   return atoms
 }
 

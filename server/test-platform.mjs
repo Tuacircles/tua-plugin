@@ -31,6 +31,8 @@ if (!mode) {
     ['hook-av', { TUA_HOME: path.join(scratch, 'avhome'), TUA_FILES_ROOT: path.join(scratch, 'avarkiv'), TUA_DATA_DIR: path.join(scratch, 'av-data'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'false', TUA_HOOK_ALLOW_TMP: '1' }],
     // 0.5.1: innstillingen «arkivmappe» når bare hooken; start-modus skriver den til ~/.tua/config.json så serveren finner arkivet uten TUA_FILES_ROOT
     ['hook-konfig', { TUA_HOME: path.join(scratch, 'konfighome'), TUA_DATA_DIR: path.join(scratch, 'konfig-data'), CLAUDE_PLUGIN_OPTION_ARKIVMAPPE: path.join(scratch, 'konfigarkiv'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'true' }],
+    // 0.5.2: fil slettet i Finder kommer ikke tilbake fra indeks-cachen; data-dumper (mest tall) blir ikke atomer i hooken
+    ['finder-slett', { TUA_HOME: path.join(scratch, 'sletthome'), TUA_FILES_ROOT: path.join(scratch, 'slettarkiv'), TUA_DATA_DIR: path.join(scratch, 'slett-data'), CLAUDE_PLUGIN_OPTION_AUTO_LAGRING: 'true', TUA_HOOK_ALLOW_TMP: '1' }],
   ]
   let failed = 0
   for (const [name, env] of cases) {
@@ -210,4 +212,34 @@ if (mode === 'hook-konfig') {
   assert.equal(JSON.parse(fs.readFileSync(configFile, 'utf8')).root, arkiv, 'tom innstilling skal ikke overskrive valget')
   assert.equal(logs().filter((l) => l.arkivmappe).length, 1, 'uendret innstilling skal ikke skrives igjen')
   say('arkivmappe → config.json · server fant arkivet uten TUA_FILES_ROOT · rå ${…} i TUA_DATA_DIR ignorert · tom innstilling rørte ikke valget')
+}
+
+if (mode === 'finder-slett') {
+  // (1) Et atom lagres → fila finnes og indeks-cachen (atoms.json) kjenner den. Brukeren sletter fila i Finder → load() tar den
+  // ikke med igjen fra cachen, og neste save() skriver den ikke tilbake. (2) Stop- og Write-hooken hopper over data-dumper.
+  const S = await imp('store.js'); S.chooseArchive(process.env.TUA_FILES_ROOT)
+  let atoms = S.load()
+  const { atom } = S.upsert(atoms, { key: 'slett:test', name: 'Skal slettes i Finder', content: 'Et notat som brukeren etterpå sletter i Finder. '.repeat(10), project: 'Test', convo: 'test', source: 'Tua', by: 'regel', short: 'Slettes' })
+  S.save(atoms)
+  const fil = S.fileOf ? S.fileOf(atom) : null
+  const found = fil || (() => { const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? (e.name === '.tua' ? [] : walk(path.join(d, e.name))) : [path.join(d, e.name)]); return walk(process.env.TUA_FILES_ROOT).find((f) => f.endsWith('.md') && fs.readFileSync(f, 'utf8').includes('Skal slettes i Finder')) })()
+  assert.ok(found && fs.existsSync(found), 'atomet skal ligge som fil')
+  assert.ok(S.loadCache().some((a) => a.id === atom.id), 'indeks-cachen skal kjenne atomet')
+  fs.unlinkSync(found)                                                     // «slett i Finder»
+  atoms = S.load()
+  assert.ok(!atoms.some((a) => a.id === atom.id), 'slettet fil skal ikke komme tilbake fra cachen i load()')
+  S.save(atoms)
+  assert.ok(!fs.existsSync(found), 'save() skal ikke skrive den slettede fila tilbake')
+  // data-dump i hooken
+  const hook = path.join(HERE, '..', 'hooks', 'tua-hook.mjs')
+  const run = (m, input) => spawnSync(process.execPath, [hook, m], { input: JSON.stringify(input), encoding: 'utf8', env: process.env })
+  const dump = Array.from({ length: 150 }, (_, i) => `1002${7245 + i}·${450000 - i * 1000} 1005${9885 + i}·${140000 + i * 10}`).join('\n')
+  assert.ok(dump.length >= 4000, 'dumpen må være lengre enn MIN_SVAR, ellers testes «kort», ikke «data-dump»')
+  assert.equal(run('svar', { cwd: home, session_id: 'dump0001', last_assistant_message: dump }).status, 0)
+  const doc = path.join(home, 'tall.md'); fs.writeFileSync(doc, dump)
+  assert.equal(run('fil', { cwd: home, session_id: 'dump0001', tool_name: 'Write', tool_input: { file_path: doc } }).status, 0)
+  const log = fs.readFileSync(path.join(process.env.TUA_FILES_ROOT, '.tua', 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  assert.deepEqual(log.map((l) => l.skipped), ['data-dump', 'data-dump'], 'begge hookene skal hoppe over data-dumpen: ' + JSON.stringify(log))
+  assert.equal(S.load().filter((a) => a.key !== 'velkommen').length, 0, 'ingen atomer av data-dumpene')
+  say('fil slettet i Finder kom ikke tilbake · data-dump hoppet over i svar- og fil-hooken')
 }

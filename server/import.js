@@ -60,7 +60,29 @@ const stem = (f) => String(f || '').replace(/\.(md|markdown|txt|pdf|docx?|csv|js
 const sha8 = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 } return h.toString(16).padStart(8, '0') }
 // S etter regel: «Tittel: første brukermelding» innenfor 300 tegn
 export const ruleS = (title, firstUser) => clip(flat(title ? `${title}: ${firstUser}` : firstUser) || flat(title), S_MAX)
-export const titleOf = (md, fallback) => (String(md || '').split('\n').find((l) => l.trim()) || fallback).replace(/^#+\s*/, '').replace(/[*_`]/g, '').trim().slice(0, 80) || fallback
+// Datalinjer: nesten bare tall og skilletegn («10027245·450000 10059885·140000», tabellrader med id/pris). En tittel tas fra
+// første linje med bokstaver, og et svar/dokument som i hovedsak består av datalinjer (≥ 60 %) regnes som en data-dump og
+// blir ikke eget atom — innholdet står uansett i samtalens transkript. Regelen gjelder bare auto-fangst (svar, filer), ikke samtaler.
+const letters = (s) => (String(s).match(/\p{L}/gu) || []).length
+// Et «data-ord» er et ord med siffer i: tall («450000», «14.10.2026»), id-er («1118489862») og koder («1smm.2j1s»).
+// En datalinje har minst to data-ord og minst halvparten data-ord — «1118489862·Plot·4000·370000·Apollonio» er data,
+// «Møte 14.10.2026 kl 09:00 med Vecchi om tomta» er tekst.
+const toks = (s) => String(s).trim().split(/[\s·|;,]+/).filter(Boolean)
+const dataWords = (ts) => ts.filter((t) => /\d/.test(t)).length
+export const isDataLine = (l) => { const ts = toks(l); const n = dataWords(ts); return n >= 2 && n / ts.length >= 0.5 }
+// En data-dump: minst 60 % datalinjer — eller, for tekst på én–to linjer (én lang rekke med id-er), minst halvparten data-ord og minst åtte av dem.
+export const isDataDump = (text) => {
+  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 80)
+  if (lines.length >= 3) return lines.filter(isDataLine).length / lines.length >= 0.6
+  const ts = toks(text); const n = dataWords(ts)
+  return n >= 8 && n / ts.length >= 0.5
+}
+// Tittel: første linje som er tekst (ikke datalinje, minst tre bokstaver); finnes ingen, brukes reserven («Svar i …»), aldri en tallrekke.
+export const titleOf = (md, fallback) => {
+  const lines = String(md || '').split('\n').map((l) => l.trim()).filter(Boolean)
+  const pick = lines.find((l) => !isDataLine(l) && letters(l) >= 3) || fallback
+  return pick.replace(/^#+\s*/, '').replace(/[*_`]/g, '').trim().slice(0, 80) || fallback
+}
 export const firstPara = (md) => flat((String(md || '').split(/\n\s*\n/).map((p) => p.replace(/^#+\s*/, '').trim()).filter((p) => p && !/^[-*|`>]/.test(p))[1] || String(md || '').split(/\n\s*\n/)[0] || ''))
 
 // Prosjektnavn for en Code-økt: .tua-sync.json i cwd (eller en forelder) vinner, ellers repo-mappenavnet (worktrees → repoet).
@@ -175,7 +197,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
   const srcLabel = source === 'cowork' ? 'Claude Cowork' : 'Claude Code'
   const srcRoot = source === 'cowork' ? COWORK_ROOT : CODE_PROJECTS
   const atoms = load()
-  const stats = { økter: list.length, nye: 0, oppdatert: 0, uendret: 0, korte: 0, filtrert: 0, svar: 0, filer: 0, feil: 0 }
+  const stats = { økter: list.length, nye: 0, oppdatert: 0, uendret: 0, korte: 0, filtrert: 0, svar: 0, filer: 0, datadump: 0, feil: 0 }
   const perProject = {}
   const afterMs = after ? Date.parse(after) : null
   const put = (data, when) => {
@@ -208,6 +230,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
       count(status); perProject[proj] = (perProject[proj] || 0) + 1
       const derived = [{ id: atom.id, version: atom.version || 1, level: 'L' }]
       for (const a of s.answers) {
+        if (isDataDump(a)) { stats.datadump++; continue }
         const r = put({
           key: `svar:${s.id.slice(0, 8)}:${sha8(a)}`, kind: 'capture', name: titleOf(a, `Svar i ${s.convo}`), content: a, project: proj, convo: s.convo, source: 'Claude', by: 'regel',
           tags: ['svar', 'auto'], links, derivedFrom: derived, short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i Code-økta «${s.convo}».`,
@@ -218,6 +241,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
         const fq = posix(fp)
         if (!TEXT_FILE.test(fq) || /\/(node_modules|\.tua|\.git)\//.test(fq) || /\/\.claude\/(?!worktrees\/)/.test(fq) || /\/CLAUDE\.md$/.test(fq) || content.trim().length < SHORT_L) continue   // samme filter som hooken: ikke Claude-oppsett/minne
         if (filesMode() && !path.relative(FILES_ROOT, fp).startsWith('..')) continue                 // fila ligger i arkivet selv
+        if (isDataDump(content)) { stats.datadump++; continue }
         const r = put({
           key: `fil:${fp}`, kind: 'capture', name: titleOf(content, path.basename(fp, path.extname(fp))), content, project: proj, convo: s.convo, source: 'Claude', by: 'regel',
           tags: ['dokument', 'auto'], links: [{ kind: 'file', href: fp }, ...links], derivedFrom: derived, short: clip(firstPara(content), S_MAX),
@@ -235,7 +259,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
     `${srcRoot} · ${list.length} øktfiler · ${new Date().toLocaleString('no-NO')}${dryRun ? ' · **dry-run, ingenting skrevet**' : ''}`, '',
     `- **Økter:** ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret`,
     `- **Hoppet over:** ${stats.korte} under ${minChars} tegn${stats.filtrert ? ` · ${stats.filtrert} utenfor filter` : ''}`,
-    `- **Egne atomer:** ${stats.svar} substansielle svar (≥ ${MIN_SVAR} tegn) · ${stats.filer} tekstdokumenter skrevet i øktene`,
+    `- **Egne atomer:** ${stats.svar} substansielle svar (≥ ${MIN_SVAR} tegn) · ${stats.filer} tekstdokumenter skrevet i øktene${stats.datadump ? ` · ${stats.datadump} data-dumper (mest tall) hoppet over` : ''}`,
     `- **Prosjekter:** ${projLine}`,
     `- **Filter:** ${filters}`,
     stats.feil ? `- **Feil:** ${stats.feil} (se loggen)` : null, '',

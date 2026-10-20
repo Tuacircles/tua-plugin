@@ -1,7 +1,7 @@
 {
   "name": "tua",
   "displayName": "Tua",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Tua is the local-first archive for everything you make with AI: save with provenance, find it again across projects (S/M/L levels), bring in your history from Claude Code, Cowork and Claude Desktop without exports. Every atom is a markdown file in your own folder — no server, no account, nothing leaves your machine. Norwegian-language product.",
   "author": { "name": "Tua Circles Holding AS", "email": "tech@tuacircles.com", "url": "https://tuacircles.com" },
   "homepage": "https://github.com/tuacircles/tua-plugin#readme",

@@ -33,7 +33,7 @@ const store = await import(mod('store.js'))
 const imp = await import(mod('import.js'))
 const { posix, insideTmp } = await import(mod('platform.js'))
 const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState } = store
-const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts } = imp
+const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts } = imp
 
 // 0.5.1: innstillingen «arkivmappe» → ~/.tua/config.json, samme fil og samme skrivemåte som tua_setup (store.chooseArchive),
 // så serveren finner arkivet uten TUA_FILES_ROOT — også i Cowork, der innstillingen aldri når serveren. Bare når innstillingen
@@ -98,6 +98,7 @@ try {
   } else if (mode === 'svar') {
     const msg = String(input.last_assistant_message || '').trim()
     if (msg.length < MIN_SVAR) { log({ skipped: 'kort', len: msg.length }); process.exit(0) }
+    if (isDataDump(msg)) { log({ skipped: 'data-dump', len: msg.length }); process.exit(0) }
     const atoms = load()
     const sha = crypto.createHash('sha1').update(msg).digest('hex').slice(0, 8)
     const { atom, status } = upsert(atoms, {
@@ -114,6 +115,7 @@ try {
     let content = ''
     try { content = fs.readFileSync(fp, 'utf8') } catch { process.exit(0) }
     if (content.trim().length < SHORT_L) { log({ skipped: 'kort', file: fp }); process.exit(0) }
+    if (isDataDump(content)) { log({ skipped: 'data-dump', file: fp }); process.exit(0) }
     const atoms = load()
     const old = atoms.find((a) => a.key === `fil:${fp}`)
     const { atom, status } = upsert(atoms, {

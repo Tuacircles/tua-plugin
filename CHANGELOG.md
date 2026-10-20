@@ -2,6 +2,13 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.2 — 2026-10-20 (two fixes found on 14 October that never reached main)
+
+Both were made and tested in the M14 session on 14 October but stayed uncommitted in that session's worktree; recovered 20 October.
+
+- **Files deleted in Finder stay deleted.** `load()` had a safety net that re-added atoms from the derived index (`atoms.json`) when their file was missing, so a file you deleted in Finder came back at the next save. Removed: when the archive folder exists it is the only truth; the index is used only when the folder is absent (another machine).
+- **Data dumps are not atoms.** Answers and documents that are mostly numbers (id/price tables such as `10027245·450000 10059885·140000 …`) are skipped by the import and by the Stop/Write hooks (logged as `data-dump`), and a title is never taken from a line of numbers — the first line with letters is used instead. Rule: a line is data when at least two and at least half of its words contain digits; a text is a dump when at least 60 % of its lines are data lines (or, for one or two lines, at least eight data words making up half the words). Conversations are never filtered this way, only the auto-captured answers and files.
+
 ## 0.5.1 — 2026-10-20 (the MCP server starts in Cowork)
 
 - **`.mcp.json` no longer references `${user_config.arkivmappe}`.** Cowork ignores an MCP server whose definition references a plugin setting without a default, and does not collect settings at all, so since 0.3.0 a directory install gave Cowork the skills but no tools. The server now gets only `TUA_DATA_DIR` from `${CLAUDE_PLUGIN_DATA}` and finds the archive the way it always could: `TUA_FILES_ROOT` (standalone installs), then `~/.tua/config.json`, then an existing Tua folder, else it asks.
