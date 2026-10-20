@@ -22,9 +22,17 @@ import zlib from 'node:zlib'
 import crypto from 'node:crypto'
 import { DATA_DIR } from './store.js'
 import { CLAUDE_APP_DIR } from './platform.js'
+import { ChromeIndexedDb } from './idb.js'
 
 // macOS: ~/Library/Application Support/Claude · Windows: %APPDATA%\Claude · Linux: ~/.config/Claude (platform.js)
 export const CACHE_DIR = process.env.TUA_DESKTOP_CACHE || path.join(CLAUDE_APP_DIR, 'Cache', 'Cache_Data')
+// 20.10.2026: fra Desktop 2.42304 (ca. 15.09.2026) ligger samtaleinnholdet ikke lenger i HTTP-cachen, men i appens IndexedDB
+// («claude-conversation-store», objektlageret «trees»): de sist åpnede samtalene — chat og Cowork («hub») — med hele
+// meldingstreet for korte samtaler og et utsnitt (historyWindow «windowed», fra floorIndex) for lange. HTTP-cachen har
+// fortsatt listesvarene (tittel + prosjekt) og eldre samtaler, så begge leses og nyeste versjon per uuid vinner.
+export const IDB_DIR = process.env.TUA_DESKTOP_IDB || path.join(CLAUDE_APP_DIR, 'IndexedDB', 'https_claude.ai_0.indexeddb.leveldb')
+export const IDB_BLOB_DIR = IDB_DIR.replace(/\.leveldb$/, '.blob')
+export const idbAvailable = () => { try { return fs.statSync(IDB_DIR).isDirectory() } catch { return false } }
 // zstd-dekoding kom i Node 22.15 / 23.8. Eldre Node: cachen kan ikke leses, og det sies i stedet for å feile stille.
 export const ZSTD_OK = typeof zlib.zstdDecompressSync === 'function'
 const zstd = (b) => { if (!ZSTD_OK) throw new Error(`Desktop-cachen er zstd-komprimert og trenger Node ≥ 22.15 (har ${process.version})`); return zlib.zstdDecompressSync(b) }
@@ -199,6 +207,59 @@ export function convFromJson(j, { id = null } = {}) {
   }
 }
 
+// Tittel fra første melding når lageret ikke har noe navn: første setning eller ordgrense, maks 72 tegn.
+export function shortTitle(s) {
+  const t = flat(s).replace(/^[#*>\-\s]+/, '')
+  if (!t) return 'Uten tittel'
+  const sentence = t.match(/^(.{12,72}?[.!?])(\s|$)/)
+  if (sentence) return sentence[1]
+  if (t.length <= 72) return t
+  const cut = t.slice(0, 72)
+  return (cut.lastIndexOf(' ') > 40 ? cut.slice(0, cut.lastIndexOf(' ')) : cut) + '…'
+}
+
+// Mappene brukeren ga Cowork/chat tilgang til, fra Desktops egen config (bare lesing): Cowork-økt «session_<id>» → mapper,
+// og chat-samtale <uuid> → mapper. Samtalelageret har ingen prosjektnavn; mappa er det nærmeste vi kommer (som Cowork-importen).
+export function desktopFolderGrants() {
+  const bySession = new Map(), byConversation = new Map()
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(CLAUDE_APP_DIR, 'claude_desktop_config.json'), 'utf8'))
+    const p = cfg?.preferences || {}
+    for (const [k, v] of Object.entries(p.remoteSessionFolderGrants || {})) if (Array.isArray(v)) bySession.set(k.replace(/^session_/, ''), v.map(String))
+    for (const [k, v] of Object.entries(p.remoteChatFolderGrants || {})) if (Array.isArray(v?.folders)) byConversation.set(k, v.folders.map(String))
+  } catch {}
+  return { bySession, byConversation }
+}
+
+// ── samtalelageret (IndexedDB) → samme samtale-JSON som cachen gir ──────────
+// Leses fra en kopi av LevelDB-mappa (appen skriver i den); blob-filene (store verdier) er uforanderlige og leses der de
+// ligger. Ingenting skrives til appens mappe. Gir [{ id, updated, n, json, store: { product, cowork, windowed } }].
+export function collectDesktopStore({ log = () => {} } = {}) {
+  const out = []
+  if (!idbAvailable()) return { entries: out, stats: { lagerSamtaler: 0, lagerHoppet: 0 } }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tua-idb-'))
+  const stats = { lagerSamtaler: 0, lagerHoppet: 0 }
+  try {
+    for (const f of fs.readdirSync(IDB_DIR)) if (/^[0-9a-f]{6}\.(ldb|log|sst)$/i.test(f)) { try { fs.copyFileSync(path.join(IDB_DIR, f), path.join(tmp, f)) } catch {} }
+    const db = new ChromeIndexedDb(tmp, IDB_BLOB_DIR)
+    const skipped = {}
+    for (const { value: v } of db.records('claude-conversation-store', 'trees', skipped)) {
+      const tree = v && typeof v === 'object' ? v.tree : null
+      if (!tree || !Array.isArray(tree.messages) || !v.conversationUuid) continue
+      const win = tree.historyWindow && tree.historyWindow.mode === 'windowed' ? { from: tree.historyWindow.floorIndex ?? null, of: tree.treeSize ?? null } : null
+      const json = { uuid: v.conversationUuid, chat_messages: tree.messages, updated_at: v.conversationUpdatedAt || v.fetchedAt || null }
+      out.push({ id: v.conversationUuid, updated: ms(json.updated_at) || 0, n: tree.messages.length, json, name: 'samtalelager', file: null, snapshot: false,
+        store: { product: v.product || '', cowork: tree.proxiedCoworkSessionId || null, windowed: win } })
+    }
+    stats.lagerSamtaler = out.length
+    stats.lagerHoppet = skipped.skipped || 0
+    log(`Desktop-lager: ${db.files} LevelDB-filer, ${db.errors} feil, ${out.length} samtaler, ${stats.lagerHoppet} poster hoppet over`)
+  } catch (e) {
+    log(`Desktop-lager: ${e.message}`)
+  } finally { try { fs.rmSync(tmp, { recursive: true, force: true }) } catch {} }
+  return { entries: out, stats }
+}
+
 // ── hele cachen → samtaler, prosjekter, dokumenter, artifacts ──────────────
 // Samme samtale ligger ofte flere ganger (én per gang den ble åpnet); den med nyest updated_at vinner, så flest meldinger.
 export function collectDesktop({ log = () => {}, since = null } = {}) {
@@ -265,6 +326,13 @@ export function collectDesktop({ log = () => {}, since = null } = {}) {
       if (!cur || info.updated > cur.updated || (info.updated === cur.updated && info.n > cur.n)) bestFile.set(info.id, { ...info, file: e.file, name: e.name })
     }
     for (const name of Object.keys(convFiles)) if (!entries.some((e) => e.name === name)) delete convFiles[name]
+    // 2b) samtalelageret (IndexedDB): nyeste versjon per uuid vinner også her — lageret har som regel den ferskeste
+    const storeRes = collectDesktopStore({ log })
+    Object.assign(stats, storeRes.stats)
+    for (const s of storeRes.entries) {
+      const cur = bestFile.get(s.id)
+      if (!cur || s.updated > cur.updated || (s.updated === cur.updated && s.n > cur.n)) bestFile.set(s.id, s)
+    }
     // 3) dekod vinnerne (bare de som er nye/endret siden sist, når `since` er gitt)
     const convs = []
     for (const [id, b] of bestFile) {
@@ -273,6 +341,11 @@ export function collectDesktop({ log = () => {}, since = null } = {}) {
       if (!j) continue
       const c = convFromJson(j, { id })
       const l = listed.get(c.id)
+      if (b.store) {
+        c.store = b.store
+        if (!c.title || c.title === 'Uten tittel') c.title = shortTitle(l?.name || c.firstUser)
+        if (b.store.windowed) c.transcript = `_[Utsnitt fra Claude Desktops samtalelager: de siste ${c.messages} av ${b.store.windowed.of ?? '?'} meldinger (fra nr. ${b.store.windowed.from ?? '?'}). Åpne samtalen i Desktop og bla opp for mer.]_\n\n${c.transcript}`
+      }
       c.projectUuid = c.projectUuid || l?.projectUuid || null
       c.projectName = c.projectName || (c.projectUuid ? projects.get(c.projectUuid) : null) || null
       c.archived = !!l?.archived
@@ -282,6 +355,7 @@ export function collectDesktop({ log = () => {}, since = null } = {}) {
       if (b.snapshot) snapshots.set(id, c)
     }
     for (const k of Object.keys(convFiles)) delete convFiles[k].json
+    for (const b of bestFile.values()) if (b.store) delete b.json
     stats.samtaler = [...bestFile.values()].filter((b) => !b.snapshot).length
     stats.snapshots = [...bestFile.values()].filter((b) => b.snapshot).length
     state.convs = convFiles
@@ -298,7 +372,9 @@ export function countDesktopConversations({ quick = false } = {}) {
   if (quick) return new Set(Object.values(state.files || {}).filter((v) => Array.isArray(v) && v[2] === 'conv').map((v) => v[3])).size
   const entries = scanCache({ state })
   writeState(state)
-  return new Set(entries.filter((e) => e.kind === 'conv').map((e) => e.id)).size
+  const ids = new Set(entries.filter((e) => e.kind === 'conv').map((e) => e.id))
+  for (const s of collectDesktopStore().entries) ids.add(s.id)                      // samtalelageret (IndexedDB), ~20 ms
+  return ids.size
 }
 // Hvilke samtaler (uuid → updated_at) er importert fra cachen før — for idempotens
 export const importedDesktop = () => readState().imported || {}

@@ -2,6 +2,14 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.4 — 2026-10-20 (Desktop conversations are captured again — from the conversation store)
+
+- **Why.** Since Claude Desktop 2.42304 (around 15 September 2026) the app no longer keeps conversation content in its HTTP cache, only small notices. Tua's Desktop reader therefore saw nothing newer than mid-September although it ran every ten minutes, and Cowork sessions — which now run through claude.ai with the Mac as a device — left no local transcript at all.
+- **Where the conversations are.** Desktop keeps the last-opened chat and Cowork conversations in a Chromium IndexedDB (`IndexedDB/https_claude.ai_0.indexeddb.leveldb`, database `claude-conversation-store`, object store `trees`): the full message tree for short conversations, the most recent window (`historyWindow: windowed`, from `floorIndex`) for long ones. Verified on 20 October: 30 conversations from 1–20 October, including a 2 500-message Cowork session whose last 26 messages (51 000 characters) were only there.
+- **`server/idb.js`** reads that store in plain Node, no native dependency: LevelDB table and log files (newest sequence number per key wins, deletions honoured), Snappy blocks, IndexedDB key prefixes and metadata, Blink envelopes (external blobs, Snappy values, trailers) and V8-serialised values. Cross-checked against CCL Forensics' `ccl_chromium_reader` (MIT) as the oracle. The LevelDB files are copied to a temp folder before reading; the `.blob` files are read in place; nothing is written to the app's folder.
+- **`server/desktop.js`** merges the store into the existing cache reader (`collectDesktopStore`): the newest version per conversation wins, windowed conversations get a note at the top of L and in the meta line, the title comes from the cache's list replies or from the first message (`shortTitle`), and Cowork conversations (`proxiedCoworkSessionId`) are named after the folder the session was given access to (`desktopFolderGrants`, read from `claude_desktop_config.json`), as the Cowork import already does. Source becomes «Claude Cowork» with the tag `cowork`.
+- **Dry run:** `TUA_FILES_ROOT=<scratch> TUA_DATA_DIR=<scratch>/data node server/test-desktop-store.mjs` (refuses to run against the real archive); `node server/test-idb.mjs` lists what the store holds.
+
 ## 0.5.3 — 2026-10-20 (the server ships as one file — no install step anywhere)
 
 - **Why.** Claude Desktop downloads an account-enabled plugin from the directory as a plain copy of the repository and never runs `npm install`. With 0.5.0–0.5.2 the server crashed there with `Cannot find package '@modelcontextprotocol/sdk'` — in Cowork and in Claude Code sessions started from Desktop, where the account plugin shadows a locally installed copy of the same name. The 0.5.1 fix (no `${user_config}` in `.mcp.json`) was necessary but not sufficient.

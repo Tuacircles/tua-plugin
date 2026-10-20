@@ -1,6 +1,6 @@
 {
   "name": "tua-plugin",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "private": true,
   "type": "module",
   "description": "Tua — the local-first archive for everything you make with AI. Claude plugin: MCP server, skills and hooks. Every atom is a markdown file in your own folder; nothing leaves your machine.",

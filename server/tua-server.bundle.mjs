@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Tua-plugin 0.5.3 — bygd av bygg.mjs 2026-10-20. IKKE REDIGER: kilden er server/*.js.
+// Tua-plugin 0.5.4 — bygd av bygg.mjs 2026-10-20. IKKE REDIGER: kilden er server/*.js.
 globalThis.__TUA_BUNDLE = true; import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -241,10 +241,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path9) {
+  if (!path9)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path9.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -493,11 +493,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path9, issues) {
   return issues.map((iss) => {
     var _a;
     (_a = iss).path ?? (_a.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path9);
     return iss;
   });
 }
@@ -686,7 +686,7 @@ function treeifyError(error40, _mapper) {
     return issue2.message;
   };
   const result = { errors: [] };
-  const processError = (error41, path8 = []) => {
+  const processError = (error41, path9 = []) => {
     var _a, _b;
     for (const issue2 of error41.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
@@ -696,7 +696,7 @@ function treeifyError(error40, _mapper) {
       } else if (issue2.code === "invalid_element") {
         processError({ issues: issue2.issues }, issue2.path);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -726,9 +726,9 @@ function treeifyError(error40, _mapper) {
   processError(error40);
   return result;
 }
-function toDotPath(path8) {
+function toDotPath(path9) {
   const segs = [];
-  for (const seg of path8) {
+  for (const seg of path9) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -14867,8 +14867,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path8) {
-      let input = path8;
+    function removeDotSegments(path9) {
+      let input = path9;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -15277,8 +15277,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path8 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
+        const path9 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path9 && path9 !== "/" ? path9 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -18791,12 +18791,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f2;
     };
-    function addFormats(ajv, list, fs8, exportName) {
+    function addFormats(ajv, list, fs9, exportName) {
       var _a;
       var _b;
       (_a = (_b = ajv.opts.code).formats) !== null && _a !== void 0 ? _a : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f2 of list)
-        ajv.addFormat(f2, fs8[f2]);
+        ajv.addFormat(f2, fs9[f2]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -19282,8 +19282,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path8, errorMaps, issueData } = params;
-  const fullPath = [...path8, ...issueData.path || []];
+  const { data, path: path9, errorMaps, issueData } = params;
+  const fullPath = [...path9, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -19399,11 +19399,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path8, key) {
+  constructor(parent, value, path9, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path8;
+    this._path = path9;
     this._key = key;
   }
   get path() {
@@ -22987,11 +22987,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path8) {
-  if (path8.length === 0) {
+function getDotPath(path9) {
+  if (path9.length === 0) {
     return "object root";
   }
-  return path8.reduce((acc, seg, index) => {
+  return path9.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -29868,9 +29868,9 @@ function registerApps(server2, { client = "Claude" } = {}) {
 }
 
 // server/import.js
-import fs7 from "node:fs";
+import fs8 from "node:fs";
 import os5 from "node:os";
-import path7 from "node:path";
+import path8 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // server/unzip.js
@@ -29892,11 +29892,620 @@ function unzipToTemp(zipPath, hasRoot) {
 }
 
 // server/desktop.js
-import fs5 from "node:fs";
+import fs6 from "node:fs";
 import os3 from "node:os";
-import path5 from "node:path";
+import path6 from "node:path";
 import zlib from "node:zlib";
-var CACHE_DIR = process.env.TUA_DESKTOP_CACHE || path5.join(CLAUDE_APP_DIR, "Cache", "Cache_Data");
+
+// server/idb.js
+import fs5 from "node:fs";
+import path5 from "node:path";
+function varint(buf, off) {
+  let result = 0, mul = 1, i = 0;
+  for (; ; ) {
+    if (off + i >= buf.length) throw new Error("varint utenfor bufferet");
+    const b = buf[off + i];
+    result += (b & 127) * mul;
+    i++;
+    if ((b & 128) === 0) break;
+    mul *= 128;
+    if (i > 10) throw new Error("varint for lang");
+  }
+  return [result, i];
+}
+function snappyDecompress(buf) {
+  const [ulen, n0] = varint(buf, 0);
+  const out = Buffer.alloc(ulen);
+  let off = n0, o = 0;
+  while (off < buf.length) {
+    const t = buf[off++];
+    const tag = t & 3;
+    if (tag === 0) {
+      const n = t >> 2;
+      let len;
+      if (n < 60) len = n + 1;
+      else if (n === 60) {
+        len = buf[off] + 1;
+        off += 1;
+      } else if (n === 61) {
+        len = buf.readUInt16LE(off) + 1;
+        off += 2;
+      } else if (n === 62) {
+        len = (buf[off] | buf[off + 1] << 8 | buf[off + 2] << 16) + 1;
+        off += 3;
+      } else {
+        len = buf.readUInt32LE(off) + 1;
+        off += 4;
+      }
+      if (off + len > buf.length || o + len > ulen) throw new Error("Snappy: literal utenfor bufferet");
+      buf.copy(out, o, off, off + len);
+      off += len;
+      o += len;
+    } else {
+      let len, back;
+      if (tag === 1) {
+        len = (t >> 2 & 7) + 4;
+        back = (t & 224) << 3 | buf[off];
+        off += 1;
+      } else if (tag === 2) {
+        len = (t >> 2) + 1;
+        back = buf.readUInt16LE(off);
+        off += 2;
+      } else {
+        len = (t >> 2) + 1;
+        back = buf.readUInt32LE(off);
+        off += 4;
+      }
+      if (back === 0 || back > o || o + len > ulen) throw new Error("Snappy: ugyldig kopi");
+      for (let i = 0; i < len; i++) {
+        out[o] = out[o - back];
+        o++;
+      }
+    }
+  }
+  if (o !== ulen) throw new Error(`Snappy: fikk ${o} B, ventet ${ulen}`);
+  return out;
+}
+var LDB_MAGIC = Buffer.from("57fb808b247547db", "hex");
+function blockEntries(raw) {
+  const count = raw.readUInt32LE(raw.length - 4);
+  const restartOff = raw.length - (count + 1) * 4;
+  const out = [];
+  let pos = count ? raw.readUInt32LE(restartOff) : 0;
+  let key = Buffer.alloc(0);
+  while (pos < restartOff) {
+    const [shared, a] = varint(raw, pos);
+    pos += a;
+    const [nonShared, b] = varint(raw, pos);
+    pos += b;
+    const [vlen, c] = varint(raw, pos);
+    pos += c;
+    if (shared > key.length) throw new Error("LevelDB: delt n\xF8kkel lengre enn forrige");
+    key = Buffer.concat([key.subarray(0, shared), raw.subarray(pos, pos + nonShared)]);
+    pos += nonShared;
+    out.push({ key, value: raw.subarray(pos, pos + vlen) });
+    pos += vlen;
+  }
+  return out;
+}
+function* ldbRecords(buf) {
+  if (buf.length < 48 || !buf.subarray(buf.length - 8).equals(LDB_MAGIC)) throw new Error("LevelDB: feil magic i tabellfil");
+  const footer = buf.length - 48;
+  let p2 = footer;
+  const [, m1] = varint(buf, p2);
+  p2 += m1;
+  const [, m2] = varint(buf, p2);
+  p2 += m2;
+  const [idxOff, i1] = varint(buf, p2);
+  p2 += i1;
+  const [idxLen, i2] = varint(buf, p2);
+  const readBlock = (off, len) => {
+    let raw = buf.subarray(off, off + len);
+    const compressed = buf[off + len] !== 0;
+    if (compressed) raw = snappyDecompress(raw);
+    return raw;
+  };
+  for (const e of blockEntries(readBlock(idxOff, idxLen))) {
+    const [off, a] = varint(e.value, 0);
+    const [len] = varint(e.value, a);
+    for (const r2 of blockEntries(readBlock(off, len))) {
+      if (r2.key.length < 8) continue;
+      const tail = r2.key.readBigUInt64LE(r2.key.length - 8);
+      yield { ukey: r2.key.subarray(0, r2.key.length - 8), seq: Number(tail >> 8n), live: Number(tail & 0xffn) === 1, value: r2.value };
+    }
+  }
+}
+function* logRecords(buf) {
+  const BLOCK = 32768;
+  let acc = null;
+  const batches = [];
+  for (let bs = 0; bs < buf.length; bs += BLOCK) {
+    const end = Math.min(bs + BLOCK, buf.length);
+    let pos = bs;
+    while (pos + 7 <= end) {
+      const len = buf.readUInt16LE(pos + 4), type = buf[pos + 6];
+      pos += 7;
+      if (type === 0 && len === 0) break;
+      if (pos + len > end) {
+        pos = end;
+        break;
+      }
+      const data = buf.subarray(pos, pos + len);
+      pos += len;
+      if (type === 1) batches.push(data);
+      else if (type === 2) acc = [data];
+      else if (type === 3) {
+        if (acc) acc.push(data);
+      } else if (type === 4) {
+        if (acc) {
+          acc.push(data);
+          batches.push(Buffer.concat(acc));
+          acc = null;
+        }
+      }
+    }
+  }
+  for (const b of batches) {
+    if (b.length < 12) continue;
+    const seq = Number(b.readBigUInt64LE(0)), count = b.readUInt32LE(8);
+    let pos = 12;
+    try {
+      for (let i = 0; i < count; i++) {
+        const t = b[pos++];
+        const [klen, a] = varint(b, pos);
+        pos += a;
+        const key = b.subarray(pos, pos + klen);
+        pos += klen;
+        let value = Buffer.alloc(0);
+        if (t === 1) {
+          const [vlen, c] = varint(b, pos);
+          pos += c;
+          value = b.subarray(pos, pos + vlen);
+          pos += vlen;
+        }
+        yield { ukey: key, seq: seq + i, live: t === 1, value };
+      }
+    } catch {
+    }
+  }
+}
+function loadLevelDb(dir) {
+  const best = /* @__PURE__ */ new Map();
+  const files = fs5.readdirSync(dir).filter((f2) => /^[0-9a-f]{6}\.(ldb|log|sst)$/i.test(f2)).sort();
+  let errors = 0;
+  for (const f2 of files) {
+    let buf;
+    try {
+      buf = fs5.readFileSync(path5.join(dir, f2));
+    } catch {
+      errors++;
+      continue;
+    }
+    try {
+      const it = f2.toLowerCase().endsWith(".log") ? logRecords(buf) : ldbRecords(buf);
+      for (const r2 of it) {
+        const k2 = r2.ukey.toString("latin1");
+        const cur = best.get(k2);
+        if (!cur || r2.seq >= cur.seq) best.set(k2, r2);
+      }
+    } catch {
+      errors++;
+    }
+  }
+  return { best, errors, files: files.length };
+}
+var leBytes = (v2) => {
+  const out = [];
+  do {
+    out.push(v2 & 255);
+    v2 = Math.floor(v2 / 256);
+  } while (v2 > 0);
+  return out;
+};
+function makePrefix(dbId, storeId, indexId, tail = []) {
+  const a = leBytes(dbId), b = leBytes(storeId), c = leBytes(indexId);
+  return Buffer.from([a.length - 1 << 5 | b.length - 1 << 2 | c.length - 1, ...a, ...b, ...c, ...tail]);
+}
+var utf16be = (buf) => {
+  const b = Buffer.from(buf);
+  b.swap16();
+  return b.toString("utf16le");
+};
+function parseKey(buf, off = 0) {
+  const t = buf[off];
+  if (t === 0) return { type: "null", value: null, len: 1 };
+  if (t === 1) {
+    const [n, a] = varint(buf, off + 1);
+    return { type: "string", value: utf16be(buf.subarray(off + 1 + a, off + 1 + a + n * 2)), len: 1 + a + n * 2 };
+  }
+  if (t === 2) return { type: "date", value: new Date(buf.readDoubleLE(off + 1)), len: 9 };
+  if (t === 3) return { type: "number", value: buf.readDoubleLE(off + 1), len: 9 };
+  if (t === 4) {
+    const [n, a] = varint(buf, off + 1);
+    let p2 = off + 1 + a;
+    const items = [];
+    for (let i = 0; i < n; i++) {
+      const k2 = parseKey(buf, p2);
+      items.push(k2.value);
+      p2 += k2.len;
+    }
+    return { type: "array", value: items, len: p2 - off };
+  }
+  if (t === 6) {
+    const [n, a] = varint(buf, off + 1);
+    return { type: "binary", value: buf.subarray(off + 1 + a, off + 1 + a + n), len: 1 + a + n };
+  }
+  throw new Error(`IndexedDB: ukjent n\xF8kkeltype ${t}`);
+}
+var truncInt = (buf) => {
+  let v2 = 0;
+  for (let i = buf.length - 1; i >= 0; i--) v2 = v2 * 256 + buf[i];
+  return v2;
+};
+var UNDEFINED = Symbol("undefined");
+var V8Reader = class {
+  constructor(buf, off, host) {
+    this.b = buf;
+    this.p = off;
+    this.objects = [];
+    this.host = host;
+    this.version = this.header();
+  }
+  byte() {
+    if (this.p >= this.b.length) throw new Error("V8: slutt p\xE5 data");
+    return this.b[this.p++];
+  }
+  tag() {
+    let t;
+    do
+      t = this.byte();
+    while (t === 0);
+    return t;
+  }
+  // 0x00 = utfylling
+  peek() {
+    const p2 = this.p;
+    const t = this.tag();
+    this.p = p2;
+    return t;
+  }
+  vint() {
+    const [v2, n] = varint(this.b, this.p);
+    this.p += n;
+    return v2;
+  }
+  zigzag() {
+    const u2 = this.vint();
+    return u2 % 2 ? -Math.floor(u2 / 2) : u2 / 2;
+  }
+  double() {
+    const v2 = this.b.readDoubleLE(this.p);
+    this.p += 8;
+    return v2;
+  }
+  raw(n) {
+    if (this.p + n > this.b.length) throw new Error("V8: streng utenfor bufferet");
+    const s = this.b.subarray(this.p, this.p + n);
+    this.p += n;
+    return s;
+  }
+  header() {
+    if (this.byte() !== 255) throw new Error("V8: mangler versjonstagg");
+    return this.vint();
+  }
+  str1() {
+    return this.raw(this.vint()).toString("latin1");
+  }
+  str2() {
+    return this.raw(this.vint()).toString("utf16le");
+  }
+  strU() {
+    return this.raw(this.vint()).toString("utf8");
+  }
+  props(endTag, into) {
+    let n = 0;
+    while (this.peek() !== endTag) {
+      const k2 = this.read();
+      const v2 = this.read();
+      into(k2, v2);
+      n++;
+    }
+    this.tag();
+    return n;
+  }
+  read() {
+    let v2 = this.readInner();
+    if (this.p < this.b.length && this.peek() === 86) {
+      this.tag();
+      this.vint();
+      const bo = this.vint();
+      const bl = this.vint();
+      if (this.version >= 14) this.vint();
+      v2 = Buffer.isBuffer(v2) ? v2.subarray(bo, bo + bl) : v2;
+    }
+    return v2;
+  }
+  readInner() {
+    const t = this.tag();
+    switch (t) {
+      case 95:
+      case 45:
+        return UNDEFINED;
+      case 48:
+        return null;
+      case 84:
+        return true;
+      case 70:
+        return false;
+      case 73:
+        return this.zigzag();
+      case 85:
+        return this.vint();
+      case 78:
+        return this.double();
+      case 68: {
+        const d2 = new Date(this.double());
+        this.objects.push(d2);
+        return d2;
+      }
+      case 90:
+      case 122: {
+        const f2 = this.vint();
+        const n = f2 >> 4;
+        const raw = this.raw(n * 8);
+        let v2 = 0n;
+        for (let i = raw.length - 1; i >= 0; i--) v2 = v2 << 8n | BigInt(raw[i]);
+        v2 = f2 & 1 ? -v2 : v2;
+        if (t === 122) this.objects.push(v2);
+        return v2;
+      }
+      case 83:
+        return this.strU();
+      case 34:
+        return this.str1();
+      case 99:
+        return this.str2();
+      case 121: {
+        this.objects.push(true);
+        return true;
+      }
+      case 120: {
+        this.objects.push(false);
+        return false;
+      }
+      case 110: {
+        const v2 = this.double();
+        this.objects.push(v2);
+        return v2;
+      }
+      case 115: {
+        const v2 = this.read();
+        this.objects.push(v2);
+        return v2;
+      }
+      case 94:
+        return this.objects[this.vint()];
+      case 111: {
+        const o = {};
+        this.objects.push(o);
+        const n = this.props(123, (k2, v2) => {
+          o[k2] = v2;
+        });
+        if (this.vint() !== n) throw new Error("V8: feil antall egenskaper");
+        return o;
+      }
+      case 65: {
+        const len = this.vint();
+        const a = new Array(len);
+        this.objects.push(a);
+        for (let i = 0; i < len; i++) {
+          const v2 = this.read();
+          a[i] = v2 === UNDEFINED ? void 0 : v2;
+        }
+        const n = this.props(36, (k2, v2) => {
+          a[k2] = v2;
+        });
+        if (this.vint() !== n) throw new Error("V8: feil antall egenskaper (array)");
+        this.vint();
+        return a;
+      }
+      case 97: {
+        const len = this.vint();
+        const a = new Array(len);
+        this.objects.push(a);
+        const n = this.props(64, (k2, v2) => {
+          a[k2] = v2;
+        });
+        if (this.vint() !== n) throw new Error("V8: feil antall egenskaper (array)");
+        this.vint();
+        return a;
+      }
+      case 59: {
+        const m2 = /* @__PURE__ */ new Map();
+        this.objects.push(m2);
+        while (this.peek() !== 58) {
+          const k2 = this.read();
+          m2.set(k2, this.read());
+        }
+        this.tag();
+        this.vint();
+        return m2;
+      }
+      case 39: {
+        const s = /* @__PURE__ */ new Set();
+        this.objects.push(s);
+        while (this.peek() !== 44) s.add(this.read());
+        this.tag();
+        this.vint();
+        return s;
+      }
+      case 66: {
+        const raw = Buffer.from(this.raw(this.vint()));
+        this.objects.push(raw);
+        return raw;
+      }
+      case 82: {
+        const src = this.read();
+        const flags = this.vint();
+        const r2 = { regex: src, flags };
+        this.objects.push(r2);
+        return r2;
+      }
+      case 112:
+        return { sharedObject: this.vint() };
+      case 92: {
+        const v2 = this.host(this);
+        this.objects.push(v2);
+        return v2;
+      }
+      default:
+        throw new Error(`V8: ukjent tagg 0x${t.toString(16)} ved ${this.p - 1}`);
+    }
+  }
+};
+function blinkHost(r2) {
+  const t = r2.byte();
+  if (t === 105) return { blobIndex: r2.vint() };
+  if (t === 101) return { fileIndex: r2.vint() };
+  if (t === 76) {
+    const n = r2.vint();
+    const out = [];
+    for (let i = 0; i < n; i++) out.push({ fileIndex: r2.vint() });
+    return out;
+  }
+  throw new Error(`Blink: vertsobjekt 0x${t.toString(16)} st\xF8ttes ikke`);
+}
+var ChromeIndexedDb = class {
+  constructor(leveldbDir, blobDir = null) {
+    this.dir = leveldbDir;
+    this.blobDir = blobDir;
+    const { best, errors, files } = loadLevelDb(leveldbDir);
+    this.all = [...best.values()].filter((r2) => r2.live);
+    this.errors = errors;
+    this.files = files;
+    this.databases = [];
+    for (const r2 of this.all) {
+      const k2 = r2.ukey;
+      if (k2.length > 5 && k2[0] === 0 && k2[1] === 0 && k2[2] === 0 && k2[3] === 0 && k2[4] === 201) {
+        let p2 = 5;
+        const [ol, a] = varint(k2, p2);
+        p2 += a;
+        const origin = utf16be(k2.subarray(p2, p2 + ol * 2));
+        p2 += ol * 2;
+        const [nl, b] = varint(k2, p2);
+        p2 += b;
+        const name = utf16be(k2.subarray(p2, p2 + nl * 2));
+        this.databases.push({ id: truncInt(r2.value), origin, name });
+      }
+    }
+    this.blobCache = /* @__PURE__ */ new Map();
+  }
+  stores(dbId) {
+    const prefix = makePrefix(dbId, 0, 0, [50]);
+    const out = /* @__PURE__ */ new Map();
+    for (const r2 of this.all) {
+      if (r2.ukey.length <= prefix.length || !r2.ukey.subarray(0, prefix.length).equals(prefix)) continue;
+      const [storeId, a] = varint(r2.ukey, prefix.length);
+      if (r2.ukey[prefix.length + a] === 0) out.set(utf16be(r2.value), storeId);
+    }
+    return out;
+  }
+  database(name) {
+    return this.databases.find((d2) => d2.name === name) || null;
+  }
+  blobPath(dbId, storeId, rawKey, index) {
+    const ck = `${dbId}/${storeId}/${rawKey.toString("latin1")}`;
+    if (!this.blobCache.has(ck)) {
+      const prefix = makePrefix(dbId, storeId, 3);
+      const want = Buffer.concat([prefix, rawKey]);
+      const list = [];
+      const rec = this.all.find((r2) => r2.ukey.equals(want));
+      if (rec) {
+        let p2 = 0;
+        const v2 = rec.value;
+        while (p2 < v2.length) {
+          const type = v2[p2++];
+          const [num2, a] = varint(v2, p2);
+          p2 += a;
+          const [ml, b] = varint(v2, p2);
+          p2 += b + ml * 2;
+          const [, c] = varint(v2, p2);
+          p2 += c;
+          if (type === 1) {
+            const [fl, d2] = varint(v2, p2);
+            p2 += d2 + fl * 2;
+            const [, e] = varint(v2, p2);
+            p2 += e;
+          }
+          list.push(num2);
+        }
+      }
+      this.blobCache.set(ck, list);
+    }
+    const num = this.blobCache.get(ck)[index];
+    if (num == null || !this.blobDir) return null;
+    return path5.join(this.blobDir, dbId.toString(16), (num >> 8).toString(16).padStart(2, "0"), num.toString(16));
+  }
+  decode(buf, dbId, storeId, rawKey) {
+    if (buf[0] !== 255) throw new Error("Blink: mangler versjonstagg");
+    const [bver, n] = varint(buf, 1);
+    let off = 1 + n;
+    if (bver === 17) {
+      if (buf[off] === 1) {
+        off++;
+        const [, a] = varint(buf, off);
+        off += a;
+        const [idx, b] = varint(buf, off);
+        off += b;
+        const p2 = this.blobPath(dbId, storeId, rawKey, idx);
+        if (!p2) throw new Error("Blink: blob-info mangler");
+        return this.decode(fs5.readFileSync(p2), dbId, storeId, rawKey);
+      }
+      if (buf[off] === 2) return this.decode(snappyDecompress(buf.subarray(off + 1)), dbId, storeId, rawKey);
+      throw new Error("Blink: ukjent 0x11-undertype");
+    }
+    if (bver >= 21) off += 13;
+    return new V8Reader(buf, off, blinkHost).read();
+  }
+  // Alle levende poster i et objektlager: { key, value } — poster som ikke lar seg dekode, telles i `skipped`.
+  *records(dbName, storeName, stats2 = {}) {
+    const db = this.database(dbName);
+    if (!db) return;
+    const storeId = this.stores(db.id).get(storeName);
+    if (storeId == null) return;
+    const prefix = makePrefix(db.id, storeId, 1);
+    for (const r2 of this.all) {
+      if (r2.ukey.length <= prefix.length || !r2.ukey.subarray(0, prefix.length).equals(prefix)) continue;
+      let key;
+      try {
+        key = parseKey(r2.ukey, prefix.length);
+      } catch {
+        stats2.skipped = (stats2.skipped || 0) + 1;
+        continue;
+      }
+      const rawKey = r2.ukey.subarray(prefix.length, prefix.length + key.len);
+      if (!r2.value.length) continue;
+      try {
+        const [, a] = varint(r2.value, 0);
+        yield { key: key.value, value: this.decode(r2.value.subarray(a), db.id, storeId, rawKey) };
+      } catch {
+        stats2.skipped = (stats2.skipped || 0) + 1;
+      }
+    }
+  }
+};
+
+// server/desktop.js
+var CACHE_DIR = process.env.TUA_DESKTOP_CACHE || path6.join(CLAUDE_APP_DIR, "Cache", "Cache_Data");
+var IDB_DIR = process.env.TUA_DESKTOP_IDB || path6.join(CLAUDE_APP_DIR, "IndexedDB", "https_claude.ai_0.indexeddb.leveldb");
+var IDB_BLOB_DIR = IDB_DIR.replace(/\.leveldb$/, ".blob");
+var idbAvailable = () => {
+  try {
+    return fs6.statSync(IDB_DIR).isDirectory();
+  } catch {
+    return false;
+  }
+};
 var ZSTD_OK = typeof zlib.zstdDecompressSync === "function";
 var zstd = (b) => {
   if (!ZSTD_OK) throw new Error(`Desktop-cachen er zstd-komprimert og trenger Node \u2265 22.15 (har ${process.version})`);
@@ -29908,7 +30517,7 @@ var ZSTD_MAGIC = Buffer.from("28b52ffd", "hex");
 var HEADER = 24;
 var EOF = 24;
 var KEY_MAX = 4096;
-var STATE = () => path5.join(DATA_DIR, "desktop-state.json");
+var STATE = () => path6.join(DATA_DIR, "desktop-state.json");
 var UUID = "[0-9a-f-]{36}";
 var KINDS2 = [
   ["conv", new RegExp(`/chat_conversations/(${UUID})(\\?|$)`)],
@@ -29933,25 +30542,25 @@ function classify(key) {
 function readKey(file2) {
   let fd = null;
   try {
-    fd = fs5.openSync(file2, "r");
+    fd = fs6.openSync(file2, "r");
     const head = Buffer.alloc(HEADER);
-    if (fs5.readSync(fd, head, 0, HEADER, 0) < HEADER || !head.subarray(0, 8).equals(INITIAL_MAGIC)) return null;
+    if (fs6.readSync(fd, head, 0, HEADER, 0) < HEADER || !head.subarray(0, 8).equals(INITIAL_MAGIC)) return null;
     const keyLen = head.readUInt32LE(12);
     if (keyLen < 8 || keyLen > KEY_MAX) return null;
     const key = Buffer.alloc(keyLen);
-    if (fs5.readSync(fd, key, 0, keyLen, HEADER) < keyLen) return null;
+    if (fs6.readSync(fd, key, 0, keyLen, HEADER) < keyLen) return null;
     return key.toString("latin1");
   } catch {
     return null;
   } finally {
-    if (fd !== null) fs5.closeSync(fd);
+    if (fd !== null) fs6.closeSync(fd);
   }
 }
 function readEntry(file2, tmpDir) {
-  const copy = path5.join(tmpDir, path5.basename(file2));
+  const copy = path6.join(tmpDir, path6.basename(file2));
   try {
-    fs5.copyFileSync(file2, copy);
-    const b = fs5.readFileSync(copy);
+    fs6.copyFileSync(file2, copy);
+    const b = fs6.readFileSync(copy);
     if (b.length < HEADER + EOF * 2 || !b.subarray(0, 8).equals(INITIAL_MAGIC)) return null;
     const keyLen = b.readUInt32LE(12);
     const key = b.subarray(HEADER, HEADER + keyLen).toString("latin1");
@@ -29978,30 +30587,30 @@ function readEntry(file2, tmpDir) {
     return null;
   } finally {
     try {
-      fs5.unlinkSync(copy);
+      fs6.unlinkSync(copy);
     } catch {
     }
   }
 }
 var readState = () => {
   try {
-    return JSON.parse(fs5.readFileSync(STATE(), "utf8"));
+    return JSON.parse(fs6.readFileSync(STATE(), "utf8"));
   } catch {
     return {};
   }
 };
 function writeState(s) {
   try {
-    fs5.mkdirSync(path5.dirname(STATE()), { recursive: true });
+    fs6.mkdirSync(path6.dirname(STATE()), { recursive: true });
     const tmp = STATE() + ".tmp";
-    fs5.writeFileSync(tmp, JSON.stringify(s) + "\n");
-    fs5.renameSync(tmp, STATE());
+    fs6.writeFileSync(tmp, JSON.stringify(s) + "\n");
+    fs6.renameSync(tmp, STATE());
   } catch {
   }
 }
 var cacheAvailable = () => {
   try {
-    return fs5.statSync(CACHE_DIR).isDirectory();
+    return fs6.statSync(CACHE_DIR).isDirectory();
   } catch {
     return false;
   }
@@ -30013,12 +30622,12 @@ function scanCache({ state = readState(), log = () => {
   const files = state.files || {};
   const seen = /* @__PURE__ */ new Set();
   let opened = 0;
-  for (const name of fs5.readdirSync(CACHE_DIR)) {
+  for (const name of fs6.readdirSync(CACHE_DIR)) {
     if (!name.endsWith("_0")) continue;
-    const file2 = path5.join(CACHE_DIR, name);
+    const file2 = path6.join(CACHE_DIR, name);
     let st;
     try {
-      st = fs5.statSync(file2);
+      st = fs6.statSync(file2);
     } catch {
       continue;
     }
@@ -30078,7 +30687,7 @@ function convFromJson(j2, { id = null } = {}) {
         const inp = b.input || {};
         if (name === "create_file" && typeof inp.file_text === "string") {
           const p2 = String(inp.path || inp.file_path || "fil");
-          artifacts.push({ id: p2, title: path5.basename(p2), content: inp.file_text, type: "file", path: p2 });
+          artifacts.push({ id: p2, title: path6.basename(p2), content: inp.file_text, type: "file", path: p2 });
           parts.push(`[fil skrevet: ${p2}]`);
         } else if (/artifacts?/i.test(name) && (inp.content || inp.new_str) && ["create", "rewrite", "update", void 0].includes(inp.command)) {
           artifacts.push({ id: inp.id || "", title: inp.title || inp.id || "Artifact", content: String(inp.content || inp.new_str || ""), type: inp.type || "" });
@@ -30120,11 +30729,75 @@ function convFromJson(j2, { id = null } = {}) {
     branches
   };
 }
+function shortTitle(s) {
+  const t = flat(s).replace(/^[#*>\-\s]+/, "");
+  if (!t) return "Uten tittel";
+  const sentence = t.match(/^(.{12,72}?[.!?])(\s|$)/);
+  if (sentence) return sentence[1];
+  if (t.length <= 72) return t;
+  const cut = t.slice(0, 72);
+  return (cut.lastIndexOf(" ") > 40 ? cut.slice(0, cut.lastIndexOf(" ")) : cut) + "\u2026";
+}
+function desktopFolderGrants() {
+  const bySession = /* @__PURE__ */ new Map(), byConversation = /* @__PURE__ */ new Map();
+  try {
+    const cfg = JSON.parse(fs6.readFileSync(path6.join(CLAUDE_APP_DIR, "claude_desktop_config.json"), "utf8"));
+    const p2 = cfg?.preferences || {};
+    for (const [k2, v2] of Object.entries(p2.remoteSessionFolderGrants || {})) if (Array.isArray(v2)) bySession.set(k2.replace(/^session_/, ""), v2.map(String));
+    for (const [k2, v2] of Object.entries(p2.remoteChatFolderGrants || {})) if (Array.isArray(v2?.folders)) byConversation.set(k2, v2.folders.map(String));
+  } catch {
+  }
+  return { bySession, byConversation };
+}
+function collectDesktopStore({ log = () => {
+} } = {}) {
+  const out = [];
+  if (!idbAvailable()) return { entries: out, stats: { lagerSamtaler: 0, lagerHoppet: 0 } };
+  const tmp = fs6.mkdtempSync(path6.join(os3.tmpdir(), "tua-idb-"));
+  const stats2 = { lagerSamtaler: 0, lagerHoppet: 0 };
+  try {
+    for (const f2 of fs6.readdirSync(IDB_DIR)) if (/^[0-9a-f]{6}\.(ldb|log|sst)$/i.test(f2)) {
+      try {
+        fs6.copyFileSync(path6.join(IDB_DIR, f2), path6.join(tmp, f2));
+      } catch {
+      }
+    }
+    const db = new ChromeIndexedDb(tmp, IDB_BLOB_DIR);
+    const skipped = {};
+    for (const { value: v2 } of db.records("claude-conversation-store", "trees", skipped)) {
+      const tree = v2 && typeof v2 === "object" ? v2.tree : null;
+      if (!tree || !Array.isArray(tree.messages) || !v2.conversationUuid) continue;
+      const win = tree.historyWindow && tree.historyWindow.mode === "windowed" ? { from: tree.historyWindow.floorIndex ?? null, of: tree.treeSize ?? null } : null;
+      const json2 = { uuid: v2.conversationUuid, chat_messages: tree.messages, updated_at: v2.conversationUpdatedAt || v2.fetchedAt || null };
+      out.push({
+        id: v2.conversationUuid,
+        updated: ms(json2.updated_at) || 0,
+        n: tree.messages.length,
+        json: json2,
+        name: "samtalelager",
+        file: null,
+        snapshot: false,
+        store: { product: v2.product || "", cowork: tree.proxiedCoworkSessionId || null, windowed: win }
+      });
+    }
+    stats2.lagerSamtaler = out.length;
+    stats2.lagerHoppet = skipped.skipped || 0;
+    log(`Desktop-lager: ${db.files} LevelDB-filer, ${db.errors} feil, ${out.length} samtaler, ${stats2.lagerHoppet} poster hoppet over`);
+  } catch (e) {
+    log(`Desktop-lager: ${e.message}`);
+  } finally {
+    try {
+      fs6.rmSync(tmp, { recursive: true, force: true });
+    } catch {
+    }
+  }
+  return { entries: out, stats: stats2 };
+}
 function collectDesktop({ log = () => {
 }, since = null } = {}) {
   const state = readState();
   const entries = scanCache({ state, log });
-  const tmp = fs5.mkdtempSync(path5.join(os3.tmpdir(), "tua-desktop-"));
+  const tmp = fs6.mkdtempSync(path6.join(os3.tmpdir(), "tua-desktop-"));
   const projects2 = /* @__PURE__ */ new Map();
   const listed = /* @__PURE__ */ new Map();
   const bestFile = /* @__PURE__ */ new Map();
@@ -30194,6 +30867,12 @@ function collectDesktop({ log = () => {
       if (!cur || info.updated > cur.updated || info.updated === cur.updated && info.n > cur.n) bestFile.set(info.id, { ...info, file: e.file, name: e.name });
     }
     for (const name of Object.keys(convFiles)) if (!entries.some((e) => e.name === name)) delete convFiles[name];
+    const storeRes = collectDesktopStore({ log });
+    Object.assign(stats2, storeRes.stats);
+    for (const s of storeRes.entries) {
+      const cur = bestFile.get(s.id);
+      if (!cur || s.updated > cur.updated || s.updated === cur.updated && s.n > cur.n) bestFile.set(s.id, s);
+    }
     const convs = [];
     for (const [id, b] of bestFile) {
       if (since && since[id] === b.updated) continue;
@@ -30201,6 +30880,13 @@ function collectDesktop({ log = () => {
       if (!j2) continue;
       const c = convFromJson(j2, { id });
       const l = listed.get(c.id);
+      if (b.store) {
+        c.store = b.store;
+        if (!c.title || c.title === "Uten tittel") c.title = shortTitle(l?.name || c.firstUser);
+        if (b.store.windowed) c.transcript = `_[Utsnitt fra Claude Desktops samtalelager: de siste ${c.messages} av ${b.store.windowed.of ?? "?"} meldinger (fra nr. ${b.store.windowed.from ?? "?"}). \xC5pne samtalen i Desktop og bla opp for mer.]_
+
+${c.transcript}`;
+      }
       c.projectUuid = c.projectUuid || l?.projectUuid || null;
       c.projectName = c.projectName || (c.projectUuid ? projects2.get(c.projectUuid) : null) || null;
       c.archived = !!l?.archived;
@@ -30210,6 +30896,7 @@ function collectDesktop({ log = () => {
       if (b.snapshot) snapshots.set(id, c);
     }
     for (const k2 of Object.keys(convFiles)) delete convFiles[k2].json;
+    for (const b of bestFile.values()) if (b.store) delete b.json;
     stats2.samtaler = [...bestFile.values()].filter((b) => !b.snapshot).length;
     stats2.snapshots = [...bestFile.values()].filter((b) => b.snapshot).length;
     state.convs = convFiles;
@@ -30217,7 +30904,7 @@ function collectDesktop({ log = () => {
     return { convs, projects: projects2, docs: [...docs.values()], artifacts, snapshots, listed, stats: stats2, best: bestFile };
   } finally {
     try {
-      fs5.rmSync(tmp, { recursive: true, force: true });
+      fs6.rmSync(tmp, { recursive: true, force: true });
     } catch {
     }
   }
@@ -30228,7 +30915,9 @@ function countDesktopConversations({ quick = false } = {}) {
   if (quick) return new Set(Object.values(state.files || {}).filter((v2) => Array.isArray(v2) && v2[2] === "conv").map((v2) => v2[3])).size;
   const entries = scanCache({ state });
   writeState(state);
-  return new Set(entries.filter((e) => e.kind === "conv").map((e) => e.id)).size;
+  const ids = new Set(entries.filter((e) => e.kind === "conv").map((e) => e.id));
+  for (const s of collectDesktopStore().entries) ids.add(s.id);
+  return ids.size;
 }
 var importedDesktop = () => readState().imported || {};
 function noteImportedDesktop(map2) {
@@ -30238,9 +30927,9 @@ function noteImportedDesktop(map2) {
 }
 
 // server/finder.js
-import fs6 from "node:fs";
+import fs7 from "node:fs";
 import os4 from "node:os";
-import path6 from "node:path";
+import path7 from "node:path";
 import crypto2 from "node:crypto";
 import { spawnSync as spawnSync3 } from "node:child_process";
 var AI_DOMAINS = {
@@ -30258,11 +30947,11 @@ var AI_DOMAINS = {
 };
 var DEFAULT_FOLDERS = () => {
   try {
-    const c = JSON.parse(fs6.readFileSync(path6.join(HOME, ".tua", "config.json"), "utf8"));
+    const c = JSON.parse(fs7.readFileSync(path7.join(HOME, ".tua", "config.json"), "utf8"));
     if (Array.isArray(c.finder?.folders) && c.finder.folders.length) return c.finder.folders;
   } catch {
   }
-  return ["Downloads", "Documents", "Desktop"].map((d2) => path6.join(os4.homedir(), d2));
+  return ["Downloads", "Documents", "Desktop"].map((d2) => path7.join(os4.homedir(), d2));
 };
 var DOC_EXT = /\.(pdf|docx?|pptx?|xlsx?|md|markdown|txt|rtf|html?|csv|json|png|jpe?g|svg)$/i;
 var TEXT_EXT = /\.(md|markdown|txt|csv|json|html?)$/i;
@@ -30270,24 +30959,24 @@ var SKIP_DIR = /^(node_modules|\.git|Library|\.Trash)$|\.(app|photoslibrary|bund
 var MAX_SIZE = 5e7;
 var MAX_TEXT = 3e5;
 var MAX_DEPTH = 3;
-var STATE2 = () => path6.join(DATA_DIR, "finder-state.json");
+var STATE2 = () => path7.join(DATA_DIR, "finder-state.json");
 var readState2 = () => {
   try {
-    return JSON.parse(fs6.readFileSync(STATE2(), "utf8"));
+    return JSON.parse(fs7.readFileSync(STATE2(), "utf8"));
   } catch {
     return { files: {} };
   }
 };
 var writeState2 = (s) => {
   try {
-    fs6.mkdirSync(DATA_DIR, { recursive: true });
-    fs6.writeFileSync(STATE2(), JSON.stringify(s) + "\n");
+    fs7.mkdirSync(DATA_DIR, { recursive: true });
+    fs7.writeFileSync(STATE2(), JSON.stringify(s) + "\n");
   } catch {
   }
 };
 var sha256File2 = (p2) => {
   try {
-    return crypto2.createHash("sha256").update(fs6.readFileSync(p2)).digest("hex");
+    return crypto2.createHash("sha256").update(fs7.readFileSync(p2)).digest("hex");
   } catch {
     return null;
   }
@@ -30349,7 +31038,7 @@ function knownContent({ desktop = null, log = () => {
     try {
       const p2 = parseCodeSession(s.file);
       for (const [fp, content] of p2.files) {
-        addText(content, { label: path6.basename(fp), origin: "Claude Code", project: projectOfCwd(p2.cwd), convo: p2.convo });
+        addText(content, { label: path7.basename(fp), origin: "Claude Code", project: projectOfCwd(p2.cwd), convo: p2.convo });
         n++;
       }
     } catch {
@@ -30357,7 +31046,7 @@ function knownContent({ desktop = null, log = () => {
   }
   const dirs = (d2) => {
     try {
-      return fs6.readdirSync(d2, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path6.join(d2, e.name));
+      return fs7.readdirSync(d2, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path7.join(d2, e.name));
     } catch {
       return [];
     }
@@ -30366,17 +31055,17 @@ function knownContent({ desktop = null, log = () => {
     if (depth > 4) return;
     let entries = [];
     try {
-      entries = fs6.readdirSync(dir, { withFileTypes: true });
+      entries = fs7.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       if (e.name.startsWith(".") || SKIP_DIR.test(e.name)) continue;
-      const p2 = path6.join(dir, e.name);
+      const p2 = path7.join(dir, e.name);
       if (e.isDirectory()) walkOut(p2, depth + 1, item);
       else if (e.isFile() && DOC_EXT.test(e.name)) {
         try {
-          const st = fs6.statSync(p2);
+          const st = fs7.statSync(p2);
           if (st.size > 0 && st.size <= MAX_SIZE) {
             add(st.size, { ...item, file: p2, label: e.name });
             n++;
@@ -30386,14 +31075,14 @@ function knownContent({ desktop = null, log = () => {
       }
     }
   };
-  for (const acct of dirs(COWORK_ROOT)) for (const room of dirs(acct)) for (const sess of dirs(room).filter((p2) => path6.basename(p2).startsWith("local_"))) {
+  for (const acct of dirs(COWORK_ROOT)) for (const room of dirs(acct)) for (const sess of dirs(room).filter((p2) => path7.basename(p2).startsWith("local_"))) {
     let meta = {};
     try {
-      meta = JSON.parse(fs6.readFileSync(sess + ".json", "utf8"));
+      meta = JSON.parse(fs7.readFileSync(sess + ".json", "utf8"));
     } catch {
     }
     const folder = Array.isArray(meta.userSelectedFolders) && meta.userSelectedFolders[0] ? String(meta.userSelectedFolders[0]) : "";
-    walkOut(path6.join(sess, "outputs"), 0, { origin: "Claude Cowork", project: folder ? projectOfCwd(folder) : "Cowork", convo: meta.title ? String(meta.title) : "" });
+    walkOut(path7.join(sess, "outputs"), 0, { origin: "Claude Cowork", project: folder ? projectOfCwd(folder) : "Cowork", convo: meta.title ? String(meta.title) : "" });
   }
   log(`Finder: ${n} kjente innhold (create_file i Desktop-cachen, Write i Code-\xF8kter, Cowork outputs/) fordelt p\xE5 ${bySize.size} st\xF8rrelser`);
   return bySize;
@@ -30409,17 +31098,17 @@ function walkFolders(folders) {
     if (depth > MAX_DEPTH) return;
     let entries = [];
     try {
-      entries = fs6.readdirSync(dir, { withFileTypes: true });
+      entries = fs7.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       if (e.name.startsWith(".") || SKIP_DIR.test(e.name)) continue;
-      const p2 = path6.join(dir, e.name);
+      const p2 = path7.join(dir, e.name);
       if (e.isDirectory()) walk2(p2, folder, depth + 1);
       else if (e.isFile() && DOC_EXT.test(e.name)) {
         try {
-          const st = fs6.statSync(p2);
+          const st = fs7.statSync(p2);
           if (st.size > 0 && st.size <= MAX_SIZE) out.push({ path: p2, folder, size: st.size, mtime: st.mtimeMs });
         } catch {
         }
@@ -30439,7 +31128,7 @@ function contentCandidates(folders, known, { state = readState2() } = {}) {
     const sha = prev && prev.size === f2.size && prev.mtime === f2.mtime ? prev.sha : sha256File2(f2.path);
     if (!sha) continue;
     files[f2.path] = { size: f2.size, mtime: f2.mtime, sha };
-    const hit = items.find((it) => !(it.file && path6.resolve(it.file) === path6.resolve(f2.path)) && hashOf(it) === sha);
+    const hit = items.find((it) => !(it.file && path7.resolve(it.file) === path7.resolve(f2.path)) && hashOf(it) === sha);
     if (hit) out.push({ path: f2.path, folder: f2.folder, criterion: "innhold", origin: hit.origin, known: hit, convo: hit.href || null });
   }
   return out;
@@ -30448,7 +31137,7 @@ function findCandidates({ folders = DEFAULT_FOLDERS(), desktop = null, log = () 
 } } = {}) {
   const real = folders.filter((f2) => {
     try {
-      return fs6.statSync(f2).isDirectory();
+      return fs7.statSync(f2).isDirectory();
     } catch {
       return false;
     }
@@ -30470,18 +31159,18 @@ function findCandidates({ folders = DEFAULT_FOLDERS(), desktop = null, log = () 
 }
 var insideArchive = (p2) => {
   if (!filesMode()) return false;
-  const r2 = path6.relative(FILES_ROOT, p2);
-  return !!r2 && !r2.startsWith("..") && !path6.isAbsolute(r2);
+  const r2 = path7.relative(FILES_ROOT, p2);
+  return !!r2 && !r2.startsWith("..") && !path7.isAbsolute(r2);
 };
 var insideRepo = (p2) => {
-  let d2 = path6.dirname(p2);
-  for (let i = 0; i < 8 && d2 && d2 !== path6.dirname(d2); i++, d2 = path6.dirname(d2)) if (fs6.existsSync(path6.join(d2, ".git"))) return true;
+  let d2 = path7.dirname(p2);
+  for (let i = 0; i < 8 && d2 && d2 !== path7.dirname(d2); i++, d2 = path7.dirname(d2)) if (fs7.existsSync(path7.join(d2, ".git"))) return true;
   return false;
 };
 function countFinderCandidates({ desktop = null, quick = false } = {}) {
   try {
     const atoms = load();
-    const list = quick ? DEFAULT_FOLDERS().filter((f2) => fs6.existsSync(f2)).flatMap((f2) => originCandidates(f2)) : findCandidates({ desktop }).candidates;
+    const list = quick ? DEFAULT_FOLDERS().filter((f2) => fs7.existsSync(f2)).flatMap((f2) => originCandidates(f2)) : findCandidates({ desktop }).candidates;
     return list.filter((c) => !insideRepo(c.path) && !insideArchive(c.path) && !atoms.some((a) => a.key === `fil:${c.path}`)).length;
   } catch {
     return 0;
@@ -30510,17 +31199,17 @@ function scanFinder({ dryRun = false, log = () => {
         stats2.alleredeITua++;
         continue;
       }
-      const fk = `${path6.basename(c.folder)} \xB7 ${c.criterion}`;
+      const fk = `${path7.basename(c.folder)} \xB7 ${c.criterion}`;
       perFolder[fk] = (perFolder[fk] || 0) + 1;
-      const st = fs6.statSync(c.path);
-      const name = path6.basename(c.path, path6.extname(c.path));
+      const st = fs7.statSync(c.path);
+      const name = path7.basename(c.path, path7.extname(c.path));
       const conv = convAtom(c.convo);
       if (conv) stats2.koblet++;
       const readable = TEXT_EXT.test(c.path) && st.size <= 5e6;
       let text2 = "";
       if (readable) {
         try {
-          text2 = fs6.readFileSync(c.path, "utf8");
+          text2 = fs7.readFileSync(c.path, "utf8");
           if (text2.length > MAX_TEXT) text2 = text2.slice(0, MAX_TEXT) + `
 
 _(forkortet: ${text2.length - MAX_TEXT} tegn til i fila)_`;
@@ -30531,7 +31220,7 @@ _(forkortet: ${text2.length - MAX_TEXT} tegn til i fila)_`;
       if (text2.trim()) stats2.lesbare++;
       const origin = c.origin || "AI";
       const whereLine = (c.urls || []).filter((u2) => !/oaiusercontent|storage\.googleapis/.test(u2)).slice(0, 3).join(" \xB7 ");
-      const desc = `_Dokument \xB7 ${path6.extname(c.path).slice(1).toLowerCase()} \xB7 ${fmtSize(st.size)} \xB7 ${iso(st.mtimeMs)} \xB7 fra ${origin}${c.known?.convo ? ` (\xAB${c.known.convo}\xBB)` : ""} \xB7 kriterium: ${c.criterion}_`;
+      const desc = `_Dokument \xB7 ${path7.extname(c.path).slice(1).toLowerCase()} \xB7 ${fmtSize(st.size)} \xB7 ${iso(st.mtimeMs)} \xB7 fra ${origin}${c.known?.convo ? ` (\xAB${c.known.convo}\xBB)` : ""} \xB7 kriterium: ${c.criterion}_`;
       const content = text2.trim() ? `# ${titleOf(text2, name)}
 
 ${desc}
@@ -30561,7 +31250,7 @@ Innholdet er identisk med ${c.known.file ? `fila ${c.known.label} i en Cowork-\x
         tags: ["dokument", "finder"],
         links,
         ...conv ? { derivedFrom: [{ id: conv.id, version: conv.version || 1, level: "L" }] } : {},
-        short: clip(text2.trim() ? firstPara(text2) : `${name} (${path6.extname(c.path).slice(1)}, ${fmtSize(st.size)}) fra ${origin}, ${iso(st.mtimeMs)}. Ligger i ${path6.basename(c.folder)}.`, S_MAX),
+        short: clip(text2.trim() ? firstPara(text2) : `${name} (${path7.extname(c.path).slice(1)}, ${fmtSize(st.size)}) fra ${origin}, ${iso(st.mtimeMs)}. Ligger i ${path7.basename(c.folder)}.`, S_MAX),
         summary: `Funnet av Finder-connectoren (${c.criterion}); fila er referert, ikke kopiert.`
       });
       if (status === "ny") {
@@ -30577,11 +31266,11 @@ Innholdet er identisk med ${c.known.file ? `fila ${c.known.label} i en Cowork-\x
   }
   const folderLine = Object.entries(perFolder).sort().map(([k2, n]) => `${k2}: ${n}`).join(" \xB7 ") || "\u2014";
   const taken = candidates.filter((c) => !insideRepo(c.path));
-  const listed = taken.slice(0, dryRun ? 120 : 40).map((c) => `- ${path6.basename(c.folder)}/${path6.relative(c.folder, c.path)} \xB7 ${c.criterion} \xB7 ${c.origin}${c.known?.convo ? ` \xB7 \xAB${c.known.convo}\xBB` : ""}`);
+  const listed = taken.slice(0, dryRun ? 120 : 40).map((c) => `- ${path7.basename(c.folder)}/${path7.relative(c.folder, c.path)} \xB7 ${c.criterion} \xB7 ${c.origin}${c.known?.convo ? ` \xB7 \xAB${c.known.convo}\xBB` : ""}`);
   const report = [
     "# Import: Finder (dokumenter ved referanse)",
     "",
-    `${real.map((f2) => path6.basename(f2)).join(", ")} \xB7 ${candidates.length} kandidater \xB7 ${(/* @__PURE__ */ new Date()).toLocaleString("no-NO")}${dryRun ? " \xB7 **dry-run, ingenting skrevet**" : ""}`,
+    `${real.map((f2) => path7.basename(f2)).join(", ")} \xB7 ${candidates.length} kandidater \xB7 ${(/* @__PURE__ */ new Date()).toLocaleString("no-NO")}${dryRun ? " \xB7 **dry-run, ingenting skrevet**" : ""}`,
     "",
     `- **Dokumenter:** ${stats2.nye} nye \xB7 ${stats2.oppdatert} oppdatert \xB7 ${stats2.uendret} uendret`,
     `- **Per mappe og kriterium:** ${folderLine}`,
@@ -30626,7 +31315,7 @@ function watchFinder({ log = () => {
   const watchers = [];
   for (const f2 of folders || DEFAULT_FOLDERS()) {
     try {
-      watchers.push(fs6.watch(f2, { persistent: false }, kick));
+      watchers.push(fs7.watch(f2, { persistent: false }, kick));
     } catch {
     }
   }
@@ -30637,20 +31326,20 @@ function watchFinder({ log = () => {
 }
 
 // server/import.js
-var FERDIG = () => path7.join(INBOX_DIR, "Ferdig");
-var BEHANDLES = () => path7.join(INBOX_DIR, ".behandles");
+var FERDIG = () => path8.join(INBOX_DIR, "Ferdig");
+var BEHANDLES = () => path8.join(INBOX_DIR, ".behandles");
 var DEFAULT_MIN = SHORT_L;
 var MIN_SVAR = Number(process.env.TUA_MIN_SVAR) || 3e3;
-var CODE_PROJECTS = path7.join(process.env.TUA_CODE_HOME || os5.homedir(), ".claude", "projects");
-var COWORK_ROOT = process.env.TUA_COWORK_ROOT || path7.join(CLAUDE_APP_DIR, "local-agent-mode-sessions");
+var CODE_PROJECTS = path8.join(process.env.TUA_CODE_HOME || os5.homedir(), ".claude", "projects");
+var COWORK_ROOT = process.env.TUA_COWORK_ROOT || path8.join(CLAUDE_APP_DIR, "local-agent-mode-sessions");
 var ms2 = (v2) => v2 == null ? null : typeof v2 === "number" ? v2 < 1e12 ? v2 * 1e3 : v2 : Date.parse(v2) || null;
 var iso2 = (t) => t ? new Date(t).toISOString().slice(0, 10) : "";
 var flat2 = (s) => String(s || "").replace(/\s+/g, " ").trim();
 var clip2 = (s, n) => s.length > n ? s.slice(0, n - 1).trimEnd() + "\u2026" : s;
-var readJson = (p2) => JSON.parse(fs7.readFileSync(p2, "utf8"));
+var readJson = (p2) => JSON.parse(fs8.readFileSync(p2, "utf8"));
 var exists2 = (p2) => {
   try {
-    fs7.accessSync(p2);
+    fs8.accessSync(p2);
     return true;
   } catch {
     return false;
@@ -30695,15 +31384,15 @@ function projectOfCwd(cwd) {
   let d2 = cwd;
   for (let i = 0; i < 6 && d2; i++) {
     try {
-      const p2 = JSON.parse(fs7.readFileSync(path7.join(d2, ".tua-sync.json"), "utf8")).project;
+      const p2 = JSON.parse(fs8.readFileSync(path8.join(d2, ".tua-sync.json"), "utf8")).project;
       if (p2) return p2;
     } catch {
     }
-    const up = path7.dirname(d2);
+    const up = path8.dirname(d2);
     if (up === d2) break;
     d2 = up;
   }
-  return path7.basename(repoRootOf(cwd)) || "Claude Code";
+  return path8.basename(repoRootOf(cwd)) || "Claude Code";
 }
 var stripReminders = (t) => String(t || "").replace(/<system-reminder[\s\S]*?<\/system-reminder>/g, "").replace(/<(command-name|command-message|command-args|local-command-stdout|local-command-caveat)>[\s\S]*?<\/\1>/g, "").trim();
 var TEXT_FILE = /\.(md|markdown|txt|rst)$/i;
@@ -30711,7 +31400,7 @@ function parseCodeSession(file2, { maxChars = 3e5 } = {}) {
   const s = { id: "", cwd: "", title: "", prompts: [], answers: [], files: /* @__PURE__ */ new Map(), edited: /* @__PURE__ */ new Set(), lastAssistant: "", first: null, last: null, turns: 0, lines: [] };
   let text2 = "";
   try {
-    text2 = fs7.readFileSync(file2, "utf8");
+    text2 = fs8.readFileSync(file2, "utf8");
   } catch {
     return s;
   }
@@ -30754,7 +31443,7 @@ function parseCodeSession(file2, { maxChars = 3e5 } = {}) {
       s.last = when || s.last;
     }
   }
-  s.id ||= path7.basename(file2, ".jsonl");
+  s.id ||= path8.basename(file2, ".jsonl");
   const full = s.lines.join("\n\n");
   s.transcript = full.length > maxChars ? full.slice(0, maxChars) + `
 
@@ -30769,16 +31458,16 @@ function listCodeSessions(root = CODE_PROJECTS) {
   const out = [];
   let dirs = [];
   try {
-    dirs = fs7.readdirSync(root, { withFileTypes: true }).filter((d2) => d2.isDirectory());
+    dirs = fs8.readdirSync(root, { withFileTypes: true }).filter((d2) => d2.isDirectory());
   } catch {
     return out;
   }
   for (const d2 of dirs) {
-    const dir = path7.join(root, d2.name);
-    for (const f2 of fs7.readdirSync(dir)) {
+    const dir = path8.join(root, d2.name);
+    for (const f2 of fs8.readdirSync(dir)) {
       if (!f2.endsWith(".jsonl") || f2.startsWith("agent-")) continue;
-      const abs = path7.join(dir, f2);
-      const st = fs7.statSync(abs);
+      const abs = path8.join(dir, f2);
+      const st = fs8.statSync(abs);
       out.push({ file: abs, dir: d2.name, size: st.size, mtime: st.mtimeMs });
     }
   }
@@ -30788,37 +31477,37 @@ function listCoworkSessions(root = COWORK_ROOT) {
   const out = [];
   const dirs = (d2) => {
     try {
-      return fs7.readdirSync(d2, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path7.join(d2, e.name));
+      return fs8.readdirSync(d2, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path8.join(d2, e.name));
     } catch {
       return [];
     }
   };
   for (const acct of dirs(root)) for (const room of dirs(acct)) {
-    for (const sess of dirs(room).filter((p2) => path7.basename(p2).startsWith("local_"))) {
+    for (const sess of dirs(room).filter((p2) => path8.basename(p2).startsWith("local_"))) {
       let meta = {};
       try {
-        meta = JSON.parse(fs7.readFileSync(sess + ".json", "utf8"));
+        meta = JSON.parse(fs8.readFileSync(sess + ".json", "utf8"));
       } catch {
       }
-      const audit = path7.join(sess, "audit.jsonl");
+      const audit = path8.join(sess, "audit.jsonl");
       let file2 = exists2(audit) ? audit : null, kind = "audit";
       if (!file2) {
-        file2 = dirs(path7.join(sess, ".claude", "projects")).flatMap((p2) => {
+        file2 = dirs(path8.join(sess, ".claude", "projects")).flatMap((p2) => {
           try {
-            return fs7.readdirSync(p2).filter((f2) => f2.endsWith(".jsonl") && !f2.startsWith("agent-")).map((f2) => path7.join(p2, f2));
+            return fs8.readdirSync(p2).filter((f2) => f2.endsWith(".jsonl") && !f2.startsWith("agent-")).map((f2) => path8.join(p2, f2));
           } catch {
             return [];
           }
-        }).map((f2) => ({ f: f2, size: fs7.statSync(f2).size })).sort((a, b) => b.size - a.size)[0]?.f || null;
+        }).map((f2) => ({ f: f2, size: fs8.statSync(f2).size })).sort((a, b) => b.size - a.size)[0]?.f || null;
         kind = "transkript";
       }
       if (!file2) continue;
-      const st = fs7.statSync(file2);
+      const st = fs8.statSync(file2);
       const folders = (Array.isArray(meta.userSelectedFolders) ? meta.userSelectedFolders : []).map(String);
       const home = os5.homedir();
       const generic = (f2) => {
-        const p2 = path7.resolve(String(f2 || ""));
-        return p2 === home || ["Documents", "Downloads", "Desktop", "Library"].some((d2) => p2 === path7.join(home, d2));
+        const p2 = path8.resolve(String(f2 || ""));
+        return p2 === home || ["Documents", "Downloads", "Desktop", "Library"].some((d2) => p2 === path8.join(home, d2));
       };
       const folder = folders.find((f2) => !generic(f2)) || folders[0] || "";
       out.push({
@@ -30826,7 +31515,7 @@ function listCoworkSessions(root = COWORK_ROOT) {
         size: st.size,
         mtime: st.mtimeMs,
         kind,
-        over: { id: path7.basename(sess).replace(/^local_/, ""), project: folder && !generic(folder) ? projectOfCwd(folder) : "Cowork", repo: folder, convo: meta.title ? String(meta.title) : "", created: meta.createdAt || null, last: meta.lastActivityAt || null, archived: !!meta.isArchived }
+        over: { id: path8.basename(sess).replace(/^local_/, ""), project: folder && !generic(folder) ? projectOfCwd(folder) : "Cowork", repo: folder, convo: meta.title ? String(meta.title) : "", created: meta.createdAt || null, last: meta.lastActivityAt || null, archived: !!meta.isArchived }
       });
     }
   }
@@ -30884,7 +31573,7 @@ function importCode({ files = null, source = "code", dryRun = false, project = n
       const links = repo ? [{ kind: "repo", href: repo, label: `Repo \u2014 ${proj}` }] : [];
       const header = `# ${s.convo}
 
-_${srcLabel} \xB7 ${s.turns} oppgaver \xB7 ${iso2(s.first)}${s.last && iso2(s.last) !== iso2(s.first) ? ` \u2013 ${iso2(s.last)}` : ""} \xB7 ${proj}${repo ? ` \xB7 ${repo}` : ""} \xB7 \xF8ktfil ${path7.basename(file2)}_
+_${srcLabel} \xB7 ${s.turns} oppgaver \xB7 ${iso2(s.first)}${s.last && iso2(s.last) !== iso2(s.first) ? ` \u2013 ${iso2(s.last)}` : ""} \xB7 ${proj}${repo ? ` \xB7 ${repo}` : ""} \xB7 \xF8ktfil ${path8.basename(file2)}_
 
 `;
       const { atom, status } = put({
@@ -30899,7 +31588,7 @@ _${srcLabel} \xB7 ${s.turns} oppgaver \xB7 ${iso2(s.first)}${s.last && iso2(s.la
         tags: ["samtale", source],
         links,
         short: ruleS(s.title, s.firstUser),
-        summary: `${srcLabel}-\xF8kt importert fra ${path7.basename(file2)} (${s.turns} oppgaver).`
+        summary: `${srcLabel}-\xF8kt importert fra ${path8.basename(file2)} (${s.turns} oppgaver).`
       }, s.last);
       count(status);
       perProject[proj] = (perProject[proj] || 0) + 1;
@@ -30929,7 +31618,7 @@ _${srcLabel} \xB7 ${s.turns} oppgaver \xB7 ${iso2(s.first)}${s.last && iso2(s.la
       for (const [fp, content] of s.files) {
         const fq = posix(fp);
         if (!TEXT_FILE.test(fq) || /\/(node_modules|\.tua|\.git)\//.test(fq) || /\/\.claude\/(?!worktrees\/)/.test(fq) || /\/CLAUDE\.md$/.test(fq) || content.trim().length < SHORT_L) continue;
-        if (filesMode() && !path7.relative(FILES_ROOT, fp).startsWith("..")) continue;
+        if (filesMode() && !path8.relative(FILES_ROOT, fp).startsWith("..")) continue;
         if (isDataDump(content)) {
           stats2.datadump++;
           continue;
@@ -30937,7 +31626,7 @@ _${srcLabel} \xB7 ${s.turns} oppgaver \xB7 ${iso2(s.first)}${s.last && iso2(s.la
         const r2 = put({
           key: `fil:${fp}`,
           kind: "capture",
-          name: titleOf(content, path7.basename(fp, path7.extname(fp))),
+          name: titleOf(content, path8.basename(fp, path8.extname(fp))),
           content,
           project: proj,
           convo: s.convo,
@@ -30953,7 +31642,7 @@ _${srcLabel} \xB7 ${s.turns} oppgaver \xB7 ${iso2(s.first)}${s.last && iso2(s.la
       }
     } catch (e) {
       stats2.feil++;
-      log(`  \u26A0 ${path7.basename(file2)}: ${e.message}`);
+      log(`  \u26A0 ${path8.basename(file2)}: ${e.message}`);
     }
   }
   const projLine = Object.entries(perProject).sort((a, b) => b[1] - a[1]).map(([p2, n]) => `${p2} (${n})`).join(", ") || "\u2014";
@@ -31014,12 +31703,12 @@ function collectClaude(dir, depth = 0) {
   const out = { conversations: [], projects: [], design: [], memories: [], other: [] };
   let entries = [];
   try {
-    entries = fs7.readdirSync(dir, { withFileTypes: true });
+    entries = fs8.readdirSync(dir, { withFileTypes: true });
   } catch {
     return out;
   }
   for (const e of entries) {
-    const p2 = path7.join(dir, e.name);
+    const p2 = path8.join(dir, e.name);
     if (e.isDirectory()) {
       if (depth < 4 && !e.name.startsWith(".")) {
         const sub = collectClaude(p2, depth + 1);
@@ -31028,7 +31717,7 @@ function collectClaude(dir, depth = 0) {
       ;
       continue;
     }
-    if (!e.name.toLowerCase().endsWith(".json") || fs7.statSync(p2).size > 4e8) continue;
+    if (!e.name.toLowerCase().endsWith(".json") || fs8.statSync(p2).size > 4e8) continue;
     let d2;
     try {
       d2 = readJson(p2);
@@ -31158,7 +31847,7 @@ function parseClaude(dir, { extraProjects = [] } = {}) {
 }
 var partText = (p2) => typeof p2 === "string" ? p2 : p2 && typeof p2 === "object" ? p2.text || p2.content || "" : "";
 function parseChatGPT(dir) {
-  const conversations = readJson(path7.join(dir, "conversations.json"));
+  const conversations = readJson(path8.join(dir, "conversations.json"));
   if (!Array.isArray(conversations)) throw new Error("conversations.json er ikke en liste");
   const seen = /* @__PURE__ */ new Set();
   const convs = conversations.filter(Boolean).map((c) => {
@@ -31190,9 +31879,9 @@ function parseChatGPT(dir) {
   return { kind: "chatgpt", convs, docs: [], projects: [], format: { felter: [...seen].sort(), prosjektkobling: null, prosjekterIFila: 0 } };
 }
 function detect(dir) {
-  const p2 = path7.join(dir, "conversations.json");
+  const p2 = path8.join(dir, "conversations.json");
   if (exists2(p2)) {
-    const head = fs7.readFileSync(p2, { encoding: "utf8", flag: "r" }).slice(0, 2e4);
+    const head = fs8.readFileSync(p2, { encoding: "utf8", flag: "r" }).slice(0, 2e4);
     if (/"mapping"/.test(head) && !/"chat_messages"/.test(head)) return "chatgpt";
   }
   const f2 = collectClaude(dir);
@@ -31201,8 +31890,8 @@ function detect(dir) {
 var allJsons = (dir, depth = 0) => {
   let out = [];
   try {
-    for (const e of fs7.readdirSync(dir, { withFileTypes: true })) {
-      if (e.isDirectory() && depth < 4) out.push(...allJsons(path7.join(dir, e.name), depth + 1));
+    for (const e of fs8.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isDirectory() && depth < 4) out.push(...allJsons(path8.join(dir, e.name), depth + 1));
       else if (e.name.toLowerCase().endsWith(".json")) out.push(e.name);
     }
   } catch {
@@ -31210,11 +31899,11 @@ var allJsons = (dir, depth = 0) => {
   return out;
 };
 function findRoot(dir, loose = false) {
-  if (exists2(path7.join(dir, "conversations.json")) || exists2(path7.join(dir, "projects.json"))) return dir;
+  if (exists2(path8.join(dir, "conversations.json")) || exists2(path8.join(dir, "projects.json"))) return dir;
   if (loose) return allJsons(dir).length ? dir : null;
-  for (const e of fs7.readdirSync(dir, { withFileTypes: true })) {
+  for (const e of fs8.readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory() && !e.name.startsWith(".")) {
-      const r2 = findRoot(path7.join(dir, e.name));
+      const r2 = findRoot(path8.join(dir, e.name));
       if (r2) return r2;
     }
   }
@@ -31223,25 +31912,25 @@ function findRoot(dir, loose = false) {
 var unzip = (zipPath) => unzipToTemp(zipPath, (tmp) => !!findRoot(tmp, true));
 var isManifest = (p2) => {
   try {
-    return /\.json$/i.test(p2) && fs7.statSync(p2).size < 2e6 && Array.isArray(readJson(p2).data_files);
+    return /\.json$/i.test(p2) && fs8.statSync(p2).size < 2e6 && Array.isArray(readJson(p2).data_files);
   } catch {
     return false;
   }
 };
 var inboxFiles = () => [INBOX_DIR, FERDIG(), BEHANDLES()].flatMap((d2) => {
   try {
-    return fs7.readdirSync(d2).map((n) => path7.join(d2, n));
+    return fs8.readdirSync(d2).map((n) => path8.join(d2, n));
   } catch {
     return [];
   }
 });
 function manifestStatus() {
-  const m2 = inboxFiles().filter(isManifest).sort((a, b) => fs7.statSync(b).mtimeMs - fs7.statSync(a).mtimeMs)[0];
+  const m2 = inboxFiles().filter(isManifest).sort((a, b) => fs8.statSync(b).mtimeMs - fs8.statSync(a).mtimeMs)[0];
   if (!m2) return null;
   const data = readJson(m2);
-  const have = new Set(inboxFiles().map((p2) => path7.basename(p2).replace(/ \(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\)(?=\.zip$)/, "")));
+  const have = new Set(inboxFiles().map((p2) => path8.basename(p2).replace(/ \(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\)(?=\.zip$)/, "")));
   const files = (data.data_files || []).map((f2) => ({ ...f2, present: have.has(f2.filename) }));
-  return { manifest: path7.basename(m2), created: data.created_at || "", total: data.total_files || files.length, files, missing: files.filter((f2) => !f2.present), present: files.filter((f2) => f2.present) };
+  return { manifest: path8.basename(m2), created: data.created_at || "", total: data.total_files || files.length, files, missing: files.filter((f2) => !f2.present), present: files.filter((f2) => f2.present) };
 }
 var manifestReport = (st) => [
   `# Claude-eksport: ${st.present.length} av ${st.files.length} filer mottatt`,
@@ -31255,13 +31944,13 @@ var manifestReport = (st) => [
 ].join("\n");
 function siblingProjects(log) {
   const out = [];
-  for (const z of inboxFiles().filter((p2) => /^projects-\d+(?: \(.*\))?\.zip$/i.test(path7.basename(p2)))) {
+  for (const z of inboxFiles().filter((p2) => /^projects-\d+(?: \(.*\))?\.zip$/i.test(path8.basename(p2)))) {
     try {
       const t = unzip(z);
       out.push(...collectClaude(t).projects);
-      fs7.rmSync(t, { recursive: true, force: true });
+      fs8.rmSync(t, { recursive: true, force: true });
     } catch (e) {
-      log(`  prosjekter i ${path7.basename(z)} kunne ikke leses: ${e.message}`);
+      log(`  prosjekter i ${path8.basename(z)} kunne ikke leses: ${e.message}`);
     }
   }
   return out;
@@ -31273,8 +31962,8 @@ var DESCRIBE = {
 function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_MIN, after = null, log = () => {
 }, moveTo = null } = {}) {
   const t0 = Date.now();
-  const name = path7.basename(src);
-  if (fs7.statSync(src).isFile() && isManifest(src)) {
+  const name = path8.basename(src);
+  if (fs8.statSync(src).isFile() && isManifest(src)) {
     const st = manifestStatus() || { manifest: name, files: [], missing: [], present: [] };
     const report = manifestReport(st);
     if (!dryRun) {
@@ -31286,7 +31975,7 @@ function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_
     return { report, stats: { manifest: true, present: st.present.length, total: st.files.length }, kind: "manifest", count: 0 };
   }
   let dir = src, tmp = null;
-  if (fs7.statSync(src).isFile()) {
+  if (fs8.statSync(src).isFile()) {
     if (!/\.zip$/i.test(src)) throw new Error(`${name}: ikke en zip og ikke en mappe`);
     tmp = unzip(src);
     dir = tmp;
@@ -31301,7 +31990,7 @@ function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_
 
 Innhold: ${found.length} json-fil${found.length === 1 ? "" : "er"} (${[...new Set(found.map((f2) => f2.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/i, "<uuid>")))].slice(0, 6).join(", ")}).${DESCRIBE[cat] ? ` ${DESCRIBE[cat]}.` : ""} Denne kategorien av Claude-eksporten blir ikke atomer enn\xE5. Fila er lagt i Innboks/Ferdig og kan slettes i Finder.`;
     log(`${name}: ikke st\xF8ttet (${cat || found.join(", ")}) \u2014 flyttes til Ferdig`);
-    if (tmp) fs7.rmSync(tmp, { recursive: true, force: true });
+    if (tmp) fs8.rmSync(tmp, { recursive: true, force: true });
     return { report, stats: { unsupported: true }, kind: "ukjent", count: 0 };
   }
   const data = kind === "claude" ? parseClaude(root, { extraProjects: collectClaude(root).projects.length ? [] : siblingProjects(log) }) : parseChatGPT(root);
@@ -31329,7 +32018,7 @@ Innhold: ${found.length} json-fil${found.length === 1 ? "" : "er"} (${[...new Se
     }
   });
   if (!dryRun) log(`${name}: ${r2.stats.nye} nye \xB7 ${r2.stats.oppdatert} oppdatert \xB7 ${r2.stats.uendret} uendret \xB7 ${r2.stats.korte} korte \xB7 ${r2.written} filer skrevet \xB7 ${((Date.now() - t0) / 1e3).toFixed(1)} s`);
-  if (tmp) fs7.rmSync(tmp, { recursive: true, force: true });
+  if (tmp) fs8.rmSync(tmp, { recursive: true, force: true });
   return { report: r2.report, stats: r2.stats, kind, count: data.convs.length };
 }
 function importParsed(data, {
@@ -31453,7 +32142,7 @@ _${c.source} \xB7 ${c.messages} meldinger \xB7 ${iso2(c.created)}${c.updated && 
       if ((d2.content || "").trim().length < minChars) continue;
       const r2 = put({
         key: `claude-doc:${d2.id}`,
-        name: stem(path7.basename(d2.title)),
+        name: stem(path8.basename(d2.title)),
         content: d2.content,
         project: d2.project,
         source: "Claude",
@@ -31548,9 +32237,29 @@ function desktopData({ log = () => {
 }, all = false } = {}) {
   const since = all ? null : importedDesktop();
   const d2 = collectDesktop({ log, since });
+  const grants = desktopFolderGrants();
+  const home = os5.homedir();
+  const generic = (f2) => {
+    const p2 = path8.resolve(String(f2 || ""));
+    return p2 === home || ["Documents", "Downloads", "Desktop", "Library"].some((x) => p2 === path8.join(home, x));
+  };
+  const projectFromGrant = (c) => {
+    const folders = c.store?.cowork && grants.bySession.get(c.store.cowork.replace(/^cse_/, "")) || grants.byConversation.get(c.id) || [];
+    const f2 = folders.find((x) => !generic(x));
+    return f2 ? projectOfCwd(f2) : null;
+  };
   const convs = d2.convs.map((c) => {
+    if (!c.projectName && c.store) c.projectName = projectFromGrant(c);
     const toolN = Object.values(c.tools).reduce((a, b) => a + b, 0);
-    const meta = [toolN ? `${toolN} verkt\xF8ykall` : null, c.thinking ? `${c.thinking} tankeblokker (ikke med)` : null, c.branches ? `${c.branches} meldinger p\xE5 andre grener (ikke med)` : null, c.model || null].filter(Boolean).join(" \xB7 ");
+    const w2 = c.store?.windowed;
+    const meta = [
+      toolN ? `${toolN} verkt\xF8ykall` : null,
+      c.thinking ? `${c.thinking} tankeblokker (ikke med)` : null,
+      c.branches ? `${c.branches} meldinger p\xE5 andre grener (ikke med)` : null,
+      c.model || null,
+      c.store ? w2 ? `utsnitt fra samtalelageret: ${c.messages} av ${w2.of ?? "?"} meldinger` : "fra samtalelageret" : null,
+      c.store?.cowork ? "Cowork" : null
+    ].filter(Boolean).join(" \xB7 ");
     return {
       id: c.id,
       title: c.title,
@@ -31558,7 +32267,7 @@ function desktopData({ log = () => {
       updated: c.updated,
       project: c.projectName ? c.projectName.replace(/[. ]+$/, "") : null,
       projectUuid: c.projectUuid,
-      source: c.snapshot ? "Claude (delt lenke)" : "Claude Desktop",
+      source: c.snapshot ? "Claude (delt lenke)" : c.store?.cowork ? "Claude Cowork" : "Claude Desktop",
       href: c.snapshot ? `https://claude.ai/share/${c.id.replace(/^share:/, "")}` : `claude://claude.ai/chat/${c.id}`,
       summary: c.summary,
       firstUser: c.firstUser,
@@ -31567,7 +32276,7 @@ function desktopData({ log = () => {
       artifacts: c.artifacts,
       attachments: c.attachments,
       meta,
-      tags: c.snapshot ? ["delt"] : ["desktop"]
+      tags: c.snapshot ? ["delt"] : c.store?.cowork ? ["desktop", "cowork"] : ["desktop"]
     };
   });
   const projects2 = [...d2.projects].map(([uuid3, name]) => ({ uuid: uuid3, name: String(name).replace(/[. ]+$/, "") }));
@@ -31604,9 +32313,10 @@ function importDesktop({ dryRun = false, project = null, minChars = DEFAULT_MIN,
     noteKind: "desktop",
     extraLines: [
       `- **Cachen:** ${CACHE_DIR} \xB7 ${st.filer} svar fra claude.ai/api \xB7 ${st.samtaler} samtaler (${st.dekodet} filer dekodet, ${st.ufullstendige} ufullstendige hoppet over) \xB7 ${st.lister} listesvar med prosjekt-kobling \xB7 ${st.snapshots} delte lenker \xE5pnet i Desktop`,
+      `- **Samtalelageret (IndexedDB, Desktop \u2265 2.42304):** ${st.lagerSamtaler ?? 0} samtaler sist \xE5pnet i Desktop (chat og Cowork)${st.lagerHoppet ? `, ${st.lagerHoppet} poster som ikke lot seg lese` : ""} \u2014 lange samtaler ligger der som utsnitt (de siste meldingene); nyeste versjon per samtale vinner over cachen`,
       artAtoms.length ? `- **Artifact-versjoner:** ${artAtoms.length} med tekst (${[...data.artifacts.values()].reduce((n, v2) => n + v2.length, 0)} versjoner i cachen)` : null,
       "- **Hva som er med i L:** brukerens meldinger og Claudes svar p\xE5 den grenen brukeren ser, mark\xF8rer for verkt\xF8ykall, filer Claude skrev (create_file) og vedlegg med tekst som egne atomer. Ikke med: verkt\xF8yresultater og tankeblokker.",
-      "- **Grense:** cachen har bare samtaler som har v\xE6rt \xC5PNET i Claude Desktop, og slik de s\xE5 ut sist de ble \xE5pnet. \xC5pne en samtale i Desktop, s\xE5 er den med innen 10 minutter."
+      "- **Grense:** cachen og samtalelageret har bare samtaler som har v\xE6rt \xC5PNET i Claude Desktop, og slik de s\xE5 ut sist de ble \xE5pnet; lageret holder de sist \xE5pnede. \xC5pne en samtale i Desktop, s\xE5 er den med innen 10 minutter."
     ].filter(Boolean),
     afterSave: (atoms) => {
       for (const a of artAtoms) upsert(atoms, { key: `artifact:${a.uuid}`, kind: "capture", name: stem(a.title), content: a.content, project: "Claude-samtaler", convo: "", source: "Claude Desktop", by: "regel", tags: ["artifact", "desktop"], short: ruleS(a.title, `artifact (${a.versions} versjoner) fra Claude Desktop-cachen`), summary: `Artifact fra Claude Desktop (${a.type || "ukjent type"}).` });
@@ -31761,15 +32471,15 @@ Beskrivelse fra siden: ${page.desc}` : ""
 var SHARE_FILE = /\.(url|webloc|txt|md)$/i;
 var shareLinksInFile = (p2) => {
   try {
-    if (fs7.statSync(p2).size > 1e6) return [];
-    return shareLinksIn(fs7.readFileSync(p2, "utf8"));
+    if (fs8.statSync(p2).size > 1e6) return [];
+    return shareLinksIn(fs8.readFileSync(p2, "utf8"));
   } catch {
     return [];
   }
 };
 function inboxShareFiles() {
   try {
-    return fs7.readdirSync(INBOX_DIR).filter((n) => !n.startsWith(".") && SHARE_FILE.test(n) && shareLinksInFile(path7.join(INBOX_DIR, n)).length).map((n) => path7.join(INBOX_DIR, n));
+    return fs8.readdirSync(INBOX_DIR).filter((n) => !n.startsWith(".") && SHARE_FILE.test(n) && shareLinksInFile(path8.join(INBOX_DIR, n)).length).map((n) => path8.join(INBOX_DIR, n));
   } catch {
     return [];
   }
@@ -31779,13 +32489,13 @@ async function processInboxShares({ dryRun = false, log = () => {
   if (ensureArchive().needsChoice) return [];
   const done = [];
   for (const src of inboxShareFiles()) {
-    const n = path7.basename(src);
+    const n = path8.basename(src);
     const links = shareLinksInFile(src);
     try {
       const r2 = await importShare(links.join("\n"), { dryRun, log, via: `Innboks (${n})` });
       if (!dryRun) {
-        fs7.mkdirSync(FERDIG(), { recursive: true });
-        fs7.renameSync(src, uniq(FERDIG(), n));
+        fs8.mkdirSync(FERDIG(), { recursive: true });
+        fs8.renameSync(src, uniq(FERDIG(), n));
       }
       done.push({ name: n, ...r2 });
     } catch (e) {
@@ -31855,7 +32565,7 @@ var historyLine = (c = historyCounts()) => {
 var isCandidate = (p2) => {
   try {
     if (/ \(feilet\)/.test(p2)) return false;
-    const st = fs7.statSync(p2);
+    const st = fs8.statSync(p2);
     return st.isFile() && (/\.zip$/i.test(p2) || isManifest(p2)) || st.isDirectory() && !!findRoot(p2);
   } catch {
     return false;
@@ -31863,22 +32573,22 @@ var isCandidate = (p2) => {
 };
 var stable = (p2) => {
   try {
-    const a = fs7.statSync(p2).size;
+    const a = fs8.statSync(p2).size;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
-    return fs7.statSync(p2).size === a;
+    return fs8.statSync(p2).size === a;
   } catch {
     return false;
   }
 };
 var uniq = (dir, base) => {
-  let p2 = path7.join(dir, base);
+  let p2 = path8.join(dir, base);
   if (!exists2(p2)) return p2;
-  const e = path7.extname(base), b = base.slice(0, base.length - e.length);
-  return path7.join(dir, `${b} (${(/* @__PURE__ */ new Date()).toISOString().slice(0, 16).replace(/[:T]/g, "-")})${e}`);
+  const e = path8.extname(base), b = base.slice(0, base.length - e.length);
+  return path8.join(dir, `${b} (${(/* @__PURE__ */ new Date()).toISOString().slice(0, 16).replace(/[:T]/g, "-")})${e}`);
 };
 function inboxPending() {
   try {
-    return fs7.readdirSync(INBOX_DIR).filter((n) => !n.startsWith(".") && n !== "Ferdig" && isCandidate(path7.join(INBOX_DIR, n)));
+    return fs8.readdirSync(INBOX_DIR).filter((n) => !n.startsWith(".") && n !== "Ferdig" && isCandidate(path8.join(INBOX_DIR, n)));
   } catch {
     return [];
   }
@@ -31888,38 +32598,38 @@ function processInbox({ dryRun = false, log = () => {
   if (ensureArchive().needsChoice) return [];
   let entries = [];
   try {
-    entries = fs7.readdirSync(INBOX_DIR).filter((n) => !n.startsWith(".") && n !== "Ferdig");
+    entries = fs8.readdirSync(INBOX_DIR).filter((n) => !n.startsWith(".") && n !== "Ferdig");
   } catch {
     return [];
   }
   const done = [];
   entries.sort((a, b) => (/^projects-/.test(b) ? 1 : 0) - (/^projects-/.test(a) ? 1 : 0) || (/\.json$/i.test(a) ? 1 : 0) - (/\.json$/i.test(b) ? 1 : 0));
   for (const n of entries) {
-    const src = path7.join(INBOX_DIR, n);
+    const src = path8.join(INBOX_DIR, n);
     if (!isCandidate(src) || !stable(src)) continue;
     let work = src;
     if (!dryRun) {
-      fs7.mkdirSync(BEHANDLES(), { recursive: true });
-      work = path7.join(BEHANDLES(), n);
+      fs8.mkdirSync(BEHANDLES(), { recursive: true });
+      work = path8.join(BEHANDLES(), n);
       try {
-        fs7.renameSync(src, work);
+        fs8.renameSync(src, work);
       } catch {
         continue;
       }
     }
     try {
       const dest = dryRun ? null : uniq(FERDIG(), n);
-      const r2 = importExport(work, { ...opts, dryRun, log, moveTo: dest ? path7.relative(FILES_ROOT, dest) : null });
+      const r2 = importExport(work, { ...opts, dryRun, log, moveTo: dest ? path8.relative(FILES_ROOT, dest) : null });
       if (!dryRun) {
-        fs7.mkdirSync(FERDIG(), { recursive: true });
-        fs7.renameSync(work, dest);
+        fs8.mkdirSync(FERDIG(), { recursive: true });
+        fs8.renameSync(work, dest);
       }
       done.push({ name: n, ...r2 });
     } catch (e) {
       log(`\u26A0 ${n}: ${e.message}`);
       if (!dryRun) {
         try {
-          fs7.renameSync(work, uniq(INBOX_DIR, n.replace(/(\.(zip|json))?$/i, " (feilet)$1")));
+          fs8.renameSync(work, uniq(INBOX_DIR, n.replace(/(\.(zip|json))?$/i, " (feilet)$1")));
         } catch {
         }
       }
@@ -31949,12 +32659,12 @@ function watchInbox({ log = () => {
     }, delay);
   };
   try {
-    fs7.mkdirSync(INBOX_DIR, { recursive: true });
+    fs8.mkdirSync(INBOX_DIR, { recursive: true });
   } catch {
   }
   let watcher = null;
   try {
-    watcher = fs7.watch(INBOX_DIR, { persistent: false }, () => kick(3e3));
+    watcher = fs8.watch(INBOX_DIR, { persistent: false }, () => kick(3e3));
   } catch (e) {
     log(`Innboks: kan ikke overv\xE5ke ${INBOX_DIR} (${e.message})`);
   }
@@ -31964,7 +32674,7 @@ function watchInbox({ log = () => {
     watcher?.close();
   };
 }
-if (!globalThis.__TUA_BUNDLE && process.argv[1] && path7.resolve(process.argv[1]) === fileURLToPath3(import.meta.url)) {
+if (!globalThis.__TUA_BUNDLE && process.argv[1] && path8.resolve(process.argv[1]) === fileURLToPath3(import.meta.url)) {
   const args = process.argv.slice(2);
   const flag = (f2) => {
     const i = args.indexOf(f2);
@@ -31999,7 +32709,7 @@ if (!globalThis.__TUA_BUNDLE && process.argv[1] && path7.resolve(process.argv[1]
       console.log(all.length ? all.map((r2) => r2.report).join("\n\n---\n\n") : `Ingenting \xE5 importere i ${INBOX_DIR}`);
     });
   } else if (src) {
-    console.log(importExport(path7.resolve(src), opts).report);
+    console.log(importExport(path8.resolve(src), opts).report);
   } else {
     console.error("Bruk: node import.js --code|--cowork|--desktop [--alle]|--finder|--alt [--project <navn>] [--etter <\xC5\xC5\xC5\xC5-MM-DD>] [--min-tegn <n>] [--dry-run]\n      node import.js --lenke <https://claude.ai/share/\u2026> [--dry-run]\n      node import.js --tall           (hva onboardingen ville sagt)\n      node import.js <zip|mappe> [--dry-run] [--project <navn>] [--min-tegn <n>] [--etter <\xC5\xC5\xC5\xC5-MM-DD>]\n      node import.js --innboks [--dry-run]");
     process.exit(2);
@@ -32020,7 +32730,7 @@ var addr = (id) => `${APP}#atom/${id}`;
 var firstRun = ensureArchive();
 if (firstRun.needsChoice) console.error(`[tua] ingen Tua-mappe funnet \u2014 sp\xF8r brukeren hvor arkivet skal ligge ved f\xF8rste verkt\xF8ykall (${archiveOptions().filter((o) => o.available).map((o) => o.label).join(", ")})`);
 var INSTRUCTIONS = "Tua er brukerens ene arkiv for AI-arbeid, p\xE5 tvers av alle prosjekter og klienter. Mappa p\xE5 disk er sannheten; hvert atom er en markdown-fil. Regler: (1) ARKIV F\xD8RST \u2014 f\xF8r du svarer fra hukommelsen p\xE5 noe som kan finnes fra f\xF8r (\xABhva har jeg om\xBB, \xABhar vi noe om\xBB, \xABhva ble bestemt\xBB, tidligere arbeid, et navn eller tall du ikke er sikker p\xE5), kall tua_search. Treffene svarer med ingressen (S) \u2014 ofte nok. Hent M med tua_get(level=M) f\xF8r L. (2) Svar kort: S og adresse. L bare n\xE5r svaret krever det; hver utlevering logges. (3) TILBY, IKKE SKRIV \u2014 n\xE5r du har levert noe verdt \xE5 finne igjen, sp\xF8r \xE9n gang \xABVil du at jeg lagrer dette til Tua?\xBB. Kall tua_save bare n\xE5r brukeren sier ja eller selv ber om lagring. Sp\xF8r aldri hvilken mappe; prosjektet er mappa. (4) Ved lagring: content = hele innholdet, short = ingress (alltid, \u2264 300 tegn), medium n\xE5r over ~3 000 tegn, project = brukerens prosjektnavn, convo = 3\u20138 ord om samtalen. (5) St\xE5r det en linje som begynner med \xABoppsett:\xBB eller \xABonboarding:\xBB i et verkt\xF8ysvar, f\xF8lg den etter at du har svart p\xE5 det brukeren ba om \u2014 det er brukerens f\xF8rste \xF8kt med Tua. Arkivstedet velger brukeren selv (tua_setup); gjett aldri. (6) \xABTa med historikken\xBB: alt som finnes lokalt fanges uten eksport \u2014 tua_import(kilde=alt) tar Code-\xF8kter (~/.claude/projects), Cowork-\xF8kter, Desktop-samtaler (fra Claude Desktops egen cache: alt som har v\xE6rt \xE5pnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kj\xF8r med dryRun=true f\xF8rst og vis tallene. Desktop-cachen leses ogs\xE5 av seg selv hvert 10. minutt. Samtaler bare p\xE5 claude.ai web/mobil: be brukeren \xE5pne dem i Claude Desktop (s\xE5 fanges de), eller lage en delt lenke (\xABDel\xBB \u2192 claude.ai/share/\u2026) og lime den inn \u2014 tua_import(kilde=lenke, lenke=\u2026) \u2014 eller legge eksporten i Innboks. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen.";
-var server = new McpServer({ name: "tua", version: "0.5.3" }, { instructions: INSTRUCTIONS });
+var server = new McpServer({ name: "tua", version: "0.5.4" }, { instructions: INSTRUCTIONS });
 var optionLines = () => archiveOptions().map((o) => `${o.id} = ${o.label}${o.available ? ` (${o.path})` : " \u2014 ikke funnet p\xE5 denne maskinen"}`).join(" \xB7 ");
 async function ensureReady(tool) {
   if (!ensureArchive().needsChoice || tool === "tua_setup") return null;

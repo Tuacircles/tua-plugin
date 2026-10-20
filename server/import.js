@@ -35,7 +35,7 @@ import {
   load, save, upsert, FILES_ROOT, INBOX_DIR, ensureArchive, registerProject, projectOf as registeredProject, claudeProjectHref,
   finishOnboarding, noteImport, importState, S_MAX, SHORT_L, filesMode,
 } from './store.js'
-import { collectDesktop, countDesktopConversations, importedDesktop, noteImportedDesktop, cacheAvailable, CACHE_DIR } from './desktop.js'   // M17
+import { collectDesktop, countDesktopConversations, importedDesktop, noteImportedDesktop, cacheAvailable, CACHE_DIR, desktopFolderGrants } from './desktop.js'   // M17 · 20.10: samtalelageret
 import { scanFinder, countFinderCandidates, DEFAULT_FOLDERS } from './finder.js'                                                         // M17
 import { CLAUDE_APP_DIR, posix } from './platform.js'                                                                                     // M18: Windows/Linux
 
@@ -673,13 +673,26 @@ const DESKTOP_LABEL = 'Claude Desktop (cache)'
 export function desktopData({ log = () => {}, all = false } = {}) {
   const since = all ? null : importedDesktop()
   const d = collectDesktop({ log, since })
+  // Samtaler fra samtalelageret mangler prosjekt: bruk mappa brukeren ga Cowork-økta eller chatten tilgang til (Desktops config)
+  const grants = desktopFolderGrants()
+  const home = os.homedir()
+  const generic = (f) => { const p = path.resolve(String(f || '')); return p === home || ['Documents', 'Downloads', 'Desktop', 'Library'].some((x) => p === path.join(home, x)) }
+  const projectFromGrant = (c) => {
+    const folders = (c.store?.cowork && grants.bySession.get(c.store.cowork.replace(/^cse_/, ''))) || grants.byConversation.get(c.id) || []
+    const f = folders.find((x) => !generic(x))
+    return f ? projectOfCwd(f) : null
+  }
   const convs = d.convs.map((c) => {
+    if (!c.projectName && c.store) c.projectName = projectFromGrant(c)
     const toolN = Object.values(c.tools).reduce((a, b) => a + b, 0)
-    const meta = [toolN ? `${toolN} verktøykall` : null, c.thinking ? `${c.thinking} tankeblokker (ikke med)` : null, c.branches ? `${c.branches} meldinger på andre grener (ikke med)` : null, c.model || null].filter(Boolean).join(' · ')
+    const w = c.store?.windowed
+    const meta = [toolN ? `${toolN} verktøykall` : null, c.thinking ? `${c.thinking} tankeblokker (ikke med)` : null, c.branches ? `${c.branches} meldinger på andre grener (ikke med)` : null, c.model || null,
+      c.store ? (w ? `utsnitt fra samtalelageret: ${c.messages} av ${w.of ?? '?'} meldinger` : 'fra samtalelageret') : null, c.store?.cowork ? 'Cowork' : null].filter(Boolean).join(' · ')
     return {
       id: c.id, title: c.title, created: c.created, updated: c.updated, project: c.projectName ? c.projectName.replace(/[. ]+$/, '') : null, projectUuid: c.projectUuid,
-      source: c.snapshot ? 'Claude (delt lenke)' : 'Claude Desktop', href: c.snapshot ? `https://claude.ai/share/${c.id.replace(/^share:/, '')}` : `claude://claude.ai/chat/${c.id}`,
-      summary: c.summary, firstUser: c.firstUser, transcript: c.transcript, messages: c.messages, artifacts: c.artifacts, attachments: c.attachments, meta, tags: c.snapshot ? ['delt'] : ['desktop'],
+      source: c.snapshot ? 'Claude (delt lenke)' : c.store?.cowork ? 'Claude Cowork' : 'Claude Desktop', href: c.snapshot ? `https://claude.ai/share/${c.id.replace(/^share:/, '')}` : `claude://claude.ai/chat/${c.id}`,
+      summary: c.summary, firstUser: c.firstUser, transcript: c.transcript, messages: c.messages, artifacts: c.artifacts, attachments: c.attachments, meta,
+      tags: c.snapshot ? ['delt'] : c.store?.cowork ? ['desktop', 'cowork'] : ['desktop'],
     }
   })
   const projects = [...d.projects].map(([uuid, name]) => ({ uuid, name: String(name).replace(/[. ]+$/, '') }))
@@ -705,9 +718,10 @@ export function importDesktop({ dryRun = false, project = null, minChars = DEFAU
     reportKey: 'import:desktop', reportName: 'Import: Claude Desktop (cache)', reportConvo: 'Historikk', noteKind: 'desktop',
     extraLines: [
       `- **Cachen:** ${CACHE_DIR} · ${st.filer} svar fra claude.ai/api · ${st.samtaler} samtaler (${st.dekodet} filer dekodet, ${st.ufullstendige} ufullstendige hoppet over) · ${st.lister} listesvar med prosjekt-kobling · ${st.snapshots} delte lenker åpnet i Desktop`,
+      `- **Samtalelageret (IndexedDB, Desktop ≥ 2.42304):** ${st.lagerSamtaler ?? 0} samtaler sist åpnet i Desktop (chat og Cowork)${st.lagerHoppet ? `, ${st.lagerHoppet} poster som ikke lot seg lese` : ''} — lange samtaler ligger der som utsnitt (de siste meldingene); nyeste versjon per samtale vinner over cachen`,
       artAtoms.length ? `- **Artifact-versjoner:** ${artAtoms.length} med tekst (${[...data.artifacts.values()].reduce((n, v) => n + v.length, 0)} versjoner i cachen)` : null,
       '- **Hva som er med i L:** brukerens meldinger og Claudes svar på den grenen brukeren ser, markører for verktøykall, filer Claude skrev (create_file) og vedlegg med tekst som egne atomer. Ikke med: verktøyresultater og tankeblokker.',
-      '- **Grense:** cachen har bare samtaler som har vært ÅPNET i Claude Desktop, og slik de så ut sist de ble åpnet. Åpne en samtale i Desktop, så er den med innen 10 minutter.',
+      '- **Grense:** cachen og samtalelageret har bare samtaler som har vært ÅPNET i Claude Desktop, og slik de så ut sist de ble åpnet; lageret holder de sist åpnede. Åpne en samtale i Desktop, så er den med innen 10 minutter.',
     ].filter(Boolean),
     afterSave: (atoms) => {
       for (const a of artAtoms) upsert(atoms, { key: `artifact:${a.uuid}`, kind: 'capture', name: stem(a.title), content: a.content, project: 'Claude-samtaler', convo: '', source: 'Claude Desktop', by: 'regel', tags: ['artifact', 'desktop'], short: ruleS(a.title, `artifact (${a.versions} versjoner) fra Claude Desktop-cachen`), summary: `Artifact fra Claude Desktop (${a.type || 'ukjent type'}).` })
