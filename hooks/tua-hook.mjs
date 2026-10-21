@@ -87,6 +87,8 @@ try {
     const lastDesk = st.desktop?.at || 0, daysDesk = lastDesk ? Math.floor((Date.now() - lastDesk) / DAYS) : null
     if (hc?.desktopNew && (daysDesk === null || daysDesk >= 7)) parts.push(`${hc.desktopNew} Desktop-samtale${hc.desktopNew === 1 ? '' : 'r'} i Claude Desktops cache er ikke tatt med — tua_import(kilde=desktop); leses ellers av seg selv når serveren kjører`)
     if (hc?.dokumenter && !st.finder) parts.push(`${hc.dokumenter} dokument${hc.dokumenter === 1 ? '' : 'er'} med AI-opphav i Nedlastinger/Dokumenter/Skrivebord er ikke i Tua — tua_import(kilde=finder)`)
+    // 21.10: helsesjekkens varsel (docs/rutine-helsesjekk.md steg 7) — rødt i natt → si det i første økt, så slettes fila
+    try { const vf = path.join(FILES_ROOT, '.tua', 'helsesjekk-varsel.txt'); const v = fs.readFileSync(vf, 'utf8').trim(); if (v) parts.push(`VARSEL fra Tua-helsesjekken i natt: ${v} — rapporten ligger som atom «Helsesjekk <dato>» i prosjekt Tua. Si det til brukeren først`); fs.unlinkSync(vf) } catch {}
     // 20.10: stillhetsvakt — leseren var blind fra 15.09 til 20.10 uten at noen merket det. Desktop i bruk, men ingen ny samtale sett på 14 dager → si fra.
     try { const ds = desk.desktopStaleness(); if (ds.stale) parts.push(`VARSEL: Desktop-leseren har ikke sett noen ny samtale på ${ds.days} dager selv om Claude Desktop er i bruk — Desktop kan ha flyttet samtalene igjen (som 15.09.2026, se STATUS.md «Desktop-leseren»). Si det til brukeren`) } catch {}
     // M24: aldri importert → pek på /tua_start (alt inn + automatikken på). Et git-repo uten .tua-sync.json → tilby /tua_auto,

@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.5 — bygd av bygg.mjs 2026-10-21. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.6 — bygd av bygg.mjs 2026-10-21. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { custom, union, string, number, looseObject, object, literal, unknown, _enum, array, intersection, record, boolean, preprocess, optional, _null, discriminatedUnion } from '../../zod/v4/classic/schemas.mjs';
 import { datetime } from '../../zod/v4/classic/iso.mjs';
 

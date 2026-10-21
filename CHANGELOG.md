@@ -2,6 +2,14 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.6 — 2026-10-21 (a nightly health check that reads the logs nobody reads)
+
+- **Why.** On 20 October three faults had been sitting in logs for days or weeks: the Desktop reader blind since 15 September, the Desktop server crashing every 30 seconds since the night before, and Tua's own test chats polluting search. The instruction for this routine is `docs/rutine-helsesjekk.md` (plain language, approved by Erik 21.10); `server/helsesjekk.js` does exactly that and nothing more.
+- **What it does, every night at 03:30 (launchd):** collects the last 24 hours of errors from the Desktop server log, Desktop's main log, the Code sessions' MCP logs and the hook log; runs the regression list R1–R8 (config path, server answers `initialize` with the right version, Desktop reader not silent, conversation store readable, Tua-chatter rule, card resource, plugin cache in step with the repo and the build newer than the sources, watchers alive); counts the archive (new atoms per project, atoms without S, «---» titles, duplicate imports, Dropbox conflicts, stale lock); writes one report atom «Helsesjekk <date>» (project Tua, tag `helsesjekk`) and updates its memory atom «Helsesjekk — minne». Red (a check that turned red, or a new error pattern ≥ 3 times) writes `.tua/helsesjekk-varsel.txt`; the SessionStart hook reads it, tells Claude to say it first, and deletes it.
+- **Never:** deletes, moves or edits an atom, changes config, uses the network, or writes anywhere but the two atoms, the warning file and `data/helsesjekk-state.json`. Tests run against scratch archives only. If the check itself fails, that is the report.
+- **How it learns without rewriting itself:** a check green 14 nights in a row proposes its own downgrade to weekly; a cleanup proposal identical three nights in a row proposes automation; a new error no check caught proposes a new check. All proposals wait in the memory atom for Erik's yes.
+- `node server/helsesjekk.js --dry-run` prints the report without writing; `--install-launchd` / `--uninstall-launchd` manage the job.
+
 ## 0.5.5 — 2026-10-21 (the build the directory's security scan can read)
 
 - **Why.** The directory's security scan does not read files larger than 256 KiB and holds back "packed" code. Versions 0.5.3–0.5.4 shipped the server as one minified 1.2 MB file plus a 330 KB minified card library, and the portal flagged them *"Ships code the scan can't read"* — such a version can never go live, whatever a reviewer decides. Version 0.5.2 (plain source + `npm install`) passed the scan but crashed wherever nothing runs `npm install` (Cowork, Desktop-started sessions). 0.5.5 satisfies both: no install step, and every file readable.

@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.5 — bygd av bygg.mjs 2026-10-21. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.6 — bygd av bygg.mjs 2026-10-21. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { requireRules } from '../rules.mjs';
 import { requireApplicability } from './applicability.mjs';
 import { requireErrors } from '../errors.mjs';
