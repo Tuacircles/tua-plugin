@@ -298,13 +298,29 @@ async function main() {
       `Forslag som venter på Erik: ${forslagTilErik.length ? forslagTilErik.map((f) => `• ${f}`).join(' ') : 'ingen'}`,
       `Forslag til endringer i instruksen (docs/rutine-helsesjekk.md): ingen — endres bare etter Eriks ja.`,
     ].join('\n').slice(0, 3000)
-    if (DRY) { console.log(text); console.log('\n---\n' + minne); console.log(`\n(dry-run: ingenting skrevet${isRed ? ' — ville skrevet varsel' : ''})`); return }
-    upsert(atoms, { key: `helsesjekk:${today}`, name: `Helsesjekk ${today}`, content: text, project: PROJECT, convo: 'Helsesjekk', source: 'Tua', by: 'regel', kind: 'capture', tags: ['helsesjekk', 'auto'], short: clip(S, 300), summary: 'Nattlig helsesjekk av Tua: feilmeldinger, regresjonslista R1–R8, arkivets tilstand og ryddeforslag.' })
+    // M — rutinens eget sammendrag (150–400 ord): status, det som er rødt/gult med bevis, feilene, tallene, forslagene, endringene
+    const M = [
+      `Helsesjekk ${today}: ${S}.`,
+      `Regresjonslista: ${results.filter((r) => r.status === G).length} grønne, ${results.filter((r) => r.status === Y).length} gule, ${red.length} røde av ${results.length}.` +
+        (red.length ? ` Rødt: ${red.map((r) => `${r.id} ${r.title} — ${clip(r.bevis, 90)}`).join('; ')}.` : '') +
+        (results.some((r) => r.status === Y) ? ` Gult: ${results.filter((r) => r.status === Y).map((r) => `${r.id} — ${clip(r.bevis, 70)}`).join('; ')}.` : ''),
+      errs.feil.length ? `Feilmeldinger siste døgn: ${errs.feil.slice(0, 4).map((e) => `${e.mønster} i ${e.kilde.replace(/ \(.*\)/, '')} ×${e.antall}`).join('; ')}${errs.feil.length > 4 ? ` (+${errs.feil.length - 4} til)` : ''}.` : 'Ingen feilmeldinger i loggene siste døgn.',
+      `Hooks: ${errs.hooks.poster} poster${errs.hooks.feil ? `, ${errs.hooks.feil} feil` : ''}; ${errs.utlev} utleveringer; ${errs.commits} commits speilet som ${errs.speilet} filendringer i Tua_tua.`,
+      `Arkivet: ${arkiv.total} atomer, ${nyeN} nye siste døgn${Object.keys(arkiv.nye).length ? ` (${Object.entries(arkiv.nye).map(([p, n]) => `${p} ${n}`).join(', ')})` : ''}; ${arkiv.utenS} uten ingress, ${arkiv.streker} «---»-titler, ${arkiv.dupl} mulige dobbeltimporter, ${arkiv.konflikt} Dropbox-konflikter.`,
+      arkiv.forslag.length ? `Ryddeforslag (ikke utført): ${arkiv.forslag.slice(0, 3).map((f) => clip(f, 90)).join('; ')}${arkiv.forslag.length > 3 ? ` (+${arkiv.forslag.length - 3} til)` : ''}.` : 'Ingen ryddeforslag.',
+      changed.length ? `Siden i går: ${changed.map((r) => `${r.id} ${prevStatus[r.id]} → ${r.status}`).join(', ')}.` : 'Ingen endring i regresjonslista siden forrige kjøring.',
+      forslagTilErik.length ? `Forslag som venter på Erik: ${forslagTilErik.map((f) => clip(f, 110)).join('; ')}.` : 'Ingen forslag venter på Erik.',
+    ].join('\n\n').slice(0, 2500)
+    if (DRY) { console.log(text); console.log('\n--- M ---\n' + M); console.log('\n--- minne ---\n' + minne); console.log(`\n(dry-run: ingenting skrevet${isRed ? ' — ville skrevet varsel' : ''})`); return }
+    const { atom: rapport } = upsert(atoms, { key: `helsesjekk:${today}`, name: `Helsesjekk ${today}`, content: text, project: PROJECT, convo: 'Helsesjekk', source: 'Tua', by: 'regel', kind: 'capture', tags: ['helsesjekk', 'auto'], short: clip(S, 300), medium: M, summary: 'Nattlig helsesjekk av Tua: feilmeldinger, regresjonslista R1–R8, arkivets tilstand og ryddeforslag.' })
     upsert(atoms, { key: 'helsesjekk:minne', name: 'Helsesjekk — minne', content: minne, project: PROJECT, convo: 'Helsesjekk', source: 'Tua', by: 'regel', kind: 'capture', tags: ['helsesjekk', 'minne'], short: clip(`Minne for helsesjekken. ${S}`, 300), summary: 'Rutinens eget minne: rekker, kjente feil, hva som skal sjekkes i morgen, forslag som venter.' })
     save(atoms)
     fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(STATE, JSON.stringify(state, null, 2) + '\n')
     if (isRed) fs.writeFileSync(VARSEL(), `${today}: ${S}\n`)
-    console.log(`${S} · rapport «Helsesjekk ${today}» i prosjekt ${PROJECT}${isRed ? ' · varsel skrevet' : ''}`)
+    // Kortet: rutinen kan ikke åpne en samtale selv — den legger igjen en lapp som SessionStart-hooken leser, så første
+    // Claude-økt etterpå viser rapporten som Tua-kort (tua_card id=…) én gang. I Desktop-chat: «vis helsesjekken fra i natt».
+    try { fs.writeFileSync(path.join(FILES_ROOT, '.tua', 'helsesjekk-siste.json'), JSON.stringify({ date: today, id: rapport.id, S, red: isRed, at: Date.now(), shown: false }, null, 2) + '\n') } catch {}
+    console.log(`${S} · rapport «Helsesjekk ${today}» i prosjekt ${PROJECT}${isRed ? ' · varsel skrevet' : ''} · vis som kort: tua_card id=${rapport.id}`)
   } catch (e) {
     // Regel 5: feiler sjekken selv, er det rapporten
     const S = `RØD: helsesjekken feilet — ${clip(e.message, 160)}`

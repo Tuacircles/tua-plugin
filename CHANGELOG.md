@@ -2,6 +2,11 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.7 — 2026-10-21 (the health check writes its own summary and shows up as a card)
+
+- The report atom now carries an M (150–400 words) written by the routine itself: status, red/yellow checks with evidence, the errors, the archive numbers, cleanup proposals, what changed since yesterday, proposals waiting for Erik.
+- The routine cannot open a conversation at 03:30, so it leaves a note (`.tua/helsesjekk-siste.json`); the SessionStart hook reads it and asks Claude to show the report as a Tua card (`tua_card id=…`) once, in the first Code session after the run. In Desktop chat: ask for «helsesjekken fra i natt».
+
 ## 0.5.6 — 2026-10-21 (a nightly health check that reads the logs nobody reads)
 
 - **Why.** On 20 October three faults had been sitting in logs for days or weeks: the Desktop reader blind since 15 September, the Desktop server crashing every 30 seconds since the night before, and Tua's own test chats polluting search. The instruction for this routine is `docs/rutine-helsesjekk.md` (plain language, approved by Erik 21.10); `server/helsesjekk.js` does exactly that and nothing more.

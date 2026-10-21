@@ -88,6 +88,10 @@ aldri utført. Minnet holdes under 3 000 tegn; eldre ting flyttes til rapporten.
 - **Rød:** skriv én linje til `<arkiv>/.tua/helsesjekk-varsel.txt`. SessionStart-hooken leser fila og ber Claude si det
   høyt i første økt neste dag («Tua-helsesjekken i natt: RØD — R3 …»). Fila slettes når Erik har sett den (hooken gjør det).
 - **Grønn/gul:** ingen varsel. Rapporten ligger i Tua.
+- **Kortet (Erik 21.10):** resultatet presenteres som Tua-kort når det er klart. Rutinen kan ikke åpne en samtale kl. 03:30,
+  så den legger igjen en lapp (`<arkiv>/.tua/helsesjekk-siste.json`); første Code-økt etterpå viser rapporten som kort
+  (`tua_card id=…`) én gang, så merkes lappen som vist. I Desktop-chat: be om «helsesjekken fra i natt».
+- **Sammendraget (M)** skriver rutinen selv (Erik 21.10): status, rødt/gult med bevis, feilene, tallene, forslagene, endringene.
 
 ## Slik lærer rutinen (uten å skrive om seg selv)
 
