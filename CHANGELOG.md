@@ -2,6 +2,15 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.5 — 2026-10-21 (the build the directory's security scan can read)
+
+- **Why.** The directory's security scan does not read files larger than 256 KiB and holds back "packed" code. Versions 0.5.3–0.5.4 shipped the server as one minified 1.2 MB file plus a 330 KB minified card library, and the portal flagged them *"Ships code the scan can't read"* — such a version can never go live, whatever a reviewer decides. Version 0.5.2 (plain source + `npm install`) passed the scan but crashed wherever nothing runs `npm install` (Cowork, Desktop-started sessions). 0.5.5 satisfies both: no install step, and every file readable.
+- **The server is built as plain ES modules, one readable file per module.** `node bygg.mjs` (Rollup) writes `server/tua-server.mjs` (the entry `.mcp.json` and the `.mcpb` start) plus `server/bygd/tua/*.mjs` (Tua's own modules) and `server/bygd/vendor/<package>/…` (the dependencies — `@modelcontextprotocol/sdk`, `zod`, `ajv` and the rest — as unminified ES modules mirroring their source layout, `dist/` dropped from the paths so nothing is gitignored or skipped by copies). 159 modules, the largest 143 KB; every file is checked against the 256 KiB limit at build time and by the `bundle` test. `import.meta.url` in Tua's modules is pointed back at the source file in `server/`, so `apps/kort.html`, `trust-scores.json` and friends are found as before.
+- **The card's client library ships unminified in three text parts.** `server/apps/kort-bibliotek.1.js` … `.3.js` (`@modelcontextprotocol/ext-apps` *app* with the SDK and zod, built by esbuild without minification, split on line boundaries under 256 KiB); `apps.js` joins them in order before inlining into `kort.html`. Replaces the minified `apps/app-with-deps.js`.
+- **Removed:** `server/tua-server.bundle.mjs` and `server/apps/app-with-deps.js`. `.gitignore` ignores `dist/` at the root only.
+- **Build tooling** (Rollup with node-resolve/commonjs/json, and esbuild) lives in the repository's sandbox dev dependencies, never in the plugin. `package.json` + lockfile stay for development and tests; the directory's "Dependencies install from a lockfile" hold is a reviewer formality.
+- Tests: `node server/test-platform.mjs` (the `bundle` case now also fails on any file over 256 KiB anywhere in the plugin, and if the old single-file bundles reappear), `node server/test-tools.mjs`, `npm test`.
+
 ## 0.5.4 — 2026-10-20 (Desktop conversations are captured again — from the conversation store)
 
 - **Why.** Since Claude Desktop 2.42304 (around 15 September 2026) the app no longer keeps conversation content in its HTTP cache, only small notices. Tua's Desktop reader therefore saw nothing newer than mid-September although it ran every ten minutes, and Cowork sessions — which now run through claude.ai with the Mac as a device — left no local transcript at all.

@@ -54,6 +54,12 @@ Open points the portal surfaced, and what was decided for 0.4.1 (Erik, 19 Oct 20
 1. **Cowork:** "An MCP server needs a user setting this surface can't collect, so it won't start here." Cause: `.mcp.json` sets `TUA_FILES_ROOT` from `${user_config.arkivmappe}`. The server already falls back to `~/.tua/config.json` and asks on first use (`tua_setup`), so dropping that env line (and the `arkivmappe` entry in `userConfig`) would make Cowork start the server. **Decision: keep the setting** (alternative B). Claude Code users keep the plugin setting; in Cowork only the skills load. Noted in `CHANGELOG.md` 0.4.1; revisit if Cowork matters.
 2. **`userConfig.auto_lagring`** looked unused because `grep auto_lagring` finds nothing, but the hook reads it as `CLAUDE_PLUGIN_OPTION_AUTO_LAGRING` — the documented way Claude Code hands every `userConfig` option to hook processes. **Decision: keep it**, with a new `hook-av` case in `server/test-platform.mjs` that proves `false` turns the capture off.
 
+## Outcome update — 21 October 2026 (why 0.5.5 exists)
+
+The portal picks up every push to `main` on its own (about every 6 hours). What it showed on 21 October: v0.4.0, v0.5.0 and v0.5.2 **passed the security scan** and sit with a reviewer (policy holds: lockfile, "Name may be confused with `tula`"). **v0.5.3 was flagged "Ships code the scan can't read"** and could never go live: the single-file server bundle (1.2 MB, minified) and the minified card library (330 KB) exceed the scan's 256 KiB-per-file limit and count as a packed payload. The portal's own guidance: *"Ship scripts as readable text under the size limit"* and *"bundle the dependencies into built files of under 256 KiB each"*.
+
+0.5.5 does exactly that (see CHANGELOG): the server is built as readable ES modules, one file per module including the vendored dependencies, and the card library ships unminified in three text parts. No install step is needed anywhere, and no file in the plugin is over 256 KiB (`server/test-platform.mjs` enforces it). After the push, check the Versions tab: the new version should read *Scan passed* → *Held by directory policy* (lockfile — reviewer clears it), like 0.5.2 did.
+
 ## Listing details step
 
 Read from `plugin.json` and the README. Check: name **Tua**, description (from `plugin.json`), author **Tua Circles Holding AS**, homepage/repository links, license **AGPL-3.0-only**, keywords. The listing description is the README; the English intro is written for that.

@@ -34,11 +34,11 @@ Every atom has three levels: **S** (ingress, ≤ 300 characters), **M** (summary
 
 ## Install
 
-Tua needs **Node.js 22.15 or newer** (24 recommended) on the `PATH`. Nothing else is installed: the server ships as one bundled file (`server/tua-server.bundle.mjs`, built by `node bygg.mjs` from `server/*.js` with its three dependencies inside), so the plugin runs the same whether Claude Code installed it, Claude Desktop downloaded it from the directory, or you copied the folder. `package.json` is for development and tests.
+Tua needs **Node.js 22.15 or newer** (24 recommended) on the `PATH`. Nothing else is installed: the server ships pre-built as plain ES modules (`server/tua-server.mjs` plus one readable file per module under `server/bygd/`, dependencies included, built by `node bygg.mjs` from `server/*.js`; every file stays under 256 KiB so the directory's security scan can read it), so the plugin runs the same whether Claude Code installed it, Claude Desktop downloaded it from the directory, or you copied the folder. `package.json` is for development and tests.
 
 **From the directory (once listed):** add Tua from claude.ai › Customize › Plugins. It syncs to Claude Code and Cowork.
 
-**Per surface.** Claude Code: MCP server, skills and hooks (the hooks capture answers and documents, and carry the *Arkivmappe* setting into `~/.tua/config.json`). Cowork: the MCP server starts from the plugin (since 0.5.1 `.mcp.json` no longer references a plugin setting, which Cowork does not collect; since 0.5.3 the server is a single bundled file, because Desktop downloads directory plugins without installing dependencies) plus the skills; the archive is whatever `~/.tua/config.json` says, or the first run asks. If you also installed the standalone `.mcpb` or a JSON connector named `tua` in Claude Desktop, Tua appears twice in Cowork — turn one of them off. Chat on claude.ai (web/mobile): skills only, no local server.
+**Per surface.** Claude Code: MCP server, skills and hooks (the hooks capture answers and documents, and carry the *Arkivmappe* setting into `~/.tua/config.json`). Cowork: the MCP server starts from the plugin (since 0.5.1 `.mcp.json` no longer references a plugin setting, which Cowork does not collect; since 0.5.3 the server is pre-built with its dependencies (since 0.5.5 as readable modules, see CHANGELOG), because Desktop downloads directory plugins without running `npm install`) plus the skills; the archive is whatever `~/.tua/config.json` says, or the first run asks. If you also installed the standalone `.mcpb` or a JSON connector named `tua` in Claude Desktop, Tua appears twice in Cowork — turn one of them off. Chat on claude.ai (web/mobile): skills only, no local server.
 
 **From this repository:**
 

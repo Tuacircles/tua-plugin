@@ -54,8 +54,8 @@ fs.writeFileSync(path.join(B, 'manifest.json'), JSON.stringify({
   privacy_policies: ['https://github.com/tuacircles/tua-plugin/blob/main/PRIVACY.md', 'https://tuacircles.com/privacy-policy'],
   server: {
     type: 'node',
-    entry_point: 'server/tua-server.bundle.mjs',
-    mcp_config: { command: 'node', args: ['${__dirname}/server/tua-server.bundle.mjs'], env: { TUA_FILES_ROOT: '${user_config.arkivmappe}', TUA_DATA_DIR: '${HOME}/.tua/cache' } },
+    entry_point: 'server/tua-server.mjs',
+    mcp_config: { command: 'node', args: ['${__dirname}/server/tua-server.mjs'], env: { TUA_FILES_ROOT: '${user_config.arkivmappe}', TUA_DATA_DIR: '${HOME}/.tua/cache' } },
   },
   user_config: {
     arkivmappe: { type: 'directory', title: manifest.userConfig.arkivmappe.title, description: manifest.userConfig.arkivmappe.description, required: false },

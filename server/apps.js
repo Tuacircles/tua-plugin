@@ -30,12 +30,13 @@ let htmlCache = null
 export function kortHtml() {
   if (htmlCache && !process.env.TUA_APPS_DEV) return htmlCache
   const tpl = fs.readFileSync(path.join(HERE, 'apps', 'kort.html'), 'utf8')
-  // 0.5.3: kortets klientbibliotek ligger ved siden av malen (apps/app-with-deps.js, lagt dit av bygg.mjs), så kortet virker
-  // også når pluginen kjører uten node_modules (konto-pluginen fra katalogen). Finnes ikke kopien, hentes fila fra node_modules (dev).
-  const vendored = path.join(HERE, 'apps', 'app-with-deps.js')
-  let bundle = fs.existsSync(vendored) ? fs.readFileSync(vendored, 'utf8') : fs.readFileSync(fileURLToPath(import.meta.resolve('@modelcontextprotocol/ext-apps/app-with-deps')), 'utf8')
+  // 0.5.5: kortets klientbibliotek ligger ved siden av malen som tekstdeler apps/kort-bibliotek.1.js, .2.js … (lagt dit av
+  // bygg.mjs, ubyggd og hver under 256 KiB så katalogens skanning kan lese dem); delene settes sammen i rekkefølge. Da virker kortet
+  // også når pluginen kjører uten node_modules (konto-pluginen fra katalogen). Finnes ingen deler, hentes biblioteket fra node_modules (dev).
+  const parts = fs.readdirSync(path.join(HERE, 'apps')).filter((f) => /^kort-bibliotek\.\d+\.js$/.test(f)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]))
+  let bundle = parts.length ? parts.map((f) => fs.readFileSync(path.join(HERE, 'apps', f), 'utf8')).join('') : fs.readFileSync(fileURLToPath(import.meta.resolve('@modelcontextprotocol/ext-apps/app-with-deps')), 'utf8')
   const m = bundle.match(/export\s*\{([^}]*)\};?\s*$/)
-  if (!m) throw new Error('fant ikke export-lista i app-with-deps.js')
+  if (!m) throw new Error('fant ikke export-lista i kortets klientbibliotek')
   const appName = (m[1].match(/(\w+)\s+as\s+App\b/) || [])[1] || 'App'
   bundle = bundle.slice(0, m.index) + `\nwindow.McpApps = { App: ${appName} };\n`
   htmlCache = tpl.replace('/*__BUNDLE__*/', () => bundle)

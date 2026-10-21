@@ -4,8 +4,8 @@ node_modules
 # Local, machine-specific state: derived index cache, Desktop-cache and Finder scan state. Never the archive itself.
 server/data/
 
-# Build output from pakk.mjs (zip + .mcpb)
-dist/
+# Build output from pakk.mjs (zip + .mcpb) — root only; server/bygd/ (built by bygg.mjs) IS committed, the plugin runs from it
+/dist/
 
 # OS files — the directory validator rejects these
 .DS_Store

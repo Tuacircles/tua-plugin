@@ -959,7 +959,7 @@ export function watchInbox({ log = () => {} } = {}) {
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
-// Kommandolinje — ikke når fila er buntet inn i serveren (server/tua-server.bundle.mjs setter __TUA_BUNDLE; der er import.meta.url bundelen selv)
+// Kommandolinje — ikke når fila er bygd inn i serveren (server/tua-server.mjs setter __TUA_BUNDLE, og bygd peker import.meta.url på kildefila mens argv[1] er inngangen)
 if (!globalThis.__TUA_BUNDLE && process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2)
   const flag = (f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : null }
