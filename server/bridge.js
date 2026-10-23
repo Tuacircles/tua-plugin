@@ -1,19 +1,22 @@
 #!/usr/bin/env node
-// bridge.js — Tua-kartet som egen lokal app (M12): én prosess som både serverer
-// kartet (ferdigbygd fra tua2-sandbox/dist) og er broen til det EKTE arkivet
+// bridge.js — Tua som egen lokal app (M12, M22): én prosess som både serverer
+// appen (ferdigbygd fra tua2-sandbox/dist) og er broen til det EKTE arkivet
 // (mappa ~/Dropbox/Tua, samme som MCP-serveren bruker).
 //
-//   GET  /                     → kartet (dist/kart.html)   · GET /index.html → hele sandkassen
-//   GET  /assets/*             → bygde filer
-//   GET  /api/atoms?offset&limit → { atoms, total, file }   (hvert atom har `links` ferdig utregnet + `file`)
+//   GET  /  /spor  /kart  /oppslag  /innstillinger → appen (dist/index.html, skive 3: én app med klient-ruting; /forside = /)
+//   GET  /sandkasse            → demoene (dist/sandkasse.html)
+//   GET  /assets/*  /fonter/*  → bygde filer og de lokale fontene
+//   GET  /api/atoms?offset&limit → { atoms, total, file }   (hvert atom har `links` ferdig utregnet + `file`,
+//                                 og siden skive 3 ord: {S,M,L}, tegn: {S,M,L}, max, vault — det forsiden gir Spør om en sak)
 //   GET  /api/search?q&context&project&limit&offset → { hits, total }  rangert: tittel/S > M > L (M12)
 //                                 hvert treff har også ord: {S, M, L} (ordantall per nivå fra lageret), max, vault og kind — til Spør-skjermens kildeliste (skive 2)
-//   GET  /spor                   → Spør-skjermen (M20a front, skive 2): ett felt, kilder med S/M/L, mottakere med Trust Score, personvernlinja, svaret strømmet
+//   Spør-skjermen (M20a front, skive 2) er ruta /spor i appen: ett felt, kilder med S/M/L, mottakere med Trust Score, personvernlinja, svaret strømmet
 //   POST /api/link   {id, project, level?}   → gjør atomet synlig i prosjektet (referanse), valgfritt nivå S/M/L;
 //                                        kall igjen med level for å endre nivået på en eksisterende referanse
 //   POST /api/unlink {id, project}   → fjerner referansen
 //   Passord (valgfritt): `node bridge.js --sett-passord` setter et passord (scrypt-hash i <arkiv>/.tua/passord.json).
-//   Da krever alt — kartet og /api/* — innlogging på /logg-inn (HttpOnly-cookie, 30 dager). `--fjern-passord` fjerner det.
+//   Da krever alt — appen og /api/* — innlogging på /logg-inn (HttpOnly-cookie, 30 dager). `--fjern-passord` fjerner det.
+//   /api/* svarer da 401 { error, login: '/logg-inn' } og appen sender brukeren til /logg-inn?next=… (skive 3); sider omdirigeres dit direkte.
 //   Uten passord er alt åpent som før, men bare for programmer på denne maskinen (127.0.0.1).
 //   POST /api/save   {content, name?, source?, project?, convo?, summary?, short?, medium?, tags?, key?}
 //                    → M11: lagrer et atom i mappa (Demo 7 «fang» over det ekte arkivet). S/M merkes menneskeskrevet.
@@ -22,7 +25,7 @@
 //        target = 'code'   → `open claude-cli://open?cwd=<repo>&q=…`  (repo må være en repo-lenke på atomet / i prosjektregisteret)
 //        Ingen andre programmer, ingen shell, ingen frie stier. `claude://`-lenker (Desktop-prosjekt) åpnes
 //        rett fra nettleseren og går aldri via broen.
-//   GET  /innstillinger          → innstillinger-siden (M15): arkivsted, sky-connectors, AI-connectors (BYOK), Finder-mapper
+//   Innstillinger (M15) er ruta /innstillinger i appen: arkivsted, sky-connectors, AI-connectors (BYOK), Finder-mapper
 //   GET  /api/settings           → { arkiv, steder, sky, ai, finder, trust } — aldri nøkkelverdier, bare «satt / ikke satt»
 //   POST /api/settings {arkiv: {sted|sti}} | {finder: {folders}}  → velger arkivsted (flytter ingenting, V9) / Finder-mapper. Samme ~/.tua/config.json som tua_setup.
 //   POST /api/keychain {provider, key}   → nøkkelen inn i macOS Keychain (security, uten shell, via stdin — aldri fil, aldri logg)
@@ -217,14 +220,17 @@ function openTarget(a, target, href) {
   throw new Error(`ukjent target «${target}» — broen åpner bare finder og code (V13)`)
 }
 
-// Statisk: kartet og sandkassen fra dist/. Ingen stier utenfor dist (realpath-sjekk).
+// Statisk: appen og sandkassen fra dist/. Ingen stier utenfor dist (realpath-sjekk).
+// Skive 3: appen er én fil (index.html) med klient-ruting — alle app-rutene får samme fil, og appen leser stien selv (router.jsx).
+export const APP_RUTER = ['/', '/forside', '/spor', '/kart', '/oppslag', '/innstillinger']
+const APP_FIL = 'index.html'
 function serveStatic(res, pathname) {
-  let rel = pathname === '/' || pathname === '/kart' ? '/kart.html' : pathname === '/sandkasse' ? '/index.html' : pathname === '/innstillinger' ? '/innstillinger.html' : pathname === '/forside' ? '/forside.html' : pathname === '/spor' ? '/spor.html' : pathname
+  const rel = APP_RUTER.includes(pathname) ? '/' + APP_FIL : pathname === '/sandkasse' ? '/sandkasse.html' : pathname
   const abs = path.normalize(path.join(DIST, rel))
   if (!abs.startsWith(DIST + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
-    if (!fs.existsSync(path.join(DIST, 'kart.html'))) {
+    if (!fs.existsSync(path.join(DIST, APP_FIL))) {
       res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8' })
-      return res.end('<!doctype html><meta charset="utf-8"><title>Tua — Kartet</title><body style="font-family:Georgia;padding:40px;color:#1A1A1A"><h1 style="color:#1F3864">Kartet er ikke bygget ennå</h1><p>Kjør <code>cd tua-plugin && npm run kart</code> (bygger kartet og starter broen), så last siden på nytt.</p><p>Broen svarer uansett på <code>/api/*</code>.</p></body>')
+      return res.end('<!doctype html><meta charset="utf-8"><title>Tua</title><body style="font-family:Georgia;padding:40px;color:#1A1A1A"><h1 style="color:#1F3864">Appen er ikke bygget ennå</h1><p>Kjør <code>cd tua-plugin && npm run kart</code> (bygger appen og starter broen), så last siden på nytt.</p><p>Broen svarer uansett på <code>/api/*</code>.</p></body>')
     }
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('ikke funnet')
   }
@@ -263,7 +269,9 @@ http
       if (req.method === 'GET' && url.pathname === '/api/atoms') {
         const all = load().sort((x, y) => y.capturedAt - x.capturedAt)
         const offset = num(url.searchParams.get('offset'), 0), limit = num(url.searchParams.get('limit'), all.length)
-        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a) }))   // lenker regnes ut ved lesing, lagres ikke her
+        // lenker regnes ut ved lesing, lagres ikke her. ord/tegn per nivå, max og vault (skive 3): det forsiden sender med til Spør om en sak —
+        // samme tall som /api/search gir, fra lageret (levelOf), så anslaget i Spør er det samme uansett hvor saken ble valgt. max er L: eget arkiv (V11).
+        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a) }))
         return json(res, 200, { atoms, total: all.length, offset, file: ARKIV() })
       }
       if (req.method === 'GET' && url.pathname === '/api/search') {
@@ -380,8 +388,8 @@ http
     }
   })
   .listen(PORT, '127.0.0.1', () => {
-    const built = fs.existsSync(path.join(DIST, 'kart.html'))
-    console.error(`[tua-bro] kartet: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} · innstillinger: http://127.0.0.1:${PORT}/innstillinger · spør: http://127.0.0.1:${PORT}/spor (POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
+    const built = fs.existsSync(path.join(DIST, APP_FIL))
+    console.error(`[tua-bro] appen: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} (forsiden · /spor · /kart · /innstillinger · /sandkasse; POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
     const log = (m) => console.error(`[tua-bro] ${m}`)
     if (process.env.TUA_BRIDGE_VAKTER !== '0') { watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log }) }     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
   })

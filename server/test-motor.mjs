@@ -6,6 +6,8 @@
 // Sjekker: skjerming (fødselsnummer gyldig/ugyldig, e-post, telefon, org.nr bare i formatet, adresse, beløp, navn fra arkivlista,
 // stoppliste), fail closed (Vault-tagg, Trust under terskel), Utlevert-linje uten originaler, prompt- og svar-sak med bygget_av,
 // og SSE-rekkefølgen i broen (skjermet → del… → ferdig, og blokkert) med mottaker «test» som ekkoer.
+// Skive 3: broen serverer app-fila (index.html) for rutene / /spor /kart /oppslag /innstillinger, /api/atoms har ord/tegn/max/vault,
+// og med passord satt svarer /api/* 401 med login: '/logg-inn' mens sidene omdirigeres til /logg-inn?next=… (innlogging ende til ende).
 // Keychain-prefikset settes til et navn som ikke finnes, så Claude-mottakeren er aldri «klar» her — uansett hva som ligger i Keychain.
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
@@ -13,6 +15,7 @@ process.env.TUA_BRIDGE_VAKTER = '0'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -154,13 +157,14 @@ ok('mottakere: test (trust 3), claude (ikke satt), ollama', TEST && TEST.trust.s
   ok('kjent-lista vokste av bruk (ingen navn i loggen)', kjentePersoner([]).includes(PERSON))
 }
 
-// ── 5) broen: SSE fra POST /api/spor, /spor-siden og søkefeltene Spør-skjermen trenger (skive 2) ─────────────────
+// ── 5) broen: SSE fra POST /api/spor, app-fila for rutene (skive 3) og søkefeltene Spør-skjermen trenger (skive 2) ─────────────────
 const PORT = 5299
-// Et lite «dist» i scratch står for det bygde kartet: broen skal svare /spor med spor.html (som / med kart.html).
+// Et lite «dist» i scratch står for den bygde appen: broen skal svare med index.html for alle app-rutene og sandkasse.html for /sandkasse.
 const DIST = path.join(DATA, 'dist')
-fs.mkdirSync(DIST, { recursive: true })
-fs.writeFileSync(path.join(DIST, 'kart.html'), '<!doctype html><title>kart-test</title>')
-fs.writeFileSync(path.join(DIST, 'spor.html'), '<!doctype html><title>spor-test</title><div id="root"></div>')
+fs.mkdirSync(path.join(DIST, 'assets'), { recursive: true })
+fs.writeFileSync(path.join(DIST, 'index.html'), '<!doctype html><title>app-test</title><div id="root"></div>')
+fs.writeFileSync(path.join(DIST, 'sandkasse.html'), '<!doctype html><title>sandkasse-test</title>')
+fs.writeFileSync(path.join(DIST, 'assets', 'app.js'), '// js-test')
 const bro = spawn(process.execPath, [path.join(HERE, 'bridge.js')], { env: { ...process.env, TUA_BRIDGE_PORT: String(PORT), TUA_KART_DIST: DIST }, stdio: ['ignore', 'ignore', 'pipe'] })
 let broLogg = ''
 bro.stderr.on('data', (d) => { broLogg += d })
@@ -190,10 +194,38 @@ try {
   ok('POST /api/spor: Claude uten nøkkel → event feil (ikke klar), ingen sending', c.hendelser.length === 1 && c.hendelser[0][0] === 'feil' && /ikke klar/.test(c.hendelser[0][1].feil), JSON.stringify(c.hendelser))
   const d = await (await fetch(`http://127.0.0.1:${PORT}/api/spor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ melding: 'x' }) })).json()
   ok('POST /api/spor uten mottaker → 400', d.error?.includes('mottaker'))
-  // Skive 2: Spør-skjermen. /spor serverer spor.html fra dist; søketreffene har ord og tegn per nivå (fra lageret), max, vault og kind.
-  const side = await fetch(`http://127.0.0.1:${PORT}/spor`)
-  ok('GET /spor → spor.html fra dist (text/html)', side.status === 200 && /text\/html/.test(side.headers.get('content-type')) && (await side.text()).includes('spor-test'), `${side.status} ${side.headers.get('content-type')}`)
-  ok('GET / → kart.html (uendret)', (await (await fetch(`http://127.0.0.1:${PORT}/`)).text()).includes('kart-test'))
+  // Skive 3: én app med ruter — broen gir index.html for hver app-rute (appen leser stien selv), sandkasse.html for /sandkasse, 404 ellers.
+  const hent = async (p, init) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { redirect: 'manual', ...init }); return { status: r.status, type: r.headers.get('content-type') || '', location: r.headers.get('location'), cookie: r.headers.get('set-cookie'), tekst: await r.text() } }
+  for (const rute of ['/', '/forside', '/spor', '/kart', '/oppslag', '/innstillinger']) {
+    const r = await hent(rute)
+    ok(`GET ${rute} → app-fila (index.html, text/html)`, r.status === 200 && /text\/html/.test(r.type) && r.tekst.includes('app-test'), `${r.status} ${r.type}`)
+  }
+  ok('GET /sandkasse → sandkasse.html (demoene, egen side)', (await hent('/sandkasse')).tekst.includes('sandkasse-test'))
+  ok('GET /assets/app.js → bygd fil, ikke app-fila', (await hent('/assets/app.js')).tekst.includes('js-test'))
+  ok('GET /finnes-ikke → 404 (ingen stille fallback til appen for ukjente stier)', (await hent('/finnes-ikke')).status === 404)
+  ok('GET /../bridge.js → ikke utenfor dist', (await hent('/%2e%2e/bridge.js')).status === 404)
+  const at = await (await fetch(`http://127.0.0.1:${PORT}/api/atoms`)).json()
+  const a1at = at.atoms.find((x) => x.id === a1.id), a2at = at.atoms.find((x) => x.id === a2.id)
+  ok('GET /api/atoms: ord og tegn per nivå, max og vault på hver sak (det forsiden gir Spør med ⌘↵)', a1at && a1at.ord.S < a1at.ord.M && a1at.ord.M < a1at.ord.L && a1at.tegn.L > 3000 && a1at.max === 'L' && a1at.vault === false && a2at?.vault === true, JSON.stringify(a1at && { ord: a1at.ord, max: a1at.max, vault: a1at.vault }))
+  // Innlogging ende til ende (skive 3): passord satt i testarkivet → /api/* gir 401 med login, sider omdirigeres med next, /api/login gir cookie.
+  const PW = 'test-passord-1234', salt = crypto.randomBytes(16).toString('hex')
+  const AUTH = path.join(ROOT, '.tua', 'passord.json')
+  fs.writeFileSync(AUTH, JSON.stringify({ salt, hash: crypto.scryptSync(PW.normalize('NFKC'), salt, 32).toString('hex'), satt: new Date().toISOString() }))
+  try {
+    const u = await hent('/api/atoms')
+    ok('passord satt: GET /api/atoms → 401 { error, login: "/logg-inn" } (appen sender til innlogging, feiler ikke stille)', u.status === 401 && JSON.parse(u.tekst).login === '/logg-inn', u.tekst)
+    const side = await hent('/spor')
+    ok('passord satt: GET /spor → 303 til /logg-inn?next=/spor', side.status === 303 && side.location === '/logg-inn?next=%2Fspor', `${side.status} ${side.location}`)
+    ok('passord satt: /assets/* serveres uten innlogging (css/js er ikke hemmelig), /logg-inn viser skjemaet', (await hent('/assets/app.js')).status === 200 && (await hent('/logg-inn?next=%2Fspor')).tekst.includes('name="next" value="/spor"'))
+    const inn = await hent('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passord: PW }) })
+    ok('POST /api/login med riktig passord → 200 og HttpOnly-cookie', inn.status === 200 && /tua_sesjon=.*HttpOnly/.test(inn.cookie || ''), `${inn.status} ${inn.cookie}`)
+    const cookie = (inn.cookie || '').split(';')[0]
+    const med = await hent('/api/atoms', { headers: { Cookie: cookie } })
+    ok('med cookie: GET /api/atoms → 200, GET /spor → app-fila', med.status === 200 && (await hent('/spor', { headers: { Cookie: cookie } })).tekst.includes('app-test'))
+    const feilPw = await hent('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passord: 'feil' }) })
+    ok('POST /api/login med feil passord → 401 uten login-felt (ingen omdirigeringssløyfe)', feilPw.status === 401 && !JSON.parse(feilPw.tekst).login, feilPw.tekst)
+  } finally { fs.rmSync(AUTH, { force: true }) }
+  ok('passord fjernet: GET /api/atoms → 200 igjen', (await hent('/api/atoms')).status === 200)
   const s = await (await fetch(`http://127.0.0.1:${PORT}/api/search?q=lager`)).json()
   const h = s.hits.find((x) => x.id === a1.id), hv = (await (await fetch(`http://127.0.0.1:${PORT}/api/search?q=vault`)).json()).hits.find((x) => x.id === a2.id)
   ok('GET /api/search: ord og tegn per nivå (S < M < L for den lange saken), max og kind', h && h.ord.S < h.ord.M && h.ord.M < h.ord.L && h.tegn.L > 3000 && h.max === 'L' && h.kind === 'capture', JSON.stringify(h && { ord: h.ord, tegn: h.tegn, max: h.max, kind: h.kind }))
