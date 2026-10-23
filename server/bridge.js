@@ -7,6 +7,8 @@
 //   GET  /assets/*             → bygde filer
 //   GET  /api/atoms?offset&limit → { atoms, total, file }   (hvert atom har `links` ferdig utregnet + `file`)
 //   GET  /api/search?q&context&project&limit&offset → { hits, total }  rangert: tittel/S > M > L (M12)
+//                                 hvert treff har også ord: {S, M, L} (ordantall per nivå fra lageret), max, vault og kind — til Spør-skjermens kildeliste (skive 2)
+//   GET  /spor                   → Spør-skjermen (M20a front, skive 2): ett felt, kilder med S/M/L, mottakere med Trust Score, personvernlinja, svaret strømmet
 //   POST /api/link   {id, project, level?}   → gjør atomet synlig i prosjektet (referanse), valgfritt nivå S/M/L;
 //                                        kall igjen med level for å endre nivået på en eksisterende referanse
 //   POST /api/unlink {id, project}   → fjerner referansen
@@ -48,11 +50,11 @@ import { openSpawn, FILE_MANAGER } from './platform.js'   // M18: «Åpne i …�
 import os from 'node:os'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { load, save, setShare, upsert, search, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive, archiveOptions, archiveInfo, chooseArchive, finderFolders, FINDER_DEFAULTS, setFinderFolders, CONFIG_FILE } from './store.js'
+import { load, save, setShare, upsert, search, levelOf, LEVELS, isVault, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive, archiveOptions, archiveInfo, chooseArchive, finderFolders, FINDER_DEFAULTS, setFinderFolders, CONFIG_FILE } from './store.js'
 import { watchInbox, watchDesktop } from './import.js'      // M14: Innboks — eksporter som legges i mappa blir atomer · M17: Desktop-cachen
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
-import { spor, mottakere, trustScores, Blokkert } from './motor.js'                                  // M20a: motoren — eneste vei ut til en modell
+import { spor, mottakere, trustScores, Blokkert, ord } from './motor.js'                             // M20a: motoren — eneste vei ut til en modell
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
@@ -217,7 +219,7 @@ function openTarget(a, target, href) {
 
 // Statisk: kartet og sandkassen fra dist/. Ingen stier utenfor dist (realpath-sjekk).
 function serveStatic(res, pathname) {
-  let rel = pathname === '/' || pathname === '/kart' ? '/kart.html' : pathname === '/sandkasse' ? '/index.html' : pathname === '/innstillinger' ? '/innstillinger.html' : pathname === '/forside' ? '/forside.html' : pathname
+  let rel = pathname === '/' || pathname === '/kart' ? '/kart.html' : pathname === '/sandkasse' ? '/index.html' : pathname === '/innstillinger' ? '/innstillinger.html' : pathname === '/forside' ? '/forside.html' : pathname === '/spor' ? '/spor.html' : pathname
   const abs = path.normalize(path.join(DIST, rel))
   if (!abs.startsWith(DIST + path.sep) || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
     if (!fs.existsSync(path.join(DIST, 'kart.html'))) {
@@ -272,7 +274,8 @@ http
         })
         return json(res, 200, {
           q, total: hits.total, offset: num(url.searchParams.get('offset'), 0),
-          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, score, snippet })),
+          // ord per nivå kommer fra lageret (levelOf) — Spør-skjermen (skive 2) regner ikke selv, så ordantallet er det samme som motoren sender
+          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet })),
         })
       }
       if (req.method === 'POST' && url.pathname === '/api/save') {
@@ -378,7 +381,7 @@ http
   })
   .listen(PORT, '127.0.0.1', () => {
     const built = fs.existsSync(path.join(DIST, 'kart.html'))
-    console.error(`[tua-bro] kartet: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} · innstillinger: http://127.0.0.1:${PORT}/innstillinger · spør: POST /api/spor (mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
+    console.error(`[tua-bro] kartet: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} · innstillinger: http://127.0.0.1:${PORT}/innstillinger · spør: http://127.0.0.1:${PORT}/spor (POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
     const log = (m) => console.error(`[tua-bro] ${m}`)
     if (process.env.TUA_BRIDGE_VAKTER !== '0') { watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log }) }     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
   })

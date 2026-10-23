@@ -153,9 +153,14 @@ ok('mottakere: test (trust 3), claude (ikke satt), ollama', TEST && TEST.trust.s
   ok('kjent-lista vokste av bruk (ingen navn i loggen)', kjentePersoner([]).includes(PERSON))
 }
 
-// ── 5) broen: SSE fra POST /api/spor ──────────────────────────────────────
+// ── 5) broen: SSE fra POST /api/spor, /spor-siden og søkefeltene Spør-skjermen trenger (skive 2) ─────────────────
 const PORT = 5299
-const bro = spawn(process.execPath, [path.join(HERE, 'bridge.js')], { env: { ...process.env, TUA_BRIDGE_PORT: String(PORT), TUA_KART_DIST: path.join(DATA, 'ingen-dist') }, stdio: ['ignore', 'ignore', 'pipe'] })
+// Et lite «dist» i scratch står for det bygde kartet: broen skal svare /spor med spor.html (som / med kart.html).
+const DIST = path.join(DATA, 'dist')
+fs.mkdirSync(DIST, { recursive: true })
+fs.writeFileSync(path.join(DIST, 'kart.html'), '<!doctype html><title>kart-test</title>')
+fs.writeFileSync(path.join(DIST, 'spor.html'), '<!doctype html><title>spor-test</title><div id="root"></div>')
+const bro = spawn(process.execPath, [path.join(HERE, 'bridge.js')], { env: { ...process.env, TUA_BRIDGE_PORT: String(PORT), TUA_KART_DIST: DIST }, stdio: ['ignore', 'ignore', 'pipe'] })
 let broLogg = ''
 bro.stderr.on('data', (d) => { broLogg += d })
 const vent = async (ms) => new Promise((r) => setTimeout(r, ms))
@@ -183,6 +188,14 @@ try {
   ok('POST /api/spor: Claude uten nøkkel → event feil (ikke klar), ingen sending', c.hendelser.length === 1 && c.hendelser[0][0] === 'feil' && /ikke klar/.test(c.hendelser[0][1].feil), JSON.stringify(c.hendelser))
   const d = await (await fetch(`http://127.0.0.1:${PORT}/api/spor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ melding: 'x' }) })).json()
   ok('POST /api/spor uten mottaker → 400', d.error?.includes('mottaker'))
+  // Skive 2: Spør-skjermen. /spor serverer spor.html fra dist; søketreffene har ord og tegn per nivå (fra lageret), max, vault og kind.
+  const side = await fetch(`http://127.0.0.1:${PORT}/spor`)
+  ok('GET /spor → spor.html fra dist (text/html)', side.status === 200 && /text\/html/.test(side.headers.get('content-type')) && (await side.text()).includes('spor-test'), `${side.status} ${side.headers.get('content-type')}`)
+  ok('GET / → kart.html (uendret)', (await (await fetch(`http://127.0.0.1:${PORT}/`)).text()).includes('kart-test'))
+  const s = await (await fetch(`http://127.0.0.1:${PORT}/api/search?q=lager`)).json()
+  const h = s.hits.find((x) => x.id === a1.id), hv = (await (await fetch(`http://127.0.0.1:${PORT}/api/search?q=vault`)).json()).hits.find((x) => x.id === a2.id)
+  ok('GET /api/search: ord og tegn per nivå (S < M < L for den lange saken), max og kind', h && h.ord.S < h.ord.M && h.ord.M < h.ord.L && h.tegn.L > 3000 && h.max === 'L' && h.kind === 'capture', JSON.stringify(h && { ord: h.ord, tegn: h.tegn, max: h.max, kind: h.kind }))
+  ok('GET /api/search: vault-flagget følger taggen (Spør-skjermen merker raden)', hv?.vault === true && h.vault === false)
 } finally { bro.kill() }
 
 console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT} · tokens-anslag for denne fila: ca. ${anslåTokens(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8'))}`)
