@@ -90,6 +90,7 @@ ok('gyldigFødselsnummer: ugyldig kontrollsiffer', !gyldigFødselsnummer(fnrUgyl
 {
   const sk = lagSkjermer([])
   const a = sk.skjerm('Kari Nordmann skrev dette.'), b = sk.skjerm('Svar til Kari Nordmann og Per Hansen.')
+  ok('anslåTokens: faktor per mottaker (Claude deler norsk finere enn gemma)', anslåTokens('x'.repeat(1900), 'claude') === 1000 && anslåTokens('x'.repeat(3500), 'ollama') === 1000 && anslåTokens('x'.repeat(3500)) === 1000)
   ok('lagSkjermer: samme person → samme plassholder på tvers av melding og kontekst', a.includes('[Person A]') && b.includes('[Person A]') && b.includes('[Person B]'), b)
 }
 
@@ -177,6 +178,7 @@ try {
   const m = await (await fetch(`http://127.0.0.1:${PORT}/api/mottakere`)).json()
   ok('GET /api/mottakere: liste med Trust Score, nøkkel satt/ikke satt, Ollama aktiv/ikke', m.mottakere.some((x) => x.id === 'claude' && x.nøkkel === 'ikke satt' && x.trust?.score === 4) && m.mottakere.some((x) => x.id === 'ollama' && typeof x.aktiv === 'boolean' && x.local) && m.mottakere.some((x) => x.id === 'test'), JSON.stringify(m.mottakere.map((x) => [x.id, x.aktiv, x.nøkkel])))
   ok('GET /api/mottakere: aldri en nøkkelverdi', !JSON.stringify(m).includes('sk-ant'))
+  ok('GET /api/mottakere: tegnPerToken per rad (Spør-skjermens anslag før sending følger motoren)', m.mottakere.every((x) => typeof x.tegnPerToken === 'number') && m.mottakere.find((x) => x.id === 'claude').tegnPerToken === 1.9, JSON.stringify(m.mottakere.map((x) => [x.id, x.tegnPerToken])))
   const r = await sse({ melding: `Hva foreslo ${PERSON}?`, saker: [{ id: a1.id, nivå: 'M' }], mottaker: 'test', prosjekt: 'Testprosjekt' })
   const navn = r.hendelser.map((h) => h[0])
   ok('POST /api/spor: text/event-stream, rekkefølge skjermet → del… → ferdig', r.status === 200 && /text\/event-stream/.test(r.type) && navn[0] === 'skjermet' && navn.at(-1) === 'ferdig' && navn.includes('del'), `${r.status} ${r.type} ${navn.slice(0, 3).join(' ')}…${navn.at(-1)}`)

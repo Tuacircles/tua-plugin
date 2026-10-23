@@ -37,9 +37,12 @@ export class Blokkert extends Error { constructor(msg, detaljer = []) { super(ms
 export class MotorFeil extends Error { constructor(msg) { super(msg); this.name = 'MotorFeil'; this.kode = 'feil' } }
 
 // ── Ord og tokens ───────────────────────────────────────────────────────────
-// Tokens kan ikke måles eksakt uten nøkkel (K7). Lokalt anslag ≈ tegn/3,5 for norsk, alltid merket «ca.»; eksakt fra usage etter svar.
+// Tokens kan ikke måles eksakt før sending (K7). Lokalt anslag = tegn / faktor, alltid merket «ca.»; eksakt fra usage etter svar.
+// Faktoren er per mottaker, målt 23.10.2026 på samme norske tekst: gemma3:4b (Ollama) ≈ 3,5 tegn per token (788 eksakt mot 826 anslått),
+// Claude Opus 5.5 ≈ 1,9 (1 645 eksakt mot 826 anslått med 3,5) — Claudes tokenizer deler norsk finere. Ukjent mottaker: 3,5.
 export const ord = (t) => (String(t || '').match(/\S+/g) || []).length
-export const anslåTokens = (t) => Math.round(String(t || '').length / 3.5)
+export const TEGN_PER_TOKEN = { claude: 1.9, ollama: 3.5, test: 3.5 }
+export const anslåTokens = (t, mottaker) => Math.round(String(t || '').length / (TEGN_PER_TOKEN[mottaker] || 3.5))
 
 // ── 1) Skjerming ────────────────────────────────────────────────────────────
 // Fornavn-lista oppdager «Fornavn Etternavn» i tekst (K5: navn uten typisk etternavnsending slapp gjennom). Ikke uttømmende —
@@ -279,7 +282,7 @@ async function sendTest({ system, melding, kontekst }, { onDel = () => {} } = {}
   const ut = `Ekko fra test-mottakeren (ingenting er sendt ut av maskinen).\n\nSystem: ${system}\n\n${byggMelding(melding, kontekst)}`
   const biter = ut.match(/[\s\S]{1,120}/g) || []
   for (const b of biter) { await new Promise((r) => setTimeout(r, 2)); onDel(b) }
-  return { tekst: ut, modell: 'ekko', usage: { input_tokens: anslåTokens(system + melding + kontekst), output_tokens: anslåTokens(ut) }, stopp: 'end_turn' }
+  return { tekst: ut, modell: 'ekko', usage: { input_tokens: anslåTokens(system + melding + kontekst, 'test'), output_tokens: anslåTokens(ut, 'test') }, stopp: 'end_turn' }
 }
 
 // Mottaker-grensesnittet. status() svarer klar/ikke klar med grunn — aldri nøkkelverdier. send() nås bare gjennom spor().
@@ -300,6 +303,7 @@ export async function mottakere() {
   const liste = await Promise.all(lagMottakere().map(async (m) => {
     const st = await m.status()
     return { id: m.id, label: m.label, endpoint: m.endpoint, modell: st.modeller?.[0] || m.modell, trust: m.trust, local: !!m.local, test: !!m.test,
+      tegnPerToken: TEGN_PER_TOKEN[m.id] || 3.5,                 // Spør-skjermens anslag før sending bruker samme faktor som motoren (skive 2)
       ...(m.nøkkel ? { nøkkel: hasKey(m.id) ? 'satt' : 'ikke satt' } : {}), aktiv: st.klar, ...(st.hvorfor ? { hvorfor: st.hvorfor } : {}) }
   }))
   const std = liste.find((m) => m.local && m.aktiv) || liste.find((m) => m.id === 'claude' && m.aktiv)
@@ -325,7 +329,7 @@ export async function spor({ melding, saker = [], mottaker: mId, prosjekt, samta
   const sk = lagSkjermer(kjentePersoner(atoms))
   const meldingS = sk.skjerm(String(melding)), kontekstS = sk.skjerm(kontekst)
   const sendes = `${SYSTEM}\n\n${byggMelding(meldingS, kontekstS)}`
-  const tokensCa = anslåTokens(sendes)
+  const tokensCa = anslåTokens(sendes, m.id)
   if (sk.nye.size) kjentePersoner([], { lær: [...sk.nye] })                   // lista vokser av bruk
   på('skjermet', { mottaker: m.id, antall: { ...sk.antall }, treff: sk.treff, ord: ord(sendes), tokens: { ca: tokensCa }, maks, tekst: sendes,
     saker: kilder.map(({ id, name, version, level, ord: o, tegn }) => ({ id, name, version, level, ord: o, tegn })), notater })
