@@ -63,6 +63,18 @@
 //   POST /api/konklusjon {prompt, svar?: [ids]} → «kjør igjen»: forskjeller og nytt utkast fra svar-sakene prompten ga (gjennom motoren) → { forskjeller, konklusjon }
 //        «Gi M og kjør igjen» er ikke en egen dør: Spør sender hele spørsmålet på nytt til POST /api/spor med kilden på M — hele motoren, nye svar-saker.
 //        Låsing (utkast → endelig) er POST /api/status som før.
+//   M16 (skive 7): lesere og Innboks — filer leses lokalt og blir saker med S/M/L FØR de kan sendes (V21, pitch v3 pkt. 4: aldri rått). lesere.js + innlesing.js.
+//   POST /api/les            fila som rå kropp (Content-Type: application/octet-stream, ?navn=<filnavn>&prosjekt=&samtale=) — slik nettleseren sender en fil som
+//                            ble dratt inn — ELLER JSON {sti, prosjekt?, samtale?} for en fil som alt ligger på maskinen. Stien må ligge i brukerens hjemmemappe
+//                            (realpath), aldri i arkivets .tua; broen lytter uansett bare på 127.0.0.1. → SSE:
+//        event: leser     {navn, format}                 event: lest {navn, format, sider, ord, tegn, verktøy, tittel}
+//        event: skriver   {mottaker, modell, lokalt}     standardmodellen lokalt skriver S (og M når teksten er lang); uten modell: regler, ingen hendelse
+//        event: ferdig    {id, name, project, S, S_av, M_av, ord: {S,M,L}, tegn, max, vault, format, sider, skriver: {av, modell, tokens, utlevert}}  — saken, klar som kilde i Spør
+//        event: feil      {feil, kode}  ukjent-format · ingen-tekst (PDF uten tekstlag — OCR kommer) · passord · for-stor · leser-mangler · feil
+//   GET  /api/innboks        { sti, dokumenter: [{navn, format, label, bytes}], eksporter, lenker, antall, ferdig, prosjekter, standard }  hva som venter i <arkiv>/Innboks
+//   POST /api/innboks/kjør   {prosjekt?, dryRun?} → { filer, tall: {filer, lest, feilet}, report }   leser dokumentene inn som saker (standard prosjekt «Innboks»), flytter til Innboks/Ferdig
+//   GET  /api/prosjekter     { prosjekter: [navn] }   prosjektene i arkivet (til prosjektvelgeren i Spør)
+//   POST /api/flytt          {id, prosjekt} → { atom }   flytter saken til et annet prosjekt (fila flyttes av lageret — det samme som å dra den i Finder, V9)
 //
 // Lytter kun på 127.0.0.1, og slipper bare kartets origin inn (CORS).
 // Kjør: npm run bridge   (i tua-plugin/). Ingen avhengigheter.
@@ -81,6 +93,9 @@ import { watchInbox, watchDesktop } from './import.js'      // M14: Innboks — 
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
 import { spor, mottakere, trustScores, Blokkert, ord, forskjeller, konklusjon, rettKonklusjon, svarFor } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
+import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks
+import { inboxPending, inboxShareFiles } from './import.js'
+import { projects as prosjektRegister, INBOX_DIR } from './store.js'
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
@@ -244,6 +259,16 @@ const readBody = (req) =>
     req.on('end', () => { try { resolve(d ? JSON.parse(d) : {}) } catch (e) { reject(e) } })
     req.on('error', reject)
   })
+// Rå kropp (en opplastet fil) som Buffer, opp til maks. Over grensen: forbindelsen brytes og kalleren får feil.
+const readBytes = (req, maks) =>
+  new Promise((resolve, reject) => {
+    const deler = []; let n = 0
+    req.on('data', (c) => { n += c.length; if (n > maks) { req.destroy(new Error(`fila er større enn ${Math.round(maks / 1048576)} MB`)); return } deler.push(c) })
+    req.on('end', () => resolve(Buffer.concat(deler)))
+    req.on('error', reject)
+  })
+const prosjektNavn = (p) => { const n = String(p || '').trim().replace(/[\/\\:*?"<>|\u0000-\u001f]/g, '·').replace(/\s+/g, ' ').slice(0, 90); if (!n || n.startsWith('.') || n === 'Ferdig') throw new Error(`«${p}» er ikke et gyldig prosjektnavn`); return n }
+const alleProsjekter = () => [...new Set([...load().map((a) => a.project), ...Object.keys(prosjektRegister()), STANDARD_PROSJEKT])].filter(Boolean).sort((a, b) => a.localeCompare(b, 'no'))
 
 // ── /api/open: fast liste (V13) ────────────────────────────────────────────
 // spawn med argv — aldri shell. Returnerer { ok, ran } eller kaster med forklaring.
@@ -401,6 +426,72 @@ http
         setStatus(a, status)
         save(atoms)                                              // versjonen som før: fila skrives om, forrige tilstand bevares i .tua/versions
         console.error(`[tua-bro] status «${a.name}»: ${før} → ${status}`)
+        return json(res, 200, { atom: { ...a, links: linksFor(a), file: fileOf(a), status: statusOf(a) }, før })
+      }
+      // ── M16 (skive 7): lesere og Innboks ──
+      if (req.method === 'GET' && url.pathname === '/api/prosjekter') return json(res, 200, { prosjekter: alleProsjekter() })
+      if (req.method === 'GET' && url.pathname === '/api/innboks') {
+        const dok = innboksDokumenter().map(({ sti, ...r }) => r)
+        return json(res, 200, { sti: INBOX_DIR, dokumenter: dok, eksporter: inboxPending(), lenker: inboxShareFiles().map((p) => path.basename(p)), antall: dok.length, ferdig: ferdigAntall(), formater: Object.values(FORMATER).map((f) => f.label), standard: STANDARD_PROSJEKT, prosjekter: alleProsjekter() })
+      }
+      if (req.method === 'POST' && ['/api/innboks/kjør', '/api/innboks/kj%C3%B8r', '/api/innboks/kjor'].includes(url.pathname)) {   // ø kommer prosent-kodet fra nettleseren
+        const b = await readBody(req)
+        let prosjekt = STANDARD_PROSJEKT
+        try { if (b.prosjekt) prosjekt = prosjektNavn(b.prosjekt) } catch (e) { return json(res, 400, { error: e.message }) }
+        const ctl = new AbortController(); req.on('close', () => ctl.abort())
+        const r = await lesInnInnboks({ prosjekt, dryRun: !!b.dryRun, skriver: b.skriver || undefined, klient: 'app', signal: ctl.signal, log: (m) => console.error(`[tua-bro] ${m}`) })
+        return json(res, 200, { ...r, filer: r.filer.map(({ sti, ...f }) => f) })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/les') {
+        // Fila kommer som rå kropp (nettleseren: dratt inn i Spør) eller som sti (JSON). Lesing og S/M skjer lokalt; SSE med fremdriften.
+        const erJson = (req.headers['content-type'] || '').includes('application/json')
+        const b = erJson ? await readBody(req) : {}
+        const navn = String(erJson ? b.navn || (b.sti ? path.basename(b.sti) : '') : url.searchParams.get('navn') || '').trim()
+        let prosjekt = STANDARD_PROSJEKT
+        try { const p = erJson ? b.prosjekt : url.searchParams.get('prosjekt'); if (p) prosjekt = prosjektNavn(p) } catch (e) { return json(res, 400, { error: e.message }) }
+        const samtale = String((erJson ? b.samtale : url.searchParams.get('samtale')) || '').trim()
+        const skriver = (erJson ? b.skriver : url.searchParams.get('skriver')) || undefined
+        let sti = null, data = null
+        if (erJson) {
+          if (!b.sti) return json(res, 400, { error: 'send {sti} (en fil i hjemmemappa di) som JSON, eller fila som rå kropp med ?navn=' })
+          const hjem = fs.realpathSync(os.homedir())
+          let abs
+          try { abs = fs.realpathSync(path.resolve(String(b.sti).replace(/^~(?=$|\/)/, os.homedir()))) } catch { return json(res, 404, { error: `fant ikke fila ${b.sti}` }) }
+          if (!abs.startsWith(hjem + path.sep)) { console.error(`[tua-bro] les AVVIST (utenfor hjemmemappa): ${b.sti}`); return json(res, 403, { error: 'broen leser bare filer i hjemmemappa di' }) }
+          if (filesMode() && abs.startsWith(path.join(fs.realpathSync(FILES_ROOT), '.tua') + path.sep)) return json(res, 403, { error: 'arkivets .tua-mappe leses ikke inn' })
+          if (!fs.statSync(abs).isFile()) return json(res, 400, { error: `${b.sti} er ikke en fil` })
+          sti = abs
+        } else {
+          if (!navn) return json(res, 400, { error: 'navn kreves (?navn=<filnavn>) når fila sendes som kropp' })
+          try { data = await readBytes(req, 50 * 1024 * 1024) } catch (e) { return json(res, 413, { error: e.message }) }
+          if (!data.length) return json(res, 400, { error: 'tom kropp — send fila som rå bytes' })
+        }
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        const ctl = new AbortController(); req.on('close', () => ctl.abort())
+        try {
+          const sak = await lesInn(sti, { navn: navn || undefined, data, prosjekt, samtale: samtale || 'Spør', skriver, klient: 'app', signal: ctl.signal, på: hendelse })
+          console.error(`[tua-bro] les ${navn || path.basename(sti)} → «${sak.name}» (${sak.id}, ${sak.status}) · ${sak.project} · ${sak.label}${sak.sider ? ` ${sak.sider} sider` : ''} · ${sak.ord.L} ord · S av ${sak.S_av}${sak.skriver?.utlevert ? ' · UTLEVERT' : ''}`)
+        } catch (e) {
+          console.error(`[tua-bro] les ${navn || sti} FEIL (${e.kode || 'feil'}): ${e.message}`)
+          hendelse('feil', { feil: e.message, kode: e.kode || 'feil', ...(e.sider ? { sider: e.sider } : {}) })
+        }
+        return res.end()
+      }
+      if (req.method === 'POST' && url.pathname === '/api/flytt') {
+        const b = await readBody(req)
+        if (!b.id || !b.prosjekt) return json(res, 400, { error: 'id og prosjekt kreves' })
+        let p
+        try { p = prosjektNavn(b.prosjekt) } catch (e) { return json(res, 400, { error: e.message }) }
+        const atoms = load()
+        const a = atoms.find((x) => x.id === b.id)
+        if (!a) return json(res, 404, { error: `fant ikke atom ${b.id}` })
+        const før = a.project
+        if (same(før, p)) return json(res, 200, { atom: { ...a, links: linksFor(a), file: fileOf(a), status: statusOf(a) }, før })
+        a.project = p
+        save(atoms)                                              // lageret flytter fila (index.json husker den gamle stien) — samme som å dra den i Finder
+        console.error(`[tua-bro] flytt «${a.name}»: ${før} → ${p}`)
         return json(res, 200, { atom: { ...a, links: linksFor(a), file: fileOf(a), status: statusOf(a) }, før })
       }
       // ── M20a: motoren ──

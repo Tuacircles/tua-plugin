@@ -26,7 +26,7 @@ import {
   archiveOptions, chooseArchive, importState,
 } from './store.js'
 import {
-  watchInbox, importCode, processInbox, processInboxShares, inboxPending, pendingCodeSessions, CODE_PROJECTS, DEFAULT_MIN,
+  watchInbox, importCode, processInbox, processInboxShares, inboxPending, pendingCodeSessions, CODE_PROJECTS, DEFAULT_MIN, lesInnInnboks,
   importDesktop, importFinder, importShare, importAll, watchDesktop, historyCounts, historyLine,                           // M17: historikk-fangst uten eksport
 } from './import.js'   // M14: «ta med historikken» + Innboks
 import { watchFinder } from './finder.js'
@@ -163,7 +163,7 @@ server.registerTool(
       'Importer tidligere samtaler og dokumenter som søkbare atomer — alt leses lokalt, uten eksport og uten innlogging. ' +
       'kilde=alt (anbefalt ved «ta med historikken»): alle kildene under + Innboks. kilde=code: Claude Code-øktene (~/.claude/projects; én atom per økt + substansielle svar og dokumenter). ' +
       'kilde=cowork: Claude Desktops Cowork-økter (audit.jsonl; prosjekt = mappa valgt i Cowork). kilde=desktop: Desktop-samtalene fra Claude Desktops egen cache — alt som har vært åpnet i Desktop, med prosjekt, verktøykall og filer Claude skrev; leses også av seg selv hvert 10. minutt. ' +
-      'kilde=finder: dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord, ved referanse (aldri kopi). kilde=lenke: en delt Claude-lenke (claude.ai/share/…) brukeren limer inn — gi den i `lenke`. kilde=innboks: eksport-zip og lenkefiler som ligger i Innboks nå. ' +
+      'kilde=finder: dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord, ved referanse (aldri kopi). kilde=lenke: en delt Claude-lenke (claude.ai/share/…) brukeren limer inn — gi den i `lenke`. kilde=innboks: eksport-zip, lenkefiler og løse dokumenter (PDF, tekst, md, html, csv, docx) som ligger i Innboks nå — dokumentene leses lokalt og blir saker med ingress og sammendrag fra den lokale modellen (project velger prosjekt, standard «Innboks»). ' +
       'Bruk når brukeren sier «ta med historikken», «importer samtalene mine», «hent inn gamle økter», «lagre denne delte lenken». Kjør med dryRun=true først og vis tallene. ' +
       'Idempotent — kan kjøres igjen; bare endrede økter får ny versjon. Samtaler som bare finnes på claude.ai web/mobil: be brukeren åpne dem i Desktop eller lage en delt lenke; Tua kaller aldri det interne API-et.',
     inputSchema: {
@@ -180,9 +180,11 @@ server.registerTool(
     const opts = { project, after: etter, minChars: minTegn ?? DEFAULT_MIN, dryRun: !!dryRun, log, skipSession: extra?.sessionId || '' }
     const tail = (key) => (dryRun ? '\n\nKjør igjen uten dryRun for å skrive.' : key ? `\n\nAdresse til rapporten: ${addr(load().find((a) => a.key === key)?.id || '')}` : '')
     if (kilde === 'innboks') {
-      const done = [...processInbox(opts), ...(await processInboxShares(opts))]
-      if (!done.length) return text(`Ingenting å importere i ${INBOX_DIR}${inboxPending().length ? '' : ' — legg en eksport-zip (claude.ai › Settings › Privacy › Export data, eller ChatGPT › Settings › Data controls › Export) eller en delt lenke (.url/.webloc/.txt) der, så blir den atomer av seg selv.'}`)
-      return text(done.map((d) => d.report).join('\n\n---\n\n'))
+      // eksporter og lenkefiler som før; så løse dokumenter (skive 7, M16): PDF, tekst, md, html, csv, docx → saker med S/M/L, S og M fra den lokale modellen
+      const dok = await lesInnInnboks({ prosjekt: project || undefined, dryRun: !!dryRun, log, klient: `chat (${CLIENT})` })
+      const done = [...processInbox(opts), ...(await processInboxShares(opts)), ...(dok.tall.filer ? [dok] : [])]
+      if (!done.length) return text(`Ingenting å importere i ${INBOX_DIR}${inboxPending().length ? '' : ' — legg en eksport-zip (claude.ai › Settings › Privacy › Export data, eller ChatGPT › Settings › Data controls › Export), en delt lenke (.url/.webloc/.txt) eller et dokument (PDF, tekst, md, html, csv, docx) der. Eksporter og lenker blir atomer av seg selv; dokumenter leses inn med tua_import(kilde=innboks).'}`)
+      return text(done.map((d) => d.report).join('\n\n---\n\n') + (dryRun && dok.tall.filer ? '\n\nKjør igjen uten dryRun for å lese inn dokumentene.' : ''))
     }
     if (kilde === 'lenke') {
       if (!lenke) return text('Gi den delte lenken i `lenke` (https://claude.ai/share/<id>).')

@@ -1,13 +1,14 @@
 // Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
-import fs from 'node:fs';
+import fs__default from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
+import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unzipToTemp } from './unzip.mjs';
-import { filesMode, INBOX_DIR, SHORT_L, load, S_MAX, FILES_ROOT, upsert, save, noteImport, importState, ensureArchive, projectOf, registerProject, claudeProjectHref, finishOnboarding } from './store.mjs';
+import { filesMode, INBOX_DIR, SHORT_L, load, S_MAX, FILES_ROOT, upsert, save, noteImport, importState, ensureArchive, projectOf, registerProject, claudeProjectHref, finishOnboarding, erTuaSak } from './store.mjs';
 import { cacheAvailable, CACHE_DIR, countDesktopConversations, importedDesktop, collectDesktop, desktopFolderGrants, noteImportedDesktop, desktopStaleness } from './desktop.mjs';
 import { scanFinder, countFinderCandidates } from './finder.mjs';
 import { CLAUDE_APP_DIR, posix } from './platform.mjs';
+import { lesInnInnboks, innboksDokumenter } from './innlesing.mjs';
 
 // import.js — «Ta med historikken» (M14 + M17): tidligere samtaler og dokumenter blir atomer. Kildene:
 //
@@ -28,7 +29,7 @@ import { CLAUDE_APP_DIR, posix } from './platform.mjs';
 //   node import.js --code|--cowork|--desktop|--finder|--alt [--project <navn>] [--etter <ÅÅÅÅ-MM-DD>] [--min-tegn <n>] [--dry-run]
 //   node import.js --lenke <https://claude.ai/share/…> [--dry-run]
 //   node import.js <zip|mappe> [--dry-run] [--project <navn>] [--min-tegn <n>] [--etter <ÅÅÅÅ-MM-DD>]
-//   node import.js --innboks [--dry-run]        én gjennomgang av Innboks nå
+//   node import.js --innboks [--dry-run] [--project <navn>]   én gjennomgang av Innboks nå — eksporter, lenkefiler og (skive 7) løse dokumenter (PDF, tekst, md, html, csv, docx) → saker
 //
 // Eksport-atomer (V13/V14): kind «samtale», prosjekt fra eksporten (ellers «Claude-samtaler»/«ChatGPT-samtaler»),
 // links med claude://claude.ai/chat/<uuid> eller https://chatgpt.com/c/<id>, S = tittel + første brukermelding (≤ 300),
@@ -37,23 +38,23 @@ import { CLAUDE_APP_DIR, posix } from './platform.mjs';
 // Fila flyttes til Innboks/Ferdig. Flere prosesser kan overvåke Innboks: den som får flyttet fila til .behandles eier den.
 
 
-const FERDIG = () => path.join(INBOX_DIR, 'Ferdig');
-const BEHANDLES = () => path.join(INBOX_DIR, '.behandles');
+const FERDIG = () => path__default.join(INBOX_DIR, 'Ferdig');
+const BEHANDLES = () => path__default.join(INBOX_DIR, '.behandles');
 const DEFAULT_MIN = SHORT_L;                               // 600 tegn — kortere samtaler har sjelden noe å finne igjen
 const MIN_SVAR = Number(process.env.TUA_MIN_SVAR) || 3000;  // et «substansielt» svar fra Claude (Erik 15.10.2026: 3 000, var 1 500)
-const CODE_PROJECTS = path.join(process.env.TUA_CODE_HOME || os.homedir(), '.claude', 'projects');
+const CODE_PROJECTS = path__default.join(process.env.TUA_CODE_HOME || os.homedir(), '.claude', 'projects');
 // Cowork (Claude Desktop, lokal agent-modus) lagrer øktene sine her — samme transkript-format som Code.
 // <konto>/<rom>/local_<økt>.json er metadata (title, userSelectedFolders, createdAt, lastActivityAt, initialMessage);
 // <konto>/<rom>/local_<økt>/.claude/projects/<mappe>/<uuid>.jsonl er transkriptet. Bare lesing.
-const COWORK_ROOT = process.env.TUA_COWORK_ROOT || path.join(CLAUDE_APP_DIR, 'local-agent-mode-sessions');   // M18: per OS (platform.js)
+const COWORK_ROOT = process.env.TUA_COWORK_ROOT || path__default.join(CLAUDE_APP_DIR, 'local-agent-mode-sessions');   // M18: per OS (platform.js)
 
 // ── små hjelpere ────────────────────────────────────────────────────────────
 const ms = (v) => (v == null ? null : typeof v === 'number' ? (v < 1e12 ? v * 1000 : v) : Date.parse(v) || null);
 const iso = (t) => (t ? new Date(t).toISOString().slice(0, 10) : '');
 const flat = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
-const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
-const exists = (p) => { try { fs.accessSync(p); return true } catch { return false } };
+const readJson = (p) => JSON.parse(fs__default.readFileSync(p, 'utf8'));
+const exists = (p) => { try { fs__default.accessSync(p); return true } catch { return false } };
 const stem = (f) => String(f || '').replace(/\.(md|markdown|txt|pdf|docx?|csv|json|html?)$/i, '');   // «plan.md» → «plan» (fila får .md uansett)
 const sha8 = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0') };
 // S etter regel: «Tittel: første brukermelding» innenfor 300 tegn
@@ -94,10 +95,10 @@ const repoRootOf = (cwd) => { const m = String(cwd || '').match(/^(.*)\/\.claude
 function projectOfCwd(cwd) {
   let d = cwd;
   for (let i = 0; i < 6 && d; i++) {
-    try { const p = JSON.parse(fs.readFileSync(path.join(d, '.tua-sync.json'), 'utf8')).project; if (p) return p } catch {}
-    const up = path.dirname(d); if (up === d) break; d = up;
+    try { const p = JSON.parse(fs__default.readFileSync(path__default.join(d, '.tua-sync.json'), 'utf8')).project; if (p) return p } catch {}
+    const up = path__default.dirname(d); if (up === d) break; d = up;
   }
-  return path.basename(repoRootOf(cwd)) || 'Claude Code'
+  return path__default.basename(repoRootOf(cwd)) || 'Claude Code'
 }
 
 // ── Code-økter (jsonl) ──────────────────────────────────────────────────────
@@ -109,7 +110,7 @@ const TEXT_FILE = /\.(md|markdown|txt|rst)$/i;
 function parseCodeSession(file, { maxChars = 300_000 } = {}) {
   const s = { id: '', cwd: '', title: '', prompts: [], answers: [], files: new Map(), edited: new Set(), lastAssistant: '', first: null, last: null, turns: 0, lines: [] };
   let text = '';
-  try { text = fs.readFileSync(file, 'utf8'); } catch { return s }
+  try { text = fs__default.readFileSync(file, 'utf8'); } catch { return s }
   for (const line of text.split('\n')) {
     if (!line) continue
     let o; try { o = JSON.parse(line); } catch { continue }
@@ -134,7 +135,7 @@ function parseCodeSession(file, { maxChars = 300_000 } = {}) {
       s.last = when || s.last;
     }
   }
-  s.id ||= path.basename(file, '.jsonl');
+  s.id ||= path__default.basename(file, '.jsonl');
   const full = s.lines.join('\n\n');
   s.transcript = full.length > maxChars ? full.slice(0, maxChars) + `\n\n_(forkortet: ${full.length - maxChars} tegn til i øktfila)_` : full;
   s.chars = full.length;
@@ -147,13 +148,13 @@ function parseCodeSession(file, { maxChars = 300_000 } = {}) {
 function listCodeSessions(root = CODE_PROJECTS) {
   const out = [];
   let dirs = [];
-  try { dirs = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { return out }
+  try { dirs = fs__default.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { return out }
   for (const d of dirs) {
-    const dir = path.join(root, d.name);
-    for (const f of fs.readdirSync(dir)) {
+    const dir = path__default.join(root, d.name);
+    for (const f of fs__default.readdirSync(dir)) {
       if (!f.endsWith('.jsonl') || f.startsWith('agent-')) continue
-      const abs = path.join(dir, f);
-      const st = fs.statSync(abs);
+      const abs = path__default.join(dir, f);
+      const st = fs__default.statSync(abs);
       out.push({ file: abs, dir: d.name, size: st.size, mtime: st.mtimeMs });
     }
   }
@@ -166,28 +167,28 @@ function listCodeSessions(root = CODE_PROJECTS) {
 // Prosjektet er mappa brukeren valgte i Cowork (userSelectedFolders[0] i local_<uuid>.json), tittelen likeså.
 function listCoworkSessions(root = COWORK_ROOT) {
   const out = [];
-  const dirs = (d) => { try { return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path.join(d, e.name)) } catch { return [] } };
+  const dirs = (d) => { try { return fs__default.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path__default.join(d, e.name)) } catch { return [] } };
   for (const acct of dirs(root)) for (const room of dirs(acct)) {
-    for (const sess of dirs(room).filter((p) => path.basename(p).startsWith('local_'))) {
+    for (const sess of dirs(room).filter((p) => path__default.basename(p).startsWith('local_'))) {
       let meta = {};
-      try { meta = JSON.parse(fs.readFileSync(sess + '.json', 'utf8')); } catch {}
-      const audit = path.join(sess, 'audit.jsonl');
+      try { meta = JSON.parse(fs__default.readFileSync(sess + '.json', 'utf8')); } catch {}
+      const audit = path__default.join(sess, 'audit.jsonl');
       let file = exists(audit) ? audit : null, kind = 'audit';
       if (!file) {
-        file = dirs(path.join(sess, '.claude', 'projects')).flatMap((p) => { try { return fs.readdirSync(p).filter((f) => f.endsWith('.jsonl') && !f.startsWith('agent-')).map((f) => path.join(p, f)) } catch { return [] } })
-          .map((f) => ({ f, size: fs.statSync(f).size })).sort((a, b) => b.size - a.size)[0]?.f || null;
+        file = dirs(path__default.join(sess, '.claude', 'projects')).flatMap((p) => { try { return fs__default.readdirSync(p).filter((f) => f.endsWith('.jsonl') && !f.startsWith('agent-')).map((f) => path__default.join(p, f)) } catch { return [] } })
+          .map((f) => ({ f, size: fs__default.statSync(f).size })).sort((a, b) => b.size - a.size)[0]?.f || null;
         kind = 'transkript';
       }
       if (!file) continue
-      const st = fs.statSync(file);
+      const st = fs__default.statSync(file);
       // prosjekt = mappa brukeren valgte i Cowork; hjemmemappa og dens standardmapper (Documents, Downloads, Desktop) er ikke prosjekter
       const folders = (Array.isArray(meta.userSelectedFolders) ? meta.userSelectedFolders : []).map(String);
       const home = os.homedir();
-      const generic = (f) => { const p = path.resolve(String(f || '')); return p === home || ['Documents', 'Downloads', 'Desktop', 'Library'].some((d) => p === path.join(home, d)) };
+      const generic = (f) => { const p = path__default.resolve(String(f || '')); return p === home || ['Documents', 'Downloads', 'Desktop', 'Library'].some((d) => p === path__default.join(home, d)) };
       const folder = folders.find((f) => !generic(f)) || folders[0] || '';
       out.push({
         file, size: st.size, mtime: st.mtimeMs, kind,
-        over: { id: path.basename(sess).replace(/^local_/, ''), project: folder && !generic(folder) ? projectOfCwd(folder) : 'Cowork', repo: folder, convo: meta.title ? String(meta.title) : '', created: meta.createdAt || null, last: meta.lastActivityAt || null, archived: !!meta.isArchived },
+        over: { id: path__default.basename(sess).replace(/^local_/, ''), project: folder && !generic(folder) ? projectOfCwd(folder) : 'Cowork', repo: folder, convo: meta.title ? String(meta.title) : '', created: meta.createdAt || null, last: meta.lastActivityAt || null, archived: !!meta.isArchived },
       });
     }
   }
@@ -227,10 +228,10 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
       if (isTuaCommand(s.prompts[0])) { stats.tuaprat = (stats.tuaprat || 0) + 1; continue }   // økta er en test av Tua (/tua_card …), ikke arbeid
       const repo = over.repo !== undefined ? over.repo : repoRootOf(s.cwd);
       const links = repo ? [{ kind: 'repo', href: repo, label: `Repo — ${proj}` }] : [];
-      const header = `# ${s.convo}\n\n_${srcLabel} · ${s.turns} oppgaver · ${iso(s.first)}${s.last && iso(s.last) !== iso(s.first) ? ` – ${iso(s.last)}` : ''} · ${proj}${repo ? ` · ${repo}` : ''} · øktfil ${path.basename(file)}_\n\n`;
+      const header = `# ${s.convo}\n\n_${srcLabel} · ${s.turns} oppgaver · ${iso(s.first)}${s.last && iso(s.last) !== iso(s.first) ? ` – ${iso(s.last)}` : ''} · ${proj}${repo ? ` · ${repo}` : ''} · øktfil ${path__default.basename(file)}_\n\n`;
       const { atom, status } = put({
         key: `samtale:${s.id}`, kind: 'samtale', name: s.convo, content: header + s.transcript, project: proj, convo: s.convo, source: srcLabel, by: 'regel',
-        tags: ['samtale', source], links, short: ruleS(s.title, s.firstUser), summary: `${srcLabel}-økt importert fra ${path.basename(file)} (${s.turns} oppgaver).`,
+        tags: ['samtale', source], links, short: ruleS(s.title, s.firstUser), summary: `${srcLabel}-økt importert fra ${path__default.basename(file)} (${s.turns} oppgaver).`,
       }, s.last);
       count(status); perProject[proj] = (perProject[proj] || 0) + 1;
       const derived = [{ id: atom.id, version: atom.version || 1, level: 'L' }];
@@ -245,16 +246,16 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
       for (const [fp, content] of s.files) {
         const fq = posix(fp);
         if (!TEXT_FILE.test(fq) || /\/(node_modules|\.tua|\.git)\//.test(fq) || /\/\.claude\/(?!worktrees\/)/.test(fq) || /\/CLAUDE\.md$/.test(fq) || content.trim().length < SHORT_L) continue   // samme filter som hooken: ikke Claude-oppsett/minne
-        if (filesMode() && !path.relative(FILES_ROOT, fp).startsWith('..')) continue                 // fila ligger i arkivet selv
+        if (filesMode() && !path__default.relative(FILES_ROOT, fp).startsWith('..')) continue                 // fila ligger i arkivet selv
         if (isDataDump(content)) { stats.datadump++; continue }
         const r = put({
-          key: `fil:${fp}`, kind: 'capture', name: titleOf(content, path.basename(fp, path.extname(fp))), content, project: proj, convo: s.convo, source: 'Claude', by: 'regel',
+          key: `fil:${fp}`, kind: 'capture', name: titleOf(content, path__default.basename(fp, path__default.extname(fp))), content, project: proj, convo: s.convo, source: 'Claude', by: 'regel',
           tags: ['dokument', 'auto'], links: [{ kind: 'file', href: fp }, ...links], derivedFrom: derived, short: clip(firstPara(content), S_MAX),
           summary: `Skrevet i Code-økta «${s.convo}» (${fp}).`,
         }, s.last);
         if (r.status !== 'uendret') stats.filer++;
       }
-    } catch (e) { stats.feil++; log(`  ⚠ ${path.basename(file)}: ${e.message}`); }
+    } catch (e) { stats.feil++; log(`  ⚠ ${path__default.basename(file)}: ${e.message}`); }
   }
   const projLine = Object.entries(perProject).sort((a, b) => b[1] - a[1]).map(([p, n]) => `${p} (${n})`).join(', ') || '—';
   const filters = [project && `prosjekt = ${project}`, `minst ${minChars} tegn`, after && `etter ${after}`].filter(Boolean).join(' · ');
@@ -314,11 +315,11 @@ const isMemories = (o) => isObj(o) && ('conversations_memory' in o || 'project_m
 function collectClaude(dir, depth = 0) {
   const out = { conversations: [], projects: [], design: [], memories: [], other: [] };
   let entries = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out }
+  try { entries = fs__default.readdirSync(dir, { withFileTypes: true }); } catch { return out }
   for (const e of entries) {
-    const p = path.join(dir, e.name);
+    const p = path__default.join(dir, e.name);
     if (e.isDirectory()) { if (depth < 4 && !e.name.startsWith('.')) { const sub = collectClaude(p, depth + 1); for (const k of Object.keys(out)) out[k].push(...sub[k]); } continue }
-    if (!e.name.toLowerCase().endsWith('.json') || fs.statSync(p).size > 400e6) continue
+    if (!e.name.toLowerCase().endsWith('.json') || fs__default.statSync(p).size > 400e6) continue
     let d; try { d = readJson(p); } catch { continue }
     const list = Array.isArray(d) ? d : [d];
     if (list.length && list.every(isConversation)) out.conversations.push(...list);
@@ -406,7 +407,7 @@ function parseClaude(dir, { extraProjects = [] } = {}) {
 //   mapping: {nodeId: {id, parent, children, message: {author: {role}, content: {content_type, parts}, create_time}}}}]
 const partText = (p) => (typeof p === 'string' ? p : p && typeof p === 'object' ? (p.text || p.content || '') : '');
 function parseChatGPT(dir) {
-  const conversations = readJson(path.join(dir, 'conversations.json'));
+  const conversations = readJson(path__default.join(dir, 'conversations.json'));
   if (!Array.isArray(conversations)) throw new Error('conversations.json er ikke en liste')
   const seen = new Set();
   const convs = conversations.filter(Boolean).map((c) => {
@@ -435,20 +436,20 @@ function parseChatGPT(dir) {
 // Hvilken eksport er dette? ChatGPT har conversations.json med `mapping`; Claude har samtaler (chat_messages) eller
 // prosjekter (name + docs) i en eller flere json-filer. null = ingen av delene.
 function detect(dir) {
-  const p = path.join(dir, 'conversations.json');
+  const p = path__default.join(dir, 'conversations.json');
   if (exists(p)) {
-    const head = fs.readFileSync(p, { encoding: 'utf8', flag: 'r' }).slice(0, 20000);
+    const head = fs__default.readFileSync(p, { encoding: 'utf8', flag: 'r' }).slice(0, 20000);
     if (/"mapping"/.test(head) && !/"chat_messages"/.test(head)) return 'chatgpt'
   }
   const f = collectClaude(dir);
   return f.conversations.length || f.projects.length || f.design.length || f.memories.length ? 'claude' : null
 }
-const allJsons = (dir, depth = 0) => { let out = []; try { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (e.isDirectory() && depth < 4) out.push(...allJsons(path.join(dir, e.name), depth + 1)); else if (e.name.toLowerCase().endsWith('.json')) out.push(e.name); } } catch {} return out };
+const allJsons = (dir, depth = 0) => { let out = []; try { for (const e of fs__default.readdirSync(dir, { withFileTypes: true })) { if (e.isDirectory() && depth < 4) out.push(...allJsons(path__default.join(dir, e.name), depth + 1)); else if (e.name.toLowerCase().endsWith('.json')) out.push(e.name); } } catch {} return out };
 function findRoot(dir, loose = false) {
-  if (exists(path.join(dir, 'conversations.json')) || exists(path.join(dir, 'projects.json'))) return dir
+  if (exists(path__default.join(dir, 'conversations.json')) || exists(path__default.join(dir, 'projects.json'))) return dir
   if (loose) return allJsons(dir).length ? dir : null
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.isDirectory() && !e.name.startsWith('.')) { const r = findRoot(path.join(dir, e.name)); if (r) return r }
+  for (const e of fs__default.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory() && !e.name.startsWith('.')) { const r = findRoot(path__default.join(dir, e.name)); if (r) return r }
   }
   return null
 }
@@ -463,15 +464,15 @@ const unzip = (zipPath) => unzipToTemp(zipPath, (tmp) => !!findRoot(tmp, true));
 // Derfor: manifestet alene gir en mottaksstatus (hva mangler), kategori-zipene importeres hver for seg (samtaler
 // finner projects.json i projects-*.zip ved siden av seg), flere deler er bare flere filer, og kategorier vi ikke
 // kan lese ennå flyttes til Ferdig med beskjed — de stopper ikke resten.
-const isManifest = (p) => { try { return /\.json$/i.test(p) && fs.statSync(p).size < 2e6 && Array.isArray(readJson(p).data_files) } catch { return false } };
-const inboxFiles = () => [INBOX_DIR, FERDIG(), BEHANDLES()].flatMap((d) => { try { return fs.readdirSync(d).map((n) => path.join(d, n)) } catch { return [] } });
+const isManifest = (p) => { try { return /\.json$/i.test(p) && fs__default.statSync(p).size < 2e6 && Array.isArray(readJson(p).data_files) } catch { return false } };
+const inboxFiles = () => [INBOX_DIR, FERDIG(), BEHANDLES()].flatMap((d) => { try { return fs__default.readdirSync(d).map((n) => path__default.join(d, n)) } catch { return [] } });
 function manifestStatus() {
-  const m = inboxFiles().filter(isManifest).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
+  const m = inboxFiles().filter(isManifest).sort((a, b) => fs__default.statSync(b).mtimeMs - fs__default.statSync(a).mtimeMs)[0];
   if (!m) return null
   const data = readJson(m);
-  const have = new Set(inboxFiles().map((p) => path.basename(p).replace(/ \(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\)(?=\.zip$)/, '')));
+  const have = new Set(inboxFiles().map((p) => path__default.basename(p).replace(/ \(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\)(?=\.zip$)/, '')));
   const files = (data.data_files || []).map((f) => ({ ...f, present: have.has(f.filename) }));
-  return { manifest: path.basename(m), created: data.created_at || '', total: data.total_files || files.length, files, missing: files.filter((f) => !f.present), present: files.filter((f) => f.present) }
+  return { manifest: path__default.basename(m), created: data.created_at || '', total: data.total_files || files.length, files, missing: files.filter((f) => !f.present), present: files.filter((f) => f.present) }
 }
 const manifestReport = (st) => [
   `# Claude-eksport: ${st.present.length} av ${st.files.length} filer mottatt`, '',
@@ -483,8 +484,8 @@ const manifestReport = (st) => [
 // projects.json fra en annen kategori-zip (Innboks eller Ferdig) — så samtaler får prosjektnavn selv om projects-000.zip kom separat
 function siblingProjects(log) {
   const out = [];
-  for (const z of inboxFiles().filter((p) => /^projects-\d+(?: \(.*\))?\.zip$/i.test(path.basename(p)))) {
-    try { const t = unzip(z); out.push(...collectClaude(t).projects); fs.rmSync(t, { recursive: true, force: true }); } catch (e) { log(`  prosjekter i ${path.basename(z)} kunne ikke leses: ${e.message}`); }
+  for (const z of inboxFiles().filter((p) => /^projects-\d+(?: \(.*\))?\.zip$/i.test(path__default.basename(p)))) {
+    try { const t = unzip(z); out.push(...collectClaude(t).projects); fs__default.rmSync(t, { recursive: true, force: true }); } catch (e) { log(`  prosjekter i ${path__default.basename(z)} kunne ikke leses: ${e.message}`); }
   }
   return out
 }
@@ -498,9 +499,9 @@ const DESCRIBE = {
 // Returnerer rapporten (tekst + tall). Skriver ingenting når dryRun.
 function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_MIN, after = null, log = () => {}, moveTo = null } = {}) {
   const t0 = Date.now();
-  const name = path.basename(src);
+  const name = path__default.basename(src);
   // manifestet alene: mottaksstatus, ingen atomer utover rapporten
-  if (fs.statSync(src).isFile() && isManifest(src)) {
+  if (fs__default.statSync(src).isFile() && isManifest(src)) {
     const st = manifestStatus() || { manifest: name, files: [], missing: [], present: [] };
     const report = manifestReport(st);
     if (!dryRun) { const atoms = load(); upsert(atoms, { key: 'import:eksport-manifest', name: 'Claude-eksport: mottak', content: report, project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], short: clip(`Claude-eksport: ${st.present.length} av ${st.files.length} filer mottatt${st.missing.length ? `; mangler ${st.missing.map((f) => f.filename).join(', ')}` : ''}.`, S_MAX) }); save(atoms); }
@@ -508,7 +509,7 @@ function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_
     return { report, stats: { manifest: true, present: st.present.length, total: st.files.length }, kind: 'manifest', count: 0 }
   }
   let dir = src, tmp = null;
-  if (fs.statSync(src).isFile()) { if (!/\.zip$/i.test(src)) throw new Error(`${name}: ikke en zip og ikke en mappe`); tmp = unzip(src); dir = tmp; }
+  if (fs__default.statSync(src).isFile()) { if (!/\.zip$/i.test(src)) throw new Error(`${name}: ikke en zip og ikke en mappe`); tmp = unzip(src); dir = tmp; }
   const root = findRoot(dir) || findRoot(dir, true);
   if (!root) throw new Error(`${name}: fant ingen json-filer`)
   const kind = detect(root);
@@ -518,7 +519,7 @@ function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_
     const cat = (name.match(/^([a-z_]+)-\d+/i) || [])[1] || '';
     const report = `# Import: ${name}\n\nInnhold: ${found.length} json-fil${found.length === 1 ? '' : 'er'} (${[...new Set(found.map((f) => f.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/i, '<uuid>')))].slice(0, 6).join(', ')}).${DESCRIBE[cat] ? ` ${DESCRIBE[cat]}.` : ''} Denne kategorien av Claude-eksporten blir ikke atomer ennå. Fila er lagt i Innboks/Ferdig og kan slettes i Finder.`;
     log(`${name}: ikke støttet (${cat || found.join(', ')}) — flyttes til Ferdig`);
-    if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+    if (tmp) fs__default.rmSync(tmp, { recursive: true, force: true });
     return { report, stats: { unsupported: true }, kind: 'ukjent', count: 0 }
   }
   const data = kind === 'claude' ? parseClaude(root, { extraProjects: collectClaude(root).projects.length ? [] : siblingProjects(log) }) : parseChatGPT(root);
@@ -535,7 +536,7 @@ function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_
     },
   });
   if (!dryRun) log(`${name}: ${r.stats.nye} nye · ${r.stats.oppdatert} oppdatert · ${r.stats.uendret} uendret · ${r.stats.korte} korte · ${r.written} filer skrevet · ${((Date.now() - t0) / 1000).toFixed(1)} s`);
-  if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+  if (tmp) fs__default.rmSync(tmp, { recursive: true, force: true });
   return { report: r.report, stats: r.stats, kind, count: data.convs.length }
 }
 
@@ -606,7 +607,7 @@ function importParsed(data, {
       if (project && d.project.toLowerCase() !== project.toLowerCase()) continue
       if ((d.content || '').trim().length < minChars) continue
       const r = put({
-        key: `claude-doc:${d.id}`, name: stem(path.basename(d.title)), content: d.content, project: d.project, source: 'Claude', by: 'regel', tags: ['dokument'],   // «claude/notat.md» → «notat»
+        key: `claude-doc:${d.id}`, name: stem(path__default.basename(d.title)), content: d.content, project: d.project, source: 'Claude', by: 'regel', tags: ['dokument'],   // «claude/notat.md» → «notat»
         links: d.projectUuid ? [{ kind: 'claude-project', href: claudeProjectHref(d.projectUuid), label: `Claude-prosjekt — ${d.project}` }] : [],
         short: ruleS(d.title, `dokument i Claude-prosjektet «${d.project}»`), summary: `Prosjektkunnskap i Claude (${d.project}), fra ${label}.`,
       }, d.created);
@@ -679,7 +680,7 @@ function desktopData({ log = () => {}, all = false } = {}) {
   // Samtaler fra samtalelageret mangler prosjekt: bruk mappa brukeren ga Cowork-økta eller chatten tilgang til (Desktops config)
   const grants = desktopFolderGrants();
   const home = os.homedir();
-  const generic = (f) => { const p = path.resolve(String(f || '')); return p === home || ['Documents', 'Downloads', 'Desktop', 'Library'].some((x) => p === path.join(home, x)) };
+  const generic = (f) => { const p = path__default.resolve(String(f || '')); return p === home || ['Documents', 'Downloads', 'Desktop', 'Library'].some((x) => p === path__default.join(home, x)) };
   const projectFromGrant = (c) => {
     const folders = (c.store?.cowork && grants.bySession.get(c.store.cowork.replace(/^cse_/, ''))) || grants.byConversation.get(c.id) || [];
     const f = folders.find((x) => !generic(x));
@@ -833,17 +834,17 @@ async function importShare(url, { dryRun = false, log = () => {}, via = 'chat', 
 // Innboks: .url (Windows), .webloc (macOS: dra en lenke til Finder), .txt/.md med en delt lenke i — også delt fra mobil via
 // «Lagre i Filer» til iCloud/Dropbox-mappa Tua/Innboks. Små filer; behandles asynkront, flyttes til Ferdig.
 const SHARE_FILE = /\.(url|webloc|txt|md)$/i;
-const shareLinksInFile = (p) => { try { if (fs.statSync(p).size > 1e6) return []; return shareLinksIn(fs.readFileSync(p, 'utf8')) } catch { return [] } };
-function inboxShareFiles() { try { return fs.readdirSync(INBOX_DIR).filter((n) => !n.startsWith('.') && SHARE_FILE.test(n) && shareLinksInFile(path.join(INBOX_DIR, n)).length).map((n) => path.join(INBOX_DIR, n)) } catch { return [] } }
+const shareLinksInFile = (p) => { try { if (fs__default.statSync(p).size > 1e6 || erTuaSak(p)) return []; return shareLinksIn(fs__default.readFileSync(p, 'utf8')) } catch { return [] } };   // skive 7: en sak lest inn til Innboks er ikke en lenkefil
+function inboxShareFiles() { try { return fs__default.readdirSync(INBOX_DIR).filter((n) => !n.startsWith('.') && SHARE_FILE.test(n) && shareLinksInFile(path__default.join(INBOX_DIR, n)).length).map((n) => path__default.join(INBOX_DIR, n)) } catch { return [] } }
 async function processInboxShares({ dryRun = false, log = () => {} } = {}) {
   if (ensureArchive().needsChoice) return []
   const done = [];
   for (const src of inboxShareFiles()) {
-    const n = path.basename(src);
+    const n = path__default.basename(src);
     const links = shareLinksInFile(src);
     try {
       const r = await importShare(links.join('\n'), { dryRun, log, via: `Innboks (${n})` });
-      if (!dryRun) { fs.mkdirSync(FERDIG(), { recursive: true }); fs.renameSync(src, uniq(FERDIG(), n)); }
+      if (!dryRun) { fs__default.mkdirSync(FERDIG(), { recursive: true }); fs__default.renameSync(src, uniq(FERDIG(), n)); }
       done.push({ name: n, ...r });
     } catch (e) { log(`⚠ ${n}: ${e.message}`); }
   }
@@ -876,7 +877,7 @@ function historyCounts({ fresh = false, quick = false } = {}) {
     at: Date.now(),
     code: pendingCodeSessions(st.code?.at || 0), codeAll: listCodeSessions().filter((s) => s.size > 2000).length,
     cowork: pendingCoworkSessions(st.cowork?.at || 0), coworkAll: listCoworkSessions().filter((s) => s.size > 20000).length,
-    desktop: 0, desktopNew: 0, dokumenter: 0, innboks: inboxPending().length + inboxShareFiles().length, quick,
+    desktop: 0, desktopNew: 0, dokumenter: 0, innboks: inboxPending().length + inboxShareFiles().length + innboksDokumenter().length, quick,
   };
   try {
     if (cacheAvailable()) {
@@ -894,36 +895,36 @@ const historyLine = (c = historyCounts()) => {
 };
 
 // ── Innboks: overvåking ─────────────────────────────────────────────────────
-const isCandidate = (p) => { try { if (/ \(feilet\)/.test(p)) return false; const st = fs.statSync(p); return (st.isFile() && (/\.zip$/i.test(p) || isManifest(p))) || (st.isDirectory() && !!findRoot(p)) } catch { return false } };
-const stable = (p) => { try { const a = fs.statSync(p).size; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); return fs.statSync(p).size === a } catch { return false } };
-const uniq = (dir, base) => { let p = path.join(dir, base); if (!exists(p)) return p; const e = path.extname(base), b = base.slice(0, base.length - e.length); return path.join(dir, `${b} (${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')})${e}`) };
-function inboxPending() { try { return fs.readdirSync(INBOX_DIR).filter((n) => !n.startsWith('.') && n !== 'Ferdig' && isCandidate(path.join(INBOX_DIR, n))) } catch { return [] } }
+const isCandidate = (p) => { try { if (/ \(feilet\)/.test(p)) return false; const st = fs__default.statSync(p); return (st.isFile() && (/\.zip$/i.test(p) || isManifest(p))) || (st.isDirectory() && !!findRoot(p)) } catch { return false } };
+const stable = (p) => { try { const a = fs__default.statSync(p).size; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); return fs__default.statSync(p).size === a } catch { return false } };
+const uniq = (dir, base) => { let p = path__default.join(dir, base); if (!exists(p)) return p; const e = path__default.extname(base), b = base.slice(0, base.length - e.length); return path__default.join(dir, `${b} (${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')})${e}`) };
+function inboxPending() { try { return fs__default.readdirSync(INBOX_DIR).filter((n) => !n.startsWith('.') && n !== 'Ferdig' && isCandidate(path__default.join(INBOX_DIR, n))) } catch { return [] } }
 
 // Én gjennomgang av Innboks. Hver fil «kreves» ved å flyttes til .behandles (atomisk) før den leses.
 function processInbox({ dryRun = false, log = () => {}, ...opts } = {}) {
   if (ensureArchive().needsChoice) return []
   let entries = [];
-  try { entries = fs.readdirSync(INBOX_DIR).filter((n) => !n.startsWith('.') && n !== 'Ferdig'); } catch { return [] }
+  try { entries = fs__default.readdirSync(INBOX_DIR).filter((n) => !n.startsWith('.') && n !== 'Ferdig'); } catch { return [] }
   const done = [];
   // projects-*.zip først, så samtaler, design og minner får prosjektnavn; manifestet sist, så statusen stemmer
   entries.sort((a, b) => (/^projects-/.test(b) ? 1 : 0) - (/^projects-/.test(a) ? 1 : 0) || (/\.json$/i.test(a) ? 1 : 0) - (/\.json$/i.test(b) ? 1 : 0));
   for (const n of entries) {
-    const src = path.join(INBOX_DIR, n);
+    const src = path__default.join(INBOX_DIR, n);
     if (!isCandidate(src) || !stable(src)) continue
     let work = src;
     if (!dryRun) {
-      fs.mkdirSync(BEHANDLES(), { recursive: true });
-      work = path.join(BEHANDLES(), n);
-      try { fs.renameSync(src, work); } catch { continue }           // en annen prosess tok den
+      fs__default.mkdirSync(BEHANDLES(), { recursive: true });
+      work = path__default.join(BEHANDLES(), n);
+      try { fs__default.renameSync(src, work); } catch { continue }           // en annen prosess tok den
     }
     try {
       const dest = dryRun ? null : uniq(FERDIG(), n);
-      const r = importExport(work, { ...opts, dryRun, log, moveTo: dest ? path.relative(FILES_ROOT, dest) : null });
-      if (!dryRun) { fs.mkdirSync(FERDIG(), { recursive: true }); fs.renameSync(work, dest); }
+      const r = importExport(work, { ...opts, dryRun, log, moveTo: dest ? path__default.relative(FILES_ROOT, dest) : null });
+      if (!dryRun) { fs__default.mkdirSync(FERDIG(), { recursive: true }); fs__default.renameSync(work, dest); }
       done.push({ name: n, ...r });
     } catch (e) {
       log(`⚠ ${n}: ${e.message}`);
-      if (!dryRun) { try { fs.renameSync(work, uniq(INBOX_DIR, n.replace(/(\.(zip|json))?$/i, ' (feilet)$1'))); } catch {} }   // «(feilet)» i navnet → prøves ikke igjen
+      if (!dryRun) { try { fs__default.renameSync(work, uniq(INBOX_DIR, n.replace(/(\.(zip|json))?$/i, ' (feilet)$1'))); } catch {} }   // «(feilet)» i navnet → prøves ikke igjen
     }
   }
   return done
@@ -938,16 +939,16 @@ function watchInbox({ log = () => {} } = {}) {
     try { const d = processInbox({ log }); for (const r of d) log(`Innboks: ${r.name} importert — ${r.stats.nye} nye, ${r.stats.oppdatert} oppdatert (rapport lagret som atom)`); } catch (e) { log(`Innboks: ${e.message}`); }
     try { for (const r of await processInboxShares({ log })) log(`Innboks: ${r.name} — ${r.stats.lenker} delt${r.stats.lenker === 1 ? '' : 'e'} lenke${r.stats.lenker === 1 ? '' : 'r'} (${r.stats.innhold} med innhold, ${r.stats.pekere} pekere)`); } catch (e) { log(`Innboks (lenker): ${e.message}`); }   // M17
   }, delay); };
-  try { fs.mkdirSync(INBOX_DIR, { recursive: true }); } catch {}
+  try { fs__default.mkdirSync(INBOX_DIR, { recursive: true }); } catch {}
   let watcher = null;
-  try { watcher = fs.watch(INBOX_DIR, { persistent: false }, () => kick(3000)); } catch (e) { log(`Innboks: kan ikke overvåke ${INBOX_DIR} (${e.message})`); }
+  try { watcher = fs__default.watch(INBOX_DIR, { persistent: false }, () => kick(3000)); } catch (e) { log(`Innboks: kan ikke overvåke ${INBOX_DIR} (${e.message})`); }
   kick(2000);
   return () => { clearTimeout(timer); watcher?.close(); }
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
 // Kommandolinje — ikke når fila er bygd inn i serveren (server/tua-server.mjs setter __TUA_BUNDLE, og bygd peker import.meta.url på kildefila mens argv[1] er inngangen)
-if (!globalThis.__TUA_BUNDLE && process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(new URL("../../import.js", import.meta.url).href)) {
+if (!globalThis.__TUA_BUNDLE && process.argv[1] && path__default.resolve(process.argv[1]) === fileURLToPath(new URL("../../import.js", import.meta.url).href)) {
   const args = process.argv.slice(2);
   const flag = (f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : null };
   const opts = { dryRun: args.includes('--dry-run'), project: flag('--project'), minChars: Number(flag('--min-tegn')) || DEFAULT_MIN, after: flag('--etter'), log: (m) => console.error(m) };
@@ -968,10 +969,11 @@ if (!globalThis.__TUA_BUNDLE && process.argv[1] && path.resolve(process.argv[1])
   } else if (args.includes('--alt')) {
     importAll(opts).then((r) => console.log(r.report));
   } else if (args.includes('--innboks')) {
+    // eksporter og lenkefiler som før, så løse dokumenter (skive 7: PDF, tekst, md, html, csv, docx → saker; --project velger prosjekt, standard «Innboks»)
     const d = processInbox(opts);
-    processInboxShares(opts).then((s) => { const all = [...d, ...s]; console.log(all.length ? all.map((r) => r.report).join('\n\n---\n\n') : `Ingenting å importere i ${INBOX_DIR}`); });
+    processInboxShares(opts).then(async (s) => { const dok = await lesInnInnboks({ prosjekt: opts.project || undefined, dryRun: opts.dryRun, log: opts.log, klient: 'kommandolinje' }); const all = [...d, ...s, ...(dok.tall.filer ? [dok] : [])]; console.log(all.length ? all.map((r) => r.report).join('\n\n---\n\n') : `Ingenting å importere i ${INBOX_DIR}`); });
   } else if (src) {
-    console.log(importExport(path.resolve(src), opts).report);
+    console.log(importExport(path__default.resolve(src), opts).report);
   } else {
     console.error('Bruk: node import.js --code|--cowork|--desktop [--alle]|--finder|--alt [--project <navn>] [--etter <ÅÅÅÅ-MM-DD>] [--min-tegn <n>] [--dry-run]\n      node import.js --lenke <https://claude.ai/share/…> [--dry-run]\n      node import.js --tall           (hva onboardingen ville sagt)\n      node import.js <zip|mappe> [--dry-run] [--project <navn>] [--min-tegn <n>] [--etter <ÅÅÅÅ-MM-DD>]\n      node import.js --innboks [--dry-run]');
     process.exit(2);

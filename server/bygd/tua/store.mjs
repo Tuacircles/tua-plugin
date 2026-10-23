@@ -1,8 +1,8 @@
 // Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
-import fs from 'node:fs';
+import fs__default from 'node:fs';
 import 'node:os';
-import path from 'node:path';
-import crypto from 'node:crypto';
+import path__default from 'node:path';
+import crypto__default from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { parse, fileNameFor, safeName, serialize } from './files.mjs';
@@ -19,19 +19,19 @@ import { HOME, cloudBases, IS_MAC } from './platform.mjs';
 // utover din egen sky-synk. «Tua har aldri master-key».
 
 
-const HERE = path.dirname(fileURLToPath(new URL("../../store.js", import.meta.url).href));
+const HERE = path__default.dirname(fileURLToPath(new URL("../../store.js", import.meta.url).href));
 // 0.5.1: en plugin-vert som ikke erstatter «${…}» i .mcp.json (Cowork uten CLAUDE_PLUGIN_DATA) sender variabelen rå —
 // en sti som fortsatt inneholder «${» er ikke en sti, og ignoreres som om den var tom.
 const envPath = (name) => { const v = process.env[name]; return v && !v.includes('${') ? v : '' };
-const DATA_DIR = envPath('TUA_DATA_DIR') || path.join(HERE, 'data');
-const FILE = path.join(DATA_DIR, 'atoms.json');            // avledet indeks
+const DATA_DIR = envPath('TUA_DATA_DIR') || path__default.join(HERE, 'data');
+const FILE = path__default.join(DATA_DIR, 'atoms.json');            // avledet indeks
 
 // M14: hvor arkivet bor. TUA_FILES_ROOT vinner alltid. Ellers valget brukeren har tatt (~/.tua/config.json),
 // ellers en Tua-mappe som allerede finnes (Dropbox, iCloud Drive, ~/Tua — eksisterende brukere spørres ikke).
 // Finnes ingenting, er roten null: Tua GJETTER IKKE, men spør brukeren (tua_setup / elicitation i server.js)
 // hvor arkivet skal ligge — iCloud Drive, Dropbox, OneDrive, Google Drive eller lokalt. Valget kan endres
 // senere på innstillinger-siden (M15). TUA_HOME overstyrer hjemmemappa (bare for tester).
-const CONFIG = path.join(HOME, '.tua', 'config.json');                      // { root, sted, valgt }
+const CONFIG = path__default.join(HOME, '.tua', 'config.json');                      // { root, sted, valgt }
 // Skytjenestene slik de ligger på macOS, Windows og Linux (platform.js). `base` er mappa tjenesten synker; arkivet blir
 // <base>/Tua. «Lokalt» (~/Tua) finnes alltid — det er fallbacken når ingen sky er installert.
 function archiveOptions() {
@@ -43,79 +43,90 @@ function archiveOptions() {
     { id: 'googledrive', label: 'Google Drive', base: c.googledrive },
     { id: 'lokalt', label: 'Lokalt (bare denne maskinen)', base: HOME },
   ];
-  return opts.map((o) => ({ ...o, path: o.base ? path.join(o.base, 'Tua') : '', available: !!o.base && fs.existsSync(o.base), exists: !!o.base && fs.existsSync(path.join(o.base, 'Tua')) }))
+  return opts.map((o) => ({ ...o, path: o.base ? path__default.join(o.base, 'Tua') : '', available: !!o.base && fs__default.existsSync(o.base), exists: !!o.base && fs__default.existsSync(path__default.join(o.base, 'Tua')) }))
 }
-const readConfig = () => { try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')) } catch { return {} } };
+const readConfig = () => { try { return JSON.parse(fs__default.readFileSync(CONFIG, 'utf8')) } catch { return {} } };
 function writeConfig(patch) {
   const next = { ...readConfig(), ...patch };
-  fs.mkdirSync(path.dirname(CONFIG), { recursive: true });
-  fs.writeFileSync(CONFIG, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
+  fs__default.mkdirSync(path__default.dirname(CONFIG), { recursive: true });
+  fs__default.writeFileSync(CONFIG, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
   return next
 }
 function chooseRoot() {
   if (envPath('TUA_FILES_ROOT')) return envPath('TUA_FILES_ROOT')
   const c = readConfig();
-  if (c.root && fs.existsSync(c.root)) return c.root
+  if (c.root && fs__default.existsSync(c.root)) return c.root
   const existing = archiveOptions().find((o) => o.exists);
   return existing ? existing.path : null
 }
 let FILES_ROOT = chooseRoot();
-let INBOX_DIR = FILES_ROOT ? path.join(FILES_ROOT, 'Innboks') : null;   // M14: eksporter legges her, flyttes til Innboks/Ferdig
-const rootLabel = () => archiveOptions().find((o) => FILES_ROOT && o.base && (FILES_ROOT === o.path || FILES_ROOT.startsWith(o.base + path.sep)))?.label || 'egen mappe';
+let INBOX_DIR = FILES_ROOT ? path__default.join(FILES_ROOT, 'Innboks') : null;   // M14: eksporter legges her, flyttes til Innboks/Ferdig
+const rootLabel = () => archiveOptions().find((o) => FILES_ROOT && o.base && (FILES_ROOT === o.path || FILES_ROOT.startsWith(o.base + path__default.sep)))?.label || 'egen mappe';
 // Brukerens valg (M14): id fra archiveOptions() eller en absolutt sti. Lagres i ~/.tua/config.json og arkivet lages.
 // Flytter aldri filer (V9: mappa er sannheten — flytting er en Finder-jobb). Andre felt i config (finder) beholdes.
 function chooseArchive(idOrPath) {
   const opt = archiveOptions().find((o) => o.id === idOrPath);
-  const root = opt ? opt.path : path.resolve(String(idOrPath || '').replace(/^~(?=$|\/)/, HOME));
-  if (!opt && !path.isAbsolute(root)) throw new Error(`«${idOrPath}» er verken et kjent sted (${archiveOptions().map((o) => o.id).join(', ')}) eller en absolutt sti`)
+  const root = opt ? opt.path : path__default.resolve(String(idOrPath || '').replace(/^~(?=$|\/)/, HOME));
+  if (!opt && !path__default.isAbsolute(root)) throw new Error(`«${idOrPath}» er verken et kjent sted (${archiveOptions().map((o) => o.id).join(', ')}) eller en absolutt sti`)
   if (opt && !opt.available) throw new Error(`${opt.label} finnes ikke på denne maskinen (${opt.base})`)
   FILES_ROOT = root;
-  INBOX_DIR = path.join(root, 'Innboks');
+  INBOX_DIR = path__default.join(root, 'Innboks');
   writeConfig({ root, sted: opt ? opt.label : 'egen mappe', valgt: new Date().toISOString() });
   return { ...ensureArchive(), label: rootLabel() }
 }
-const tuaFile = (name) => path.join(FILES_ROOT, '.tua', name);
+const tuaFile = (name) => path__default.join(FILES_ROOT, '.tua', name);
 const INDEX = () => tuaFile('index.json');          // id → relativ sti
 const PROJECTS = () => tuaFile('projects.json');    // prosjektnavn → { repo, claudeProject }
 const WRITTEN = () => tuaFile('written.json');      // id → { sha, version } slik Tua sist skrev fila (M10/V15: oppdager redigering utenfra)
-const DELIVERY = () => (filesMode() ? tuaFile('utlevering.jsonl') : path.join(DATA_DIR, 'utlevering.jsonl'));
-const filesMode = () => !!FILES_ROOT && fs.existsSync(FILES_ROOT);
+const DELIVERY = () => (filesMode() ? tuaFile('utlevering.jsonl') : path__default.join(DATA_DIR, 'utlevering.jsonl'));
+const filesMode = () => !!FILES_ROOT && fs__default.existsSync(FILES_ROOT);
 
 const uid = () =>
   'a_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 
 // ── cache (atoms.json) ──────────────────────────────────────────────────────
 function loadCache() {
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) } catch { return [] }
+  try { return JSON.parse(fs__default.readFileSync(FILE, 'utf8')) } catch { return [] }
 }
 function writeCache(atoms) {
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs__default.mkdirSync(DATA_DIR, { recursive: true });
     const tmp = FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(atoms, null, 2));
-    fs.renameSync(tmp, FILE);
+    fs__default.writeFileSync(tmp, JSON.stringify(atoms, null, 2));
+    fs__default.renameSync(tmp, FILE);
   } catch (e) { console.error(`[tua] kunne ikke skrive indeks-cachen (${FILE}): ${e.message} — mappa er uansett sannheten`); }   // M14: cachen er avledet; en skrivebeskyttet plugin-mappe skal ikke stoppe lagring
 }
 
 // ── mappa ───────────────────────────────────────────────────────────────────
-const readIndex = () => { try { return JSON.parse(fs.readFileSync(INDEX(), 'utf8')) } catch { return {} } };
-const writeIndex = (ix) => { fs.mkdirSync(path.dirname(INDEX()), { recursive: true }); fs.writeFileSync(INDEX(), JSON.stringify(ix, null, 2) + '\n'); };
+const readIndex = () => { try { return JSON.parse(fs__default.readFileSync(INDEX(), 'utf8')) } catch { return {} } };
+const writeIndex = (ix) => { fs__default.mkdirSync(path__default.dirname(INDEX()), { recursive: true }); fs__default.writeFileSync(INDEX(), JSON.stringify(ix, null, 2) + '\n'); };
 
 function* walk(dir, rel = '') {
   let entries = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return }
+  try { entries = fs__default.readdirSync(dir, { withFileTypes: true }); } catch { return }
   for (const e of entries) {
     if (e.name.startsWith('.')) continue                      // .tua, .DS_Store, Dropbox-sidecars
-    if (!rel && e.name === 'Innboks') continue                // M14: Innboks er postkasse, ikke prosjekt
-    const abs = path.join(dir, e.name), r = rel ? path.join(rel, e.name) : e.name;
+    const abs = path__default.join(dir, e.name), r = rel ? path__default.join(rel, e.name) : e.name;
+    if (!rel && e.name === 'Innboks') {                       // M14: Innboks er postkasse, ikke prosjekt — M16 (skive 7): unntatt Tuas egne saker som ble lest inn dit
+      if (!e.isDirectory()) continue                          // (prosjekt «Innboks» til Erik flytter fila i Finder, V9). Bare .md med Tua-frontmatter, bare øverst (ikke Ferdig/.behandles).
+      let inne = [];
+      try { inne = fs__default.readdirSync(abs, { withFileTypes: true }); } catch { continue }
+      for (const f of inne) if (f.isFile() && f.name.toLowerCase().endsWith('.md') && !f.name.startsWith('.') && erTuaSak(path__default.join(abs, f.name))) yield { abs: path__default.join(abs, f.name), rel: path__default.join(r, f.name) };
+      continue
+    }
     if (e.isDirectory()) yield* walk(abs, r);
     else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) yield { abs, rel: r };
   }
 }
-const stableId = (rel) => 'f_' + crypto.createHash('sha1').update(rel).digest('hex').slice(0, 12);
-const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
-const sha256File = (p) => { try { return sha256(fs.readFileSync(p)) } catch { return null } };
-const readWritten = () => { try { return JSON.parse(fs.readFileSync(WRITTEN(), 'utf8')) } catch { return {} } };
+// Er fila en sak Tua har skrevet (frontmatter med tua_id)? Leser bare de første 600 tegnene. Brukes av Innboks-skillet over og av innlesingen
+// (et løst .md-dokument i Innboks er noe som skal leses inn; en sak i Innboks er alt lest inn).
+function erTuaSak(p) {
+  try { const fd = fs__default.openSync(p, 'r'); const b = Buffer.alloc(600); const n = fs__default.readSync(fd, b, 0, 600, 0); fs__default.closeSync(fd); const h = b.subarray(0, n).toString('utf8'); return h.startsWith('---\n') && /\ntua_id:/.test(h) } catch { return false }
+}
+const stableId = (rel) => 'f_' + crypto__default.createHash('sha1').update(rel).digest('hex').slice(0, 12);
+const sha256 = (s) => crypto__default.createHash('sha256').update(s).digest('hex');
+const sha256File = (p) => { try { return sha256(fs__default.readFileSync(p)) } catch { return null } };
+const readWritten = () => { try { return JSON.parse(fs__default.readFileSync(WRITTEN(), 'utf8')) } catch { return {} } };
 
 function load() {
   if (!filesMode()) return loadCache()
@@ -125,7 +136,7 @@ function load() {
   const seenIds = new Map();                                     // id → rel; to filer med samme tua_id (kopi i Finder, gammel feil) → den indeksen peker på vinner
   for (const { abs, rel } of walk(FILES_ROOT)) {
     try {
-      const text = fs.readFileSync(abs, 'utf8');
+      const text = fs__default.readFileSync(abs, 'utf8');
       const a = parse(text, { fallbackId: stableId(rel) });
       const dup = seenIds.get(a.id);
       if (dup !== undefined) {
@@ -133,9 +144,9 @@ function load() {
         const i = atoms.findIndex((x) => x.id === a.id); if (i >= 0) atoms.splice(i, 1);   // den første var kopien
       }
       seenIds.set(a.id, rel);
-      const dir = path.dirname(rel);
+      const dir = path__default.dirname(rel);
       if (dir && dir !== '.') a.project = dir;                 // mappa vinner: flytt fila = flytt atomet
-      if (!a.name || a.name === 'Uten tittel') a.name = path.basename(rel, '.md');
+      if (!a.name || a.name === 'Uten tittel') a.name = path__default.basename(rel, '.md');
       // V15 regel 1: fila er endret av noen andre enn Tua siden sist skriving → NY versjon, aldri merge.
       // Versjonen telles opp her (i minnet); neste save() fester den og bevarer den redigerte teksten i .tua/versions.
       const w = written[a.id];
@@ -166,14 +177,14 @@ function normalizeLinks(list) {
   }
   return out
 }
-const projects = () => { try { return JSON.parse(fs.readFileSync(PROJECTS(), 'utf8')) } catch { return {} } };
+const projects = () => { try { return JSON.parse(fs__default.readFileSync(PROJECTS(), 'utf8')) } catch { return {} } };
 // Prosjektnavn som skal slås sammen (Erik 15.10.2026): .tua/project-aliases.json = { "navn slik kilden sier det": "mappa i Tua" }.
 // Brukes av upsert for alle kilder (lagring, import, hooks), så én mappe per prosjekt uansett hvor atomet kom fra.
-const ALIASES = () => path.join(FILES_ROOT, '.tua', 'project-aliases.json');
+const ALIASES = () => path__default.join(FILES_ROOT, '.tua', 'project-aliases.json');
 const projectAlias = (name) => {
   const n = String(name || '').trim();
   try {
-    const m = JSON.parse(fs.readFileSync(ALIASES(), 'utf8'));
+    const m = JSON.parse(fs__default.readFileSync(ALIASES(), 'utf8'));
     const k = Object.keys(m).find((x) => x !== '_' && x.toLowerCase() === n.toLowerCase());
     return k ? m[k] : n
   } catch { return n }
@@ -186,12 +197,12 @@ function registerProject(name, { repo, claudeProject } = {}) {
   const next = { ...cur, ...(repo ? { repo } : {}), ...(claudeProject ? { claudeProject } : {}) };
   if (JSON.stringify(cur) === JSON.stringify(next)) return false
   all[key] = next;
-  fs.mkdirSync(path.dirname(PROJECTS()), { recursive: true });
-  fs.writeFileSync(PROJECTS(), JSON.stringify(all, null, 2) + '\n');
+  fs__default.mkdirSync(path__default.dirname(PROJECTS()), { recursive: true });
+  fs__default.writeFileSync(PROJECTS(), JSON.stringify(all, null, 2) + '\n');
   return true
 }
 const projectOf = (name) => { const all = projects(); const k = Object.keys(all).find((x) => x.toLowerCase() === String(name || '').toLowerCase()); return k ? all[k] : {} };
-const fileOf = (a) => { const rel = filesMode() ? readIndex()[a.id] : null; return rel ? path.join(FILES_ROOT, rel) : '' };
+const fileOf = (a) => { const rel = filesMode() ? readIndex()[a.id] : null; return rel ? path__default.join(FILES_ROOT, rel) : '' };
 // Alle lenker for et atom: egne først, så avledede (egen fil, repo, Desktop-prosjekt). Aldri duplikater.
 function linksFor(a) {
   const own = fileOf(a);
@@ -218,7 +229,7 @@ const normalizeDerived = (list) => (Array.isArray(list) ? list : [])
   .filter((d) => d && d.id).map((d) => ({ id: String(d.id), version: Number(d.version) || 1, level: LEVELS.includes(d.level) ? d.level : 'L' }));
 const normalizeRenders = (list) => (Array.isArray(list) ? list : [])
   .filter((r) => r && (r.path || r.url)).map((r) => {
-    const out = { format: String(r.format || (r.url ? 'artifact' : path.extname(r.path).slice(1) || 'file')) };
+    const out = { format: String(r.format || (r.url ? 'artifact' : path__default.extname(r.path).slice(1) || 'file')) };
     if (r.path) { out.path = String(r.path); out.sha256 = r.sha256 || sha256File(r.path) || undefined; }
     if (r.url) out.url = String(r.url);
     out.at = Number(r.at) || Date.now();
@@ -246,16 +257,16 @@ const renderStatus = (a) => (a.renders || []).map((r) => {
 // walk() leser bare .md, så kopien blir aldri et eget atom. TUA_RENDERS_DIR overstyrer målmappa
 // (f.eks. en iCloud Drive-mappe); standard er atomets egen prosjektmappe.
 const RENDERS_DIR = process.env.TUA_RENDERS_DIR || '';
-const isInside = (p, dir) => { const r = path.relative(dir, p); return !!r && !r.startsWith('..') && !path.isAbsolute(r) };
+const isInside = (p, dir) => { const r = path__default.relative(dir, p); return !!r && !r.startsWith('..') && !path__default.isAbsolute(r) };
 function exportRenders(a) {
   let n = 0;
   for (const r of a.renders || []) {
-    if (!r.path || !fs.existsSync(r.path) || (!RENDERS_DIR && isInside(r.path, FILES_ROOT))) continue
-    const dir = RENDERS_DIR || path.join(FILES_ROOT, a.project || 'Uten prosjekt');
-    const dest = path.join(dir, safeName(a.name, 80) + path.extname(r.path).toLowerCase());
+    if (!r.path || !fs__default.existsSync(r.path) || (!RENDERS_DIR && isInside(r.path, FILES_ROOT))) continue
+    const dir = RENDERS_DIR || path__default.join(FILES_ROOT, a.project || 'Uten prosjekt');
+    const dest = path__default.join(dir, safeName(a.name, 80) + path__default.extname(r.path).toLowerCase());
     const srcSha = sha256File(r.path);
-    if (fs.existsSync(dest) && sha256File(dest) === srcSha) { r.copy = dest; continue }
-    try { fs.mkdirSync(dir, { recursive: true }); fs.copyFileSync(r.path, dest); r.copy = dest; r.sha256 = srcSha; n++; } catch { /* la kilden stå */ }
+    if (fs__default.existsSync(dest) && sha256File(dest) === srcSha) { r.copy = dest; continue }
+    try { fs__default.mkdirSync(dir, { recursive: true }); fs__default.copyFileSync(r.path, dest); r.copy = dest; r.sha256 = srcSha; n++; } catch { /* la kilden stå */ }
   }
   return n
 }
@@ -264,15 +275,15 @@ function exportRenders(a) {
 function logDelivery(entry) {
   try {
     const p = DELIVERY();
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.appendFileSync(p, JSON.stringify({ at: Date.now(), ...entry }) + '\n');
+    fs__default.mkdirSync(path__default.dirname(p), { recursive: true });
+    fs__default.appendFileSync(p, JSON.stringify({ at: Date.now(), ...entry }) + '\n');
     return true
   } catch { return false }
 }
 // M20a: en sending fra motoren (tool: 'spor') er ÉN linje med `saker: [{id, version, level}]` — den treffer på hver av sakene.
 function deliveries(id, limit = 10) {
   try {
-    return fs.readFileSync(DELIVERY(), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } })
+    return fs__default.readFileSync(DELIVERY(), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } })
       .filter((e) => e && (!id || e.id === id || (Array.isArray(e.saker) && e.saker.some((s) => s && s.id === id)))).slice(-limit)
   } catch { return [] }
 }
@@ -300,27 +311,27 @@ function compose(atoms, { ids, level = 'M', name, intro, context }) {
 const VERSIONS_DIR = () => tuaFile('versions');
 function keepVersion(id, oldText) {
   const n = (oldText.match(/^versjon:\s*(\d+)/m) || [])[1] || '0';
-  const dir = path.join(VERSIONS_DIR(), id);
-  fs.mkdirSync(dir, { recursive: true });
-  let p = path.join(dir, `v${n}.md`);
-  if (fs.existsSync(p)) {
-    if (fs.readFileSync(p, 'utf8') === oldText) return
-    p = path.join(dir, `v${n}-${Date.now()}.md`);
+  const dir = path__default.join(VERSIONS_DIR(), id);
+  fs__default.mkdirSync(dir, { recursive: true });
+  let p = path__default.join(dir, `v${n}.md`);
+  if (fs__default.existsSync(p)) {
+    if (fs__default.readFileSync(p, 'utf8') === oldText) return
+    p = path__default.join(dir, `v${n}-${Date.now()}.md`);
   }
-  fs.writeFileSync(p, oldText);
+  fs__default.writeFileSync(p, oldText);
 }
 function versions(id) {
   if (!filesMode()) return []
-  const dir = path.join(VERSIONS_DIR(), id);
+  const dir = path__default.join(VERSIONS_DIR(), id);
   let names = [];
-  try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.md')); } catch { return [] }
+  try { names = fs__default.readdirSync(dir).filter((f) => f.endsWith('.md')); } catch { return [] }
   return names
-    .map((f) => { const st = fs.statSync(path.join(dir, f)); return { name: f.replace(/\.md$/, ''), size: st.size, mtime: st.mtimeMs } })
+    .map((f) => { const st = fs__default.statSync(path__default.join(dir, f)); return { name: f.replace(/\.md$/, ''), size: st.size, mtime: st.mtimeMs } })
     .sort((x, y) => x.mtime - y.mtime)
 }
 function readVersion(id, name) {
-  const p = path.join(VERSIONS_DIR(), id, name.replace(/[^\w.-]/g, '') + '.md');
-  try { return parse(fs.readFileSync(p, 'utf8'), { fallbackId: id }) } catch { return null }
+  const p = path__default.join(VERSIONS_DIR(), id, name.replace(/[^\w.-]/g, '') + '.md');
+  try { return parse(fs__default.readFileSync(p, 'utf8'), { fallbackId: id }) } catch { return null }
 }
 
 // Relaterte atomer: samme samtale (sterkest), synlig i samme prosjekter, felles tagger.
@@ -357,19 +368,19 @@ const LOCK = () => tuaFile('.lock');
 function acquireLock() {
   const t0 = Date.now();
   while (true) {
-    try { fs.mkdirSync(LOCK(), { recursive: false }); return true } catch {}
-    try { if (Date.now() - fs.statSync(LOCK()).mtimeMs > 15000) { fs.rmSync(LOCK(), { recursive: true, force: true }); continue } } catch { continue }
+    try { fs__default.mkdirSync(LOCK(), { recursive: false }); return true } catch {}
+    try { if (Date.now() - fs__default.statSync(LOCK()).mtimeMs > 15000) { fs__default.rmSync(LOCK(), { recursive: true, force: true }); continue } } catch { continue }
     if (Date.now() - t0 > 3000) return false
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
   }
 }
-const releaseLock = () => { try { fs.rmSync(LOCK(), { recursive: true, force: true }); } catch {} };
+const releaseLock = () => { try { fs__default.rmSync(LOCK(), { recursive: true, force: true }); } catch {} };
 
 // Skriver bare det som endret seg. Flytter fila hvis navnet/prosjektet endret seg.
 // Sletter aldri. Returnerer antall skrevne filer.
 function save(atoms) {
   if (!filesMode()) { writeCache(atoms); return 0 }
-  fs.mkdirSync(path.dirname(LOCK()), { recursive: true });
+  fs__default.mkdirSync(path__default.dirname(LOCK()), { recursive: true });
   const locked = acquireLock();
   try { return saveUnlocked(atoms) } finally { if (locked) releaseLock(); }
 }
@@ -380,29 +391,29 @@ function saveUnlocked(atoms) {
   let written = 0;
   for (const a of atoms) {
     const dir = a.project || 'Uten prosjekt';
-    const plain = path.join(dir, fileNameFor(a)), suffixed = path.join(dir, safeName(a.name, 80) + ` (${String(a.id).slice(-6)}).md`);
+    const plain = path__default.join(dir, fileNameFor(a)), suffixed = path__default.join(dir, safeName(a.name, 80) + ` (${String(a.id).slice(-6)}).md`);
     // M17: stabil ved navnekollisjon — det navnet atomet HADDE (plain eller med id-suffiks) beholdes så lenge det er ledig.
     // Før kunne to atomer med samme tittel bytte filnavn ved hver lagring (rekkefølgen i atoms varierer) → omskriving + falske versjoner.
     const prev = index[a.id];
     let rel = prev && (prev === plain || prev === suffixed) && !used.has(prev.toLowerCase()) ? prev : plain;
     if (used.has(rel.toLowerCase())) rel = suffixed;
     // skal fila flyttes, men målet finnes alt (en annen fil) og vi ikke kan flytte: behold forrige navn — aldri to filer med samme atom
-    if (prev && prev !== rel && !used.has(prev.toLowerCase()) && fs.existsSync(path.join(FILES_ROOT, rel)) && fs.existsSync(path.join(FILES_ROOT, prev))) rel = prev;
+    if (prev && prev !== rel && !used.has(prev.toLowerCase()) && fs__default.existsSync(path__default.join(FILES_ROOT, rel)) && fs__default.existsSync(path__default.join(FILES_ROOT, prev))) rel = prev;
     used.add(rel.toLowerCase());
-    const abs = path.join(FILES_ROOT, rel);
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    const abs = path__default.join(FILES_ROOT, rel);
+    fs__default.mkdirSync(path__default.dirname(abs), { recursive: true });
     if (prev && prev !== rel) {
-      const prevAbs = path.join(FILES_ROOT, prev);
-      if (fs.existsSync(prevAbs) && !fs.existsSync(abs)) fs.renameSync(prevAbs, abs);
+      const prevAbs = path__default.join(FILES_ROOT, prev);
+      if (fs__default.existsSync(prevAbs) && !fs__default.existsSync(abs)) fs__default.renameSync(prevAbs, abs);
     }
     delete a.editedOutside;                              // festes nå: versjonen er talt opp, teksten under bevares
     if (a.renders?.length) exportRenders(a);              // M11: html/pdf-kopi ved siden av atomet i arkivet
     const md = serialize(a);
     let before = null;
-    try { before = fs.readFileSync(abs, 'utf8'); } catch {}
+    try { before = fs__default.readFileSync(abs, 'utf8'); } catch {}
     if (before !== md) {
       if (before !== null) keepVersion(a.id, before);   // historikk: forrige versjon bevares som egen fil
-      fs.writeFileSync(abs, md);
+      fs__default.writeFileSync(abs, md);
       setFinderTags(abs, [...new Set([...(a.tags || []), a.project])]);
       written++;
     }
@@ -410,7 +421,7 @@ function saveUnlocked(atoms) {
     wr[a.id] = { sha: sha256(md), version: a.version || 1 };
   }
   writeIndex(index);
-  fs.writeFileSync(WRITTEN(), JSON.stringify(wr, null, 2) + '\n');
+  fs__default.writeFileSync(WRITTEN(), JSON.stringify(wr, null, 2) + '\n');
   writeCache(atoms);
   return written
 }
@@ -679,23 +690,23 @@ Tua er arkivet for det du lager sammen med AI. Hvert stykke arbeid blir en fil i
 
 Ingenting forlater maskinen din utover din egen skysynk. Tua har ingen server og ingen nøkkel til innholdet ditt.`;
 
-const onboardingState = () => { try { return filesMode() ? JSON.parse(fs.readFileSync(ONBOARDING(), 'utf8')) : null } catch { return null } };
+const onboardingState = () => { try { return filesMode() ? JSON.parse(fs__default.readFileSync(ONBOARDING(), 'utf8')) : null } catch { return null } };
 const onboardingActive = () => onboardingState()?.state === 'aktiv';
 function finishOnboarding(how) {
   const s = onboardingState();
   if (!s || s.state !== 'aktiv') return false
-  fs.writeFileSync(ONBOARDING(), JSON.stringify({ ...s, state: 'ferdig', ferdig: new Date().toISOString(), ved: how || '' }, null, 2) + '\n');
+  fs__default.writeFileSync(ONBOARDING(), JSON.stringify({ ...s, state: 'ferdig', ferdig: new Date().toISOString(), ved: how || '' }, null, 2) + '\n');
   return true
 }
 const welcomeAtom = (atoms) => atoms.find((a) => a.key === WELCOME_KEY && a.project.toLowerCase() === WELCOME_PROJECT.toLowerCase());
 // Siste import (Innboks eller Code-økter) — SessionStart-hooken bruker dette til påminnelsen «ny import?»
-const importState = () => { try { return filesMode() ? JSON.parse(fs.readFileSync(tuaFile('import-state.json'), 'utf8')) : {} } catch { return {} } };
+const importState = () => { try { return filesMode() ? JSON.parse(fs__default.readFileSync(tuaFile('import-state.json'), 'utf8')) : {} } catch { return {} } };
 function noteImport(kind, info = {}) {
   if (!filesMode()) return
   const s = importState();
   s.last = { at: Date.now(), kind, ...info };
   s[kind] = { at: Date.now(), ...info };
-  fs.writeFileSync(tuaFile('import-state.json'), JSON.stringify(s, null, 2) + '\n');
+  fs__default.writeFileSync(tuaFile('import-state.json'), JSON.stringify(s, null, 2) + '\n');
 }
 
 // Lager arkivet hvis det ikke finnes. Rører aldri et arkiv som finnes. Returnerer { created, root }.
@@ -703,14 +714,14 @@ function noteImport(kind, info = {}) {
 function ensureArchive() {
   // 0.5.1: var ingen rot valgt ved oppstart, sjekk config igjen — SessionStart-hooken kan ha skrevet «arkivmappe» dit etter at
   // serveren startet (begge starter samtidig i Claude Code). Samme regel som chooseRoot(); ingen gjetting utover den.
-  if (!FILES_ROOT) { const r = chooseRoot(); if (r) { FILES_ROOT = r; INBOX_DIR = path.join(r, 'Innboks'); } }
+  if (!FILES_ROOT) { const r = chooseRoot(); if (r) { FILES_ROOT = r; INBOX_DIR = path__default.join(r, 'Innboks'); } }
   if (!FILES_ROOT) return { created: false, root: null, needsChoice: true }
-  if (fs.existsSync(FILES_ROOT)) {
-    try { fs.mkdirSync(INBOX_DIR, { recursive: true }); } catch {}
+  if (fs__default.existsSync(FILES_ROOT)) {
+    try { fs__default.mkdirSync(INBOX_DIR, { recursive: true }); } catch {}
     return { created: false, root: FILES_ROOT }
   }
-  fs.mkdirSync(path.join(FILES_ROOT, '.tua'), { recursive: true });
-  fs.mkdirSync(INBOX_DIR, { recursive: true });
+  fs__default.mkdirSync(path__default.join(FILES_ROOT, '.tua'), { recursive: true });
+  fs__default.mkdirSync(INBOX_DIR, { recursive: true });
   const atoms = load();                                          // tom mappe (+ evt. cache fra en annen maskin, som nå blir filer)
   upsert(atoms, {
     key: WELCOME_KEY, name: 'Velkommen til Tua', content: WELCOME_L, short: WELCOME_S, project: WELCOME_PROJECT,
@@ -718,8 +729,8 @@ function ensureArchive() {
     summary: 'Opprettet automatisk første gang Tua startet på denne maskinen.',
   });
   save(atoms);
-  fs.writeFileSync(ONBOARDING(), JSON.stringify({ state: 'aktiv', opprettet: new Date().toISOString(), sted: rootLabel(), root: FILES_ROOT }, null, 2) + '\n');
+  fs__default.writeFileSync(ONBOARDING(), JSON.stringify({ state: 'aktiv', opprettet: new Date().toISOString(), sted: rootLabel(), root: FILES_ROOT }, null, 2) + '\n');
   return { created: true, root: FILES_ROOT }
 }
 
-export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, maxLevel, needsLevel, noteImport, onboardingActive, projectOf, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sources, staleSources, upsert, vaultClamp, versions, visibleIn, welcomeAtom };
+export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, maxLevel, needsLevel, noteImport, onboardingActive, projectOf, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sources, staleSources, upsert, vaultClamp, versions, visibleIn, welcomeAtom };

@@ -125,11 +125,22 @@ function* walk(dir, rel = '') {
   try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
   for (const e of entries) {
     if (e.name.startsWith('.')) continue                      // .tua, .DS_Store, Dropbox-sidecars
-    if (!rel && e.name === 'Innboks') continue                // M14: Innboks er postkasse, ikke prosjekt
     const abs = path.join(dir, e.name), r = rel ? path.join(rel, e.name) : e.name
+    if (!rel && e.name === 'Innboks') {                       // M14: Innboks er postkasse, ikke prosjekt — M16 (skive 7): unntatt Tuas egne saker som ble lest inn dit
+      if (!e.isDirectory()) continue                          // (prosjekt «Innboks» til Erik flytter fila i Finder, V9). Bare .md med Tua-frontmatter, bare øverst (ikke Ferdig/.behandles).
+      let inne = []
+      try { inne = fs.readdirSync(abs, { withFileTypes: true }) } catch { continue }
+      for (const f of inne) if (f.isFile() && f.name.toLowerCase().endsWith('.md') && !f.name.startsWith('.') && erTuaSak(path.join(abs, f.name))) yield { abs: path.join(abs, f.name), rel: path.join(r, f.name) }
+      continue
+    }
     if (e.isDirectory()) yield* walk(abs, r)
     else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) yield { abs, rel: r }
   }
+}
+// Er fila en sak Tua har skrevet (frontmatter med tua_id)? Leser bare de første 600 tegnene. Brukes av Innboks-skillet over og av innlesingen
+// (et løst .md-dokument i Innboks er noe som skal leses inn; en sak i Innboks er alt lest inn).
+export function erTuaSak(p) {
+  try { const fd = fs.openSync(p, 'r'); const b = Buffer.alloc(600); const n = fs.readSync(fd, b, 0, 600, 0); fs.closeSync(fd); const h = b.subarray(0, n).toString('utf8'); return h.startsWith('---\n') && /\ntua_id:/.test(h) } catch { return false }
 }
 const stableId = (rel) => 'f_' + crypto.createHash('sha1').update(rel).digest('hex').slice(0, 12)
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex')

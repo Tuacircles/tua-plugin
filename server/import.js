@@ -18,7 +18,7 @@
 //   node import.js --code|--cowork|--desktop|--finder|--alt [--project <navn>] [--etter <ÅÅÅÅ-MM-DD>] [--min-tegn <n>] [--dry-run]
 //   node import.js --lenke <https://claude.ai/share/…> [--dry-run]
 //   node import.js <zip|mappe> [--dry-run] [--project <navn>] [--min-tegn <n>] [--etter <ÅÅÅÅ-MM-DD>]
-//   node import.js --innboks [--dry-run]        én gjennomgang av Innboks nå
+//   node import.js --innboks [--dry-run] [--project <navn>]   én gjennomgang av Innboks nå — eksporter, lenkefiler og (skive 7) løse dokumenter (PDF, tekst, md, html, csv, docx) → saker
 //
 // Eksport-atomer (V13/V14): kind «samtale», prosjekt fra eksporten (ellers «Claude-samtaler»/«ChatGPT-samtaler»),
 // links med claude://claude.ai/chat/<uuid> eller https://chatgpt.com/c/<id>, S = tittel + første brukermelding (≤ 300),
@@ -33,11 +33,13 @@ import { fileURLToPath } from 'node:url'
 import { unzipToTemp } from './unzip.js'   // 19.10.2026: utpakking uten shell, skilt ut (validatoren så fetch + spawn i samme fil)
 import {
   load, save, upsert, FILES_ROOT, INBOX_DIR, ensureArchive, registerProject, projectOf as registeredProject, claudeProjectHref,
-  finishOnboarding, noteImport, importState, S_MAX, SHORT_L, filesMode,
+  finishOnboarding, noteImport, importState, S_MAX, SHORT_L, filesMode, erTuaSak,
 } from './store.js'
 import { collectDesktop, countDesktopConversations, importedDesktop, noteImportedDesktop, cacheAvailable, CACHE_DIR, desktopFolderGrants, desktopStaleness } from './desktop.js'   // M17 · 20.10: samtalelageret + stillhetsvakt
 import { scanFinder, countFinderCandidates, DEFAULT_FOLDERS } from './finder.js'                                                         // M17
 import { CLAUDE_APP_DIR, posix } from './platform.js'                                                                                     // M18: Windows/Linux
+import { lesInnInnboks, innboksDokumenter } from './innlesing.js'                                                                        // M16 (skive 7): løse dokumenter i Innboks → saker med S/M/L
+export { lesInnInnboks, innboksDokumenter }
 
 const FERDIG = () => path.join(INBOX_DIR, 'Ferdig')
 const BEHANDLES = () => path.join(INBOX_DIR, '.behandles')
@@ -846,7 +848,7 @@ export async function importShare(url, { dryRun = false, log = () => {}, via = '
 // Innboks: .url (Windows), .webloc (macOS: dra en lenke til Finder), .txt/.md med en delt lenke i — også delt fra mobil via
 // «Lagre i Filer» til iCloud/Dropbox-mappa Tua/Innboks. Små filer; behandles asynkront, flyttes til Ferdig.
 const SHARE_FILE = /\.(url|webloc|txt|md)$/i
-const shareLinksInFile = (p) => { try { if (fs.statSync(p).size > 1e6) return []; return shareLinksIn(fs.readFileSync(p, 'utf8')) } catch { return [] } }
+const shareLinksInFile = (p) => { try { if (fs.statSync(p).size > 1e6 || erTuaSak(p)) return []; return shareLinksIn(fs.readFileSync(p, 'utf8')) } catch { return [] } }   // skive 7: en sak lest inn til Innboks er ikke en lenkefil
 export function inboxShareFiles() { try { return fs.readdirSync(INBOX_DIR).filter((n) => !n.startsWith('.') && SHARE_FILE.test(n) && shareLinksInFile(path.join(INBOX_DIR, n)).length).map((n) => path.join(INBOX_DIR, n)) } catch { return [] } }
 export async function processInboxShares({ dryRun = false, log = () => {} } = {}) {
   if (ensureArchive().needsChoice) return []
@@ -889,7 +891,7 @@ export function historyCounts({ fresh = false, quick = false } = {}) {
     at: Date.now(),
     code: pendingCodeSessions(st.code?.at || 0), codeAll: listCodeSessions().filter((s) => s.size > 2000).length,
     cowork: pendingCoworkSessions(st.cowork?.at || 0), coworkAll: listCoworkSessions().filter((s) => s.size > 20000).length,
-    desktop: 0, desktopNew: 0, dokumenter: 0, innboks: inboxPending().length + inboxShareFiles().length, quick,
+    desktop: 0, desktopNew: 0, dokumenter: 0, innboks: inboxPending().length + inboxShareFiles().length + innboksDokumenter().length, quick,
   }
   try {
     if (cacheAvailable()) {
@@ -981,8 +983,9 @@ if (!globalThis.__TUA_BUNDLE && process.argv[1] && path.resolve(process.argv[1])
   } else if (args.includes('--alt')) {
     importAll(opts).then((r) => console.log(r.report))
   } else if (args.includes('--innboks')) {
+    // eksporter og lenkefiler som før, så løse dokumenter (skive 7: PDF, tekst, md, html, csv, docx → saker; --project velger prosjekt, standard «Innboks»)
     const d = processInbox(opts)
-    processInboxShares(opts).then((s) => { const all = [...d, ...s]; console.log(all.length ? all.map((r) => r.report).join('\n\n---\n\n') : `Ingenting å importere i ${INBOX_DIR}`) })
+    processInboxShares(opts).then(async (s) => { const dok = await lesInnInnboks({ prosjekt: opts.project || undefined, dryRun: opts.dryRun, log: opts.log, klient: 'kommandolinje' }); const all = [...d, ...s, ...(dok.tall.filer ? [dok] : [])]; console.log(all.length ? all.map((r) => r.report).join('\n\n---\n\n') : `Ingenting å importere i ${INBOX_DIR}`) })
   } else if (src) {
     console.log(importExport(path.resolve(src), opts).report)
   } else {

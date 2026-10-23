@@ -81,7 +81,9 @@ const build = await rollup({
       },
     },
   ],
-  external: (id) => id.startsWith('node:') || builtinModules.includes(id),
+  // pdfjs-dist (skive 7, PDF-leseren) holdes utenfor: pakka er én fil på 1,2 MB, langt over 256 KiB-grensen, og lastes lazily av lesere.js bare når en PDF
+  // skal leses. I katalog-kopien uten node_modules gir det en tydelig feil for PDF; alt annet virker. Fra repoet (npm install) virker PDF også.
+  external: (id) => id.startsWith('node:') || builtinModules.includes(id) || id === 'pdfjs-dist' || id.startsWith('pdfjs-dist/'),
   onwarn(w, warn) { if (!['CIRCULAR_DEPENDENCY', 'THIS_IS_UNDEFINED', 'EMPTY_BUNDLE'].includes(w.code)) warn(w) },
 })
 await build.write({

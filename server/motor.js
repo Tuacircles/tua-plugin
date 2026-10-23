@@ -32,7 +32,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, FILES_ROOT, filesMode, DATA_DIR } from './store.js'
+import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, LONG_L, FILES_ROOT, filesMode, DATA_DIR } from './store.js'
 import { readKey, hasKey, ollamaStatus } from './keychain.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -321,6 +321,11 @@ async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => 
     const ut = 'Utkast til konklusjon (test-mottakeren, ingenting sendt ut av maskinen): svarene er enige om hovedsaken, uenige i formuleringen, og ett av dem har et tilleggspunkt. Rett teksten og lås den når den stemmer.'
     await strøm(ut, onDel); return testSvar(ut, inn, 'test')
   }
+  if (oppgave === 'nivåer') {   // skive 7: fast, tolkbar S/M for en innlest fil — første linje i konteksten (etter overskriften) som ingress, teksten flatet som sammendrag
+    const flat = String(kontekst).replace(/^## .*\n+/, '').replace(/\s+/g, ' ').trim()
+    const ut = JSON.stringify({ S: `Test-ingress: ${flat.slice(0, 200)}`, M: `Test-sammendrag (ingenting sendt ut av maskinen): ${flat.slice(0, 1200)}` })
+    await strøm(ut, onDel); return testSvar(ut, inn, 'test')
+  }
   const ut = `Ekko fra test-mottakeren (ingenting er sendt ut av maskinen).\n\nSystem: ${system}\n\n${byggMelding(melding, kontekst)}`
   await strøm(ut, onDel); return testSvar(ut, inn, 'test')
 }
@@ -373,6 +378,90 @@ export async function vurderer() {
   const grunner = []
   for (const m of rekke.filter(Boolean)) { const st = await m.status(); if (st.klar) return { m, modell: st.modeller?.[0] || m.modell }; grunner.push(`${m.label}: ${st.hvorfor}`) }
   return { m: null, grunn: `Ingen modell kan vurdere svarene${grunner.length ? ` — ${grunner.join('; ')}` : ønsket ? ` — ukjent vurderer «${ønsket}»` : ''}. Start Ollama, eller legg inn en Claude-nøkkel under Innstillinger › AI-mottakere.` }
+}
+
+// ── 0) Lese: S og M for en innlest fil (M16, skive 7) ──────────────────────
+// En fil som leses inn (lesere.js → innlesing.js) blir en sak med L = hele teksten. S og M skrives av standardmodellen LOKALT — Ollama når den
+// kjører — ellers etter regler (regelNivåer). Claude skriver bare når det bes om det (skriver: 'claude'); da går teksten gjennom de samme trinnene
+// som spor(): sjekkTillatt (L til Claude krever Trust 4) → skjerm → send → avskjerm → én Utlevert-linje (tool: innlesing). En lokal modell logges
+// IKKE som utlevering — ingenting forlot maskinen. V10: nivået merkes med hvem som skrev det (`av`: «regel», «Ollama · gemma3:4b», «Claude · …»).
+// TUA_SKRIVER overstyrer (regel | test | ollama | claude) — testene bruker regel og test.
+export async function skriver(ønsket = process.env.TUA_SKRIVER || 'auto') {
+  if (ønsket === 'regel') return { m: null, regel: true }
+  const alle = lagMottakere()
+  const rekke = ønsket === 'auto' ? [alle.find((m) => m.id === 'ollama')] : alle.filter((m) => m.id === ønsket)
+  const grunner = []
+  for (const m of rekke.filter(Boolean)) { const st = await m.status(); if (st.klar) return { m, modell: st.modeller?.[0] || m.modell }; grunner.push(`${m.label}: ${st.hvorfor}`) }
+  return { m: null, regel: true, grunn: grunner.length ? grunner.join('; ') : ønsket === 'auto' ? 'ingen lokal modell' : `ukjent skriver «${ønsket}»` }
+}
+const setningKutt = (t, maks) => {
+  const s = String(t || '').replace(/\s+/g, ' ').trim()
+  if (s.length <= maks) return s
+  const k = s.slice(0, maks)
+  const i = Math.max(k.lastIndexOf('. '), k.lastIndexOf('! '), k.lastIndexOf('? '))
+  return i > maks * 0.4 ? k.slice(0, i + 1) : k.slice(0, maks - 1).trimEnd() + '…'
+}
+// Regelbasert S/M: S = første avsnitt med brødtekst (ikke overskrift, ikke liste, ikke tabell) flatet til ≤ 300 tegn; M (bare når teksten er lang,
+// > LONG_L) = overskriftene og første setning i hvert avsnitt under, til 2 500 tegn. Forutsigbart og uten modell — merket «regel».
+export function regelNivåer(tekst, { tittel = '' } = {}) {
+  const t = String(tekst || '').replace(/\r\n?/g, '\n')
+  const avsnitt = t.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+  const erOverskrift = (p) => /^#{1,6}\s/.test(p)
+  const brød = avsnitt.filter((p) => !erOverskrift(p) && !/^[-*|>`]/.test(p) && ord(p) >= 4)
+  const S = setningKutt((brød[0] || avsnitt.find((p) => !erOverskrift(p)) || avsnitt[0] || tittel || '').replace(/^#+\s*/, ''), 300)
+  if (t.length <= LONG_L) return { S, M: '' }
+  const linjer = []
+  let n = 0
+  for (const p of avsnitt) {
+    const l = erOverskrift(p) ? p.replace(/^#+\s*/, '').replace(/\s+/g, ' ').trim() : setningKutt(p.replace(/^[-*>]\s*/, ''), 220)
+    if (!l || l === S) continue
+    if (n + l.length + 2 > 2400) break
+    linjer.push(erOverskrift(p) ? `**${l}**` : `– ${l}`); n += l.length + 2
+  }
+  return { S, M: setningKutt(linjer.join('\n'), 2500) }
+}
+const NIVÅ_OPPGAVE = (medM, tegn, kuttet) => `Teksten under er et dokument fra brukerens arkiv (${tegn.toLocaleString('no-NO')} tegn${kuttet ? ', bare begynnelsen er med' : ''}). Svar med ett JSON-objekt: ` +
+  (medM ? '{"S": "…", "M": "…"}. S = ingress: én til to setninger, høyst 300 tegn, som sier hva dokumentet er og hva det handler om. M = sammendrag, høyst 2 500 tegn: hovedpunktene, tallene og navnene som står i teksten, i den rekkefølgen de står. '
+    : '{"S": "…"}. S = ingress: én til to setninger, høyst 300 tegn, som sier hva dokumentet er og hva det handler om. ') +
+  'På norsk. Ikke finn på noe som ikke står i teksten. Plassholdere som [Person A] brukes uendret.'
+export const NIVÅ_MAKS_TEGN = 12000
+// Skriv S (og M når teksten er lang) for én tekst. Returnerer { S, M, av, modell, tokens, utlevert, grunn? } — faller alltid tilbake til regler, aldri feil.
+export async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, klient = 'app', skriver: ønsket, signal, på = () => {} } = {}) {
+  const t = String(tekst || '')
+  const regel = regelNivåer(t, { tittel })
+  const v = await skriver(ønsket)
+  if (!v.m) return { ...regel, av: 'regel', modell: null, tokens: null, utlevert: false, ...(v.grunn ? { grunn: v.grunn } : {}) }
+  const m = v.m
+  const medM = t.length > LONG_L
+  const atoms = load()
+  if (!m.test) {   // fail closed som i spor(): en ekstern skriver må ha Trust Score for L (Claude 4 → ok); lokal og test går alltid
+    const kilder = [{ id: sak?.id || null, name: tittel || sak?.name || 'fila', version: sak?.version || 1, level: 'L', vault: false }]
+    try { sjekkTillatt(m, kilder) } catch (e) { if (e instanceof Blokkert) return { ...regel, av: 'regel', modell: null, tokens: null, utlevert: false, grunn: `${m.label} fikk ikke lese fila: ${e.message}` }; throw e }
+  }
+  const sk = lagSkjermer(kjentePersoner(atoms))
+  const kuttet = t.length > NIVÅ_MAKS_TEGN
+  const kontekst = `## ${sk.skjerm(tittel || 'Dokument')}\n\n${sk.skjerm(kuttet ? t.slice(0, NIVÅ_MAKS_TEGN) : t)}${kuttet ? '\n\n[…]' : ''}`
+  const oppgave = NIVÅ_OPPGAVE(medM, t.length, kuttet)
+  const sendes = `${SYSTEM}${JSON_KRAV}\n\n${byggMelding(oppgave, kontekst)}`
+  const tokensCa = anslåTokens(sendes, m.id)
+  på('skriver', { mottaker: m.id, label: m.label, modell: v.modell, lokalt: !!m.local || !!m.test, tokens: { ca: tokensCa }, medM })
+  let r
+  try { r = await m.send({ system: SYSTEM, melding: oppgave, kontekst, json: true, oppgave: 'nivåer' }, { signal }) }
+  catch (e) { return { ...regel, av: 'regel', modell: null, tokens: null, utlevert: false, grunn: `${m.label} svarte ikke (${e.message}) — S og M er skrevet etter regler.` } }
+  const j = plukkJson(r.tekst) || {}
+  const S = setningKutt(avskjerm(typeof j.S === 'string' ? j.S : typeof j.s === 'string' ? j.s : typeof j.ingress === 'string' ? j.ingress : '', sk.kobling), 300)
+  const Mrå = typeof j.M === 'string' ? j.M : typeof j.m === 'string' ? j.m : typeof j.sammendrag === 'string' ? j.sammendrag : ''
+  const M = medM ? avskjerm(Mrå, sk.kobling).trim().slice(0, 2500) : ''
+  const tokens = { ca: tokensCa, inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
+  const av = m.test ? 'test' : `${m.label.split(' (')[0]} · ${r.modell || v.modell}`
+  let utlevert = false
+  if (!m.local && !m.test) {   // bare en ekstern modell er en utlevering
+    logDelivery({ tool: 'innlesing', client: klient, mottaker: m.id, endpoint: m.endpoint, modell: r.modell, saker: sak?.id ? [{ id: sak.id, version: sak.version || 1, level: 'L' }] : [], skjermet: { ...sk.antall }, ord: ord(sendes), tokens, ...(prosjekt ? { context: prosjekt } : {}) })
+    utlevert = true
+  }
+  if (sk.nye.size) kjentePersoner([], { lær: [...sk.nye] })
+  if (!S) return { ...regel, av: 'regel', modell: r.modell, tokens, utlevert, grunn: `${m.label} ga ingen ingress — S og M er skrevet etter regler.` }
+  return { S, M: M || (medM ? regel.M : ''), av, M_av: M ? av : medM ? 'regel' : null, modell: r.modell, tokens, utlevert, skjermet: { ...sk.antall } }
 }
 
 // ── 4) spor(): hele løpet, ingen vei utenom ────────────────────────────────
