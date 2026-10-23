@@ -49,6 +49,20 @@
 //        event: blokkert  {feil, detaljer}   fail closed: nivå over det Trust Score / Vault tillater — sier hva som må endres
 //        event: feil      {feil}             alt annet (mottaker ikke klar, nettverk, avslag)
 //        mottaker «test» ekkoer uten å sende noe ut av maskinen. TUA_BRIDGE_VAKTER=0 slår av Innboks/Desktop/Finder-vaktene (tester).
+//   M20b (skive 6): flere mottakere samtidig, Forskjeller og konklusjon — alt i motoren (motor.js), broen bærer bare hendelsene.
+//   POST /api/spor  {…, mottakere: [id, id]}  (i tillegg til mottaker) → samme SSE, men per mottaker:
+//        event: skjermet  {…, mottakere, tokens: {ca, per: {id: ca}}}  én gang — samme skjermede melding går til alle
+//        event: del       {mottaker, tekst} · event: ferdig {mottaker, svar, prompt, tokens, tekst}  én per mottaker, i den rekkefølgen de svarer
+//        event: blokkert  {feil, detaljer, mottaker}  er ÉN mottaker blokkert, sendes ingenting til noen (V21 fail closed) — linja sier hvilken
+//        event: feil      {mottaker, feil}   én mottaker sviktet underveis; de andre fortsetter (uten mottaker: hele sendingen feilet)
+//        event: vurderer  {steg: forskjeller|konklusjon, mottaker, modell}  standardmodellen lokalt tar over (Ollama → Claude)
+//        event: forskjeller {tilgjengelig, enig, uenig, unikt, vurdert_av, modell, tokens | grunn}   bare når mer enn én svarte
+//        event: konklusjon-del {tekst} · event: konklusjon {tilgjengelig, id, tekst, status: utkast, mottaker, modell, tokens | grunn}
+//        event: slutt     {prompt, svar: [ids], mottakere}
+//   POST /api/konklusjon {id, tekst}            → brukerens rettelse av utkastet: ny versjon av samme sak, ingenting sendes → { konklusjon }
+//   POST /api/konklusjon {prompt, svar?: [ids]} → «kjør igjen»: forskjeller og nytt utkast fra svar-sakene prompten ga (gjennom motoren) → { forskjeller, konklusjon }
+//        «Gi M og kjør igjen» er ikke en egen dør: Spør sender hele spørsmålet på nytt til POST /api/spor med kilden på M — hele motoren, nye svar-saker.
+//        Låsing (utkast → endelig) er POST /api/status som før.
 //
 // Lytter kun på 127.0.0.1, og slipper bare kartets origin inn (CORS).
 // Kjør: npm run bridge   (i tua-plugin/). Ingen avhengigheter.
@@ -66,7 +80,7 @@ import { load, save, setShare, upsert, search, levelOf, LEVELS, isVault, FILE, F
 import { watchInbox, watchDesktop } from './import.js'      // M14: Innboks — eksporter som legges i mappa blir atomer · M17: Desktop-cachen
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
-import { spor, mottakere, trustScores, Blokkert, ord } from './motor.js'                             // M20a: motoren — eneste vei ut til en modell
+import { spor, mottakere, trustScores, Blokkert, ord, forskjeller, konklusjon, rettKonklusjon, svarFor } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
@@ -394,7 +408,8 @@ http
       if (req.method === 'POST' && url.pathname === '/api/spor') {
         const b = await readBody(req)
         if (!b.melding || !String(b.melding).trim()) return json(res, 400, { error: 'melding kreves' })
-        if (!b.mottaker) return json(res, 400, { error: 'mottaker kreves (se /api/mottakere)' })
+        const mottakerIds = [...new Set([...(Array.isArray(b.mottakere) ? b.mottakere : []), ...(b.mottaker ? [b.mottaker] : [])].map((x) => String(x || '').trim()).filter(Boolean))]
+        if (!mottakerIds.length) return json(res, 400, { error: 'mottaker kreves (se /api/mottakere) — én som `mottaker` eller flere som `mottakere: []`' })
         const saker = Array.isArray(b.saker) ? b.saker.filter((s) => s && s.id) : []
         // SSE: hendelsene skrives etter hvert — broen er ren http, ingenting bufrer (K9). Lukker klienten, avbrytes kallet mot mottakeren.
         res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
@@ -403,14 +418,36 @@ http
         const ctl = new AbortController()
         req.on('close', () => ctl.abort())
         try {
-          const r = await spor({ melding: String(b.melding), saker, mottaker: String(b.mottaker), prosjekt: b.prosjekt || undefined, samtale: b.samtale || undefined, klient: 'app', signal: ctl.signal, på: hendelse })
-          console.error(`[tua-bro] spor → ${b.mottaker} · ${saker.length} saker · svar ${r.svar} · tokens ca. ${r.tokens.ca}${r.tokens.inn != null ? ` (eksakt ${r.tokens.inn}+${r.tokens.ut})` : ''}`)
+          const r = await spor({ melding: String(b.melding), saker, mottakere: mottakerIds, prosjekt: b.prosjekt || undefined, samtale: b.samtale || undefined, klient: 'app', signal: ctl.signal, på: hendelse })
+          if (Array.isArray(r.svar)) console.error(`[tua-bro] spor → ${mottakerIds.join('+')} · ${saker.length} saker · ${r.svar.length} svar${r.feilet?.length ? ` · ${r.feilet.length} feilet` : ''} · forskjeller ${r.forskjeller ? (r.forskjeller.tilgjengelig ? `${r.forskjeller.enig.length}/${r.forskjeller.uenig.length}/${r.forskjeller.unikt.length} (${r.forskjeller.vurdert_av})` : 'ikke tilgjengelig') : '—'} · konklusjon ${r.konklusjon?.id || '—'}`)
+          else console.error(`[tua-bro] spor → ${mottakerIds[0]} · ${saker.length} saker · svar ${r.svar} · tokens ca. ${r.tokens.ca}${r.tokens.inn != null ? ` (eksakt ${r.tokens.inn}+${r.tokens.ut})` : ''}`)
         } catch (e) {
           const blokkert = e instanceof Blokkert
-          console.error(`[tua-bro] spor → ${b.mottaker} ${blokkert ? 'BLOKKERT' : 'FEIL'}: ${e.message}`)
-          hendelse(blokkert ? 'blokkert' : 'feil', { feil: e.message, ...(blokkert ? { detaljer: e.detaljer } : {}) })
+          console.error(`[tua-bro] spor → ${mottakerIds.join('+')} ${blokkert ? 'BLOKKERT' : 'FEIL'}: ${e.message}`)
+          hendelse(blokkert ? 'blokkert' : 'feil', { feil: e.message, ...(blokkert ? { detaljer: e.detaljer, ...(e.mottaker ? { mottaker: e.mottaker } : {}) } : {}) })
         }
         return res.end()
+      }
+      // ── M20b (skive 6): konklusjonen — rettelse eller «kjør igjen». Alt gjennom motoren; låsing er /api/status. ──
+      if (req.method === 'POST' && url.pathname === '/api/konklusjon') {
+        const b = await readBody(req)
+        if (b.id && b.tekst != null) {
+          try { const k = rettKonklusjon({ id: String(b.id), tekst: String(b.tekst) }); console.error(`[tua-bro] konklusjon ${k.id} rettet (${k.endret}, v${k.version})`); return json(res, 200, { konklusjon: k }) }
+          catch (e) { return json(res, e.message.startsWith('fant ikke') ? 404 : 400, { error: e.message }) }
+        }
+        if (!b.prompt) return json(res, 400, { error: 'send {id, tekst} for å rette utkastet, eller {prompt, svar?: [ids]} for å kjøre vurderingen igjen' })
+        const atoms = load()
+        const p = atoms.find((a) => a.id === b.prompt)
+        if (!p) return json(res, 404, { error: `fant ikke sak ${b.prompt}` })
+        const svar = svarFor(atoms, p.id, Array.isArray(b.svar) ? b.svar : null)
+        if (!svar.length) return json(res, 400, { error: 'prompten har ingen svar-saker å konkludere ut fra' })
+        const ctl = new AbortController(); req.on('close', () => ctl.abort())
+        try {
+          const f = svar.length > 1 ? await forskjeller(svar, { melding: p.content, prosjekt: b.prosjekt || p.project, klient: 'app', signal: ctl.signal }) : { tilgjengelig: false, grunn: 'Forskjeller vises bare når mer enn én har svart.', enig: [], uenig: [], unikt: [] }
+          const k = await konklusjon({ prompt: p.id, svar, forskjeller: f.tilgjengelig ? f : null, melding: p.content, prosjekt: b.prosjekt || p.project, samtale: p.convo || undefined, klient: 'app', signal: ctl.signal })
+          console.error(`[tua-bro] konklusjon kjørt igjen for ${p.id} · ${svar.length} svar · ${k.tilgjengelig ? `utkast ${k.id} v${k.version} (${k.mottaker})` : `ikke tilgjengelig: ${k.grunn}`}`)
+          return json(res, 200, { forskjeller: f, konklusjon: k })
+        } catch (e) { console.error(`[tua-bro] konklusjon FEIL: ${e.message}`); return json(res, e instanceof Blokkert ? 403 : 500, { error: e.message }) }
       }
       // ── M15: innstillinger ──
       if (req.method === 'GET' && url.pathname === '/api/settings') return json(res, 200, await settingsView())

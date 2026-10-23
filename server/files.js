@@ -59,6 +59,7 @@ export function serialize(atom) {
     synlig_i: atom.refs || [],
     ...(atom.links?.length ? { lenker: atom.links } : {}),
     ...(atom.derivedFrom?.length ? { bygget_av: atom.derivedFrom } : {}),
+    ...(atom.ga?.length ? { ga: atom.ga } : {}),                  // M20b (skive 6, V16): svarene en prompt-sak ga — [{id, version}], én per mottaker
     ...(atom.renders?.length ? { gjengivelser: atom.renders } : {}),
     ...(atom.share && Object.keys(atom.share).length ? { nivaa: atom.share } : {}),
     ...(atom.levels?.S ? { S_av: atom.levels.S.by || '', S_versjon: atom.levels.S.of ?? null } : {}),
@@ -136,6 +137,7 @@ export function parse(text, { fallbackId } = {}) {
   if (fm.nivaa && typeof fm.nivaa === 'object') atom.share = fm.nivaa
   if (Array.isArray(fm.lenker) && fm.lenker.length) atom.links = fm.lenker.filter((l) => l && l.href)
   if (Array.isArray(fm.bygget_av) && fm.bygget_av.length) atom.derivedFrom = fm.bygget_av.filter((d) => d && d.id)
+  if (Array.isArray(fm.ga) && fm.ga.length) atom.ga = fm.ga.filter((d) => d && d.id)
   if (Array.isArray(fm.gjengivelser) && fm.gjengivelser.length) atom.renders = fm.gjengivelser.filter((r) => r && (r.path || r.url))
   const levels = {}
   if (fm.S_av !== undefined && ingress) levels.S = { text: ingress, by: fm.S_av, of: fm.S_versjon ?? null }

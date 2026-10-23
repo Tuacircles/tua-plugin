@@ -20,12 +20,19 @@
 //                            type, ord og tokens (ca. lokalt ≈ tegn/3,5; eksakt fra usage etter svar). Aldri innhold, aldri originaler.
 //
 // Svaret lagres som sak (kind: svar) med bygget_av → prompt-saken (kind: prompt, V16) og kildene som ble sendt.
-// Tester: server/test-motor.mjs (mot testarkiv i scratch, aldri ~/Dropbox/Tua; ingen ekte kall).
+//
+// Skive 6 (M20b): spor() tar flere mottakere samtidig — ett skjerm, ett minimer, én sjekkTillatt per mottaker (én blokkert stopper alle, V21),
+// samme melding til alle parallelt, ett svar-sak og én Utlevert-linje per mottaker, prompt-saken får `ga` med alle svarene. Når mer enn én svarte:
+//   forskjeller(svar[])      tre lister enig / uenig / unikt, vurdert av standardmodellen lokalt (vurderer(): Ollama → Claude → ikke tilgjengelig
+//                            med grunn), som JSON fra modellen med robust tolker (tolkForskjeller) og fallback. Går gjennom motoren: skjerm → send → logg.
+//   konklusjon(…)            vurdereren skriver et utkast; lagres som sak kind: konklusjon, status utkast, bygget_av → prompten og alle svarene.
+//                            rettKonklusjon() tar brukerens rettelse som ny versjon; låsing er POST /api/status. Ingen kodevei utenom.
+// Tester: server/test-motor.mjs og server/test-forskjeller.mjs (mot testarkiv i scratch, aldri ~/Dropbox/Tua; ingen ekte kall).
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, LEVELS, FILES_ROOT, filesMode, DATA_DIR } from './store.js'
+import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, FILES_ROOT, filesMode, DATA_DIR } from './store.js'
 import { readKey, hasKey, ollamaStatus } from './keychain.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -53,7 +60,7 @@ export class MotorFeil extends Error { constructor(msg) { super(msg); this.name 
 // Faktoren er per mottaker, målt 23.10.2026 på samme norske tekst: gemma3:4b (Ollama) ≈ 3,5 tegn per token (788 eksakt mot 826 anslått),
 // Claude Opus 5.5 ≈ 1,9 (1 645 eksakt mot 826 anslått med 3,5) — Claudes tokenizer deler norsk finere. Ukjent mottaker: 3,5.
 export const ord = (t) => (String(t || '').match(/\S+/g) || []).length
-export const TEGN_PER_TOKEN = { claude: 1.9, ollama: 3.5, test: 3.5 }
+export const TEGN_PER_TOKEN = { claude: 1.9, ollama: 3.5, test: 3.5, test2: 3.5 }
 export const anslåTokens = (t, mottaker) => Math.round(String(t || '').length / (TEGN_PER_TOKEN[mottaker] || 3.5))
 
 // ── 1) Skjerming ────────────────────────────────────────────────────────────
@@ -243,12 +250,15 @@ const SYSTEM = 'Du svarer på norsk, kort og presist. Teksten under «Kontekst»
   'plassholdere som [Person A], [E-post 1] eller [Adresse 1]. Det er skjermede opplysninger: bruk plassholderne uendret i svaret, ' +
   'og ikke gjett hva de står for.'
 const byggMelding = (melding, kontekst) => (kontekst ? `${melding.trim()}\n\n---\n\nKontekst\n\n${kontekst}` : melding.trim())
+// Skive 6: send() tar også `json` (svaret skal være ett JSON-objekt — Ollama får format: json, Claude får det i system-teksten) og `oppgave`
+// ('forskjeller' | 'konklusjon' — bare test-mottakeren bryr seg: den svarer med et fast, tolkbart svar så testene aldri trenger en modell).
+const JSON_KRAV = ' Svar BARE med ett gyldig JSON-objekt — ingen tekst før eller etter, ingen kodeblokk.'
 
 export const CLAUDE_MODELL = 'claude-opus-5-5'
 // Claude via egen nøkkel (D2'). Nøkkelen leses fra Keychain i selve kallet og lever bare i klient-objektet til kallet er ferdig.
 // Strømmer tekstbiter til onDel; adaptiv tenkning; server-side fallback «default» slik at et avslag fra sikkerhetsklassifisering
 // kjøres på nytt på modellen Anthropic anbefaler (beta server-side-fallback-2026-07-01). Avslag etter fallback → MotorFeil.
-async function sendClaude({ system, melding, kontekst }, { onDel = () => {}, signal } = {}) {
+async function sendClaude({ system, melding, kontekst, json }, { onDel = () => {}, signal } = {}) {
   let nøkkel = readKey('claude')
   if (!nøkkel) throw new MotorFeil('Ingen API-nøkkel for Claude i Keychain. Legg den inn under Innstillinger › AI-mottakere (console.anthropic.com › API keys).')
   const { default: Anthropic } = await import('@anthropic-ai/sdk')
@@ -257,7 +267,7 @@ async function sendClaude({ system, melding, kontekst }, { onDel = () => {}, sig
   const stream = client.beta.messages.stream({
     model: CLAUDE_MODELL, max_tokens: 64000, thinking: { type: 'adaptive' },
     betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-    system, messages: [{ role: 'user', content: byggMelding(melding, kontekst) }],
+    system: json ? system + JSON_KRAV : system, messages: [{ role: 'user', content: byggMelding(melding, kontekst) }],
   }, { signal })
   for await (const ev of stream) if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') onDel(ev.delta.text)
   const fm = await stream.finalMessage()
@@ -267,11 +277,12 @@ async function sendClaude({ system, melding, kontekst }, { onDel = () => {}, sig
 }
 
 // Ollama lokalt (V18: lokal modell først når den finnes). Modell: TUA_OLLAMA_MODELL eller den første i lista. NDJSON-strøm fra /api/chat.
-async function sendOllama({ system, melding, kontekst }, { onDel = () => {}, signal } = {}) {
+async function sendOllama({ system, melding, kontekst, json }, { onDel = () => {}, signal } = {}) {
   const st = await ollamaStatus()
   if (!st.running || !st.models.length) throw new MotorFeil('Ollama kjører ikke på 127.0.0.1:11434, eller har ingen modell (ollama pull …).')
   const model = process.env.TUA_OLLAMA_MODELL || st.models[0]
-  const r = await fetch('http://127.0.0.1:11434/api/chat', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model, stream: true, messages: [{ role: 'system', content: system }, { role: 'user', content: byggMelding(melding, kontekst) }] }) })
+  const body = { model, stream: true, messages: [{ role: 'system', content: json ? system + JSON_KRAV : system }, { role: 'user', content: byggMelding(melding, kontekst) }], ...(json ? { format: 'json' } : {}) }
+  const r = await fetch('http://127.0.0.1:11434/api/chat', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!r.ok || !r.body) throw new MotorFeil(`Ollama svarte ${r.status}`)
   let tekst = '', rest = '', usage = { input_tokens: null, output_tokens: null }
   const dec = new TextDecoder()
@@ -289,25 +300,50 @@ async function sendOllama({ system, melding, kontekst }, { onDel = () => {}, sig
   return { tekst, modell: model, usage, stopp: 'end_turn' }
 }
 
-// Test-mottaker: ekkoer det som ville blitt sendt, i biter, uten å sende noe ut av maskinen. Trust 3 → S og M går, L blokkeres (fail closed kan prøves).
-async function sendTest({ system, melding, kontekst }, { onDel = () => {} } = {}) {
+// Test-mottakerne: ekkoer det som ville blitt sendt, i biter, uten å sende noe ut av maskinen. Trust 3 → S og M går, L blokkeres (fail closed kan prøves).
+// Som vurderer (TUA_VURDERER=test) svarer «test» med faste, tolkbare forskjeller (JSON over bokstavene A, B … i konteksten) og en fast konklusjon.
+// «test2» (bare med TUA_TESTMOTTAKERE=2, til testene) ekkoer ANNERLEDES enn «test» — overskriftene i konteksten og et tilleggspunkt — så to
+// svar på samme spørsmål faktisk er forskjellige og Forskjeller har noe å finne.
+const strøm = async (ut, onDel) => { for (const b of ut.match(/[\s\S]{1,120}/g) || []) { await new Promise((r) => setTimeout(r, 2)); onDel(b) } }
+const testSvar = (ut, inn, id) => ({ tekst: ut, modell: 'ekko', usage: { input_tokens: anslåTokens(inn, id), output_tokens: anslåTokens(ut, id) }, stopp: 'end_turn' })
+async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => {} } = {}) {
+  const inn = system + melding + kontekst
+  if (oppgave === 'forskjeller') {
+    const bokstaver = [...String(kontekst).matchAll(/^## Svar ([A-Z]+)\b/gm)].map((m) => m[1])
+    const ut = JSON.stringify({
+      enig: [{ punkt: 'Alle svarene gjengir spørsmålet og konteksten som ble sendt.', svar: bokstaver }],
+      uenig: [{ punkt: 'Svarene formulerer seg ulikt om det samme innholdet.', svar: bokstaver }],
+      unikt: bokstaver.length ? [{ punkt: `Svar ${bokstaver.at(-1)} har et tilleggspunkt de andre ikke har med.`, svar: [bokstaver.at(-1)] }] : [],
+    })
+    await strøm(ut, onDel); return testSvar(ut, inn, 'test')
+  }
+  if (oppgave === 'konklusjon') {
+    const ut = 'Utkast til konklusjon (test-mottakeren, ingenting sendt ut av maskinen): svarene er enige om hovedsaken, uenige i formuleringen, og ett av dem har et tilleggspunkt. Rett teksten og lås den når den stemmer.'
+    await strøm(ut, onDel); return testSvar(ut, inn, 'test')
+  }
   const ut = `Ekko fra test-mottakeren (ingenting er sendt ut av maskinen).\n\nSystem: ${system}\n\n${byggMelding(melding, kontekst)}`
-  const biter = ut.match(/[\s\S]{1,120}/g) || []
-  for (const b of biter) { await new Promise((r) => setTimeout(r, 2)); onDel(b) }
-  return { tekst: ut, modell: 'ekko', usage: { input_tokens: anslåTokens(system + melding + kontekst, 'test'), output_tokens: anslåTokens(ut, 'test') }, stopp: 'end_turn' }
+  await strøm(ut, onDel); return testSvar(ut, inn, 'test')
+}
+async function sendTest2({ melding, kontekst }, { onDel = () => {} } = {}) {
+  const overskrifter = [...String(kontekst).matchAll(/^## (.+)$/gm)].map((m) => m[1])
+  const ut = `EKKO B (test-mottaker 2 — ingenting er sendt ut av maskinen).\n\nSpørsmålet var: ${melding.trim()}\n\nKildene jeg fikk: ${overskrifter.length ? overskrifter.join(' · ') : 'ingen'}.\n\nTilleggspunkt bare fra B: dette svaret ser saken fra en annen vinkel enn test-mottaker 1.`
+  await strøm(ut, onDel); return testSvar(ut, melding + kontekst, 'test2')
 }
 
-// Mottaker-grensesnittet. status() svarer klar/ikke klar med grunn — aldri nøkkelverdier. send() nås bare gjennom spor().
+const TEST_TRUST = (label, kilde) => ({ score: 3, label, endpoint: 'lokalt', region: 'lokalt', metadata: 'Ingen — ingenting sendes.', innhold: 'Forlater aldri maskinen; viser bare det som ville blitt sendt.', mining: 'Ingen.', retensjon: 'Bare Tuas egen Utlevert-linje (metadata).', svakest: null, kilde, dato: '2026-10-23' })
+// Mottaker-grensesnittet. status() svarer klar/ikke klar med grunn — aldri nøkkelverdier. send() nås bare gjennom spor(), forskjeller() og konklusjon().
 function lagMottakere() {
   const ts = trustScores().ai || {}
-  return [
+  const liste = [
     { id: 'claude', label: 'Claude (Anthropic)', endpoint: 'api.anthropic.com', modell: CLAUDE_MODELL, trust: ts.claude || null, nøkkel: true,
       status: async () => (hasKey('claude') ? { klar: true } : { klar: false, hvorfor: 'ingen API-nøkkel i Keychain (Innstillinger › AI-mottakere)' }), send: sendClaude },
     { id: 'ollama', label: 'Ollama (lokal)', endpoint: '127.0.0.1:11434', modell: process.env.TUA_OLLAMA_MODELL || null, trust: ts.ollama || null, local: true,
       status: async () => { const s = await ollamaStatus(); return s.running && s.models.length ? { klar: true, modeller: s.models } : { klar: false, hvorfor: s.running ? 'Ollama kjører, men har ingen modell' : 'Ollama kjører ikke' } }, send: sendOllama },
-    { id: 'test', label: 'Test (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: { score: 3, label: 'Test', endpoint: 'lokalt', region: 'lokalt', metadata: 'Ingen — ingenting sendes.', innhold: 'Forlater aldri maskinen; viser bare det som ville blitt sendt.', mining: 'Ingen.', retensjon: 'Bare Tuas egen Utlevert-linje (metadata).', svakest: null, kilde: 'Tua selv: ekko-mottakeren i motor.js. Score 3 er satt lavt med vilje så fail closed kan prøves (L blokkeres).', dato: '2026-10-23' }, test: true,
+    { id: 'test', label: 'Test (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test', 'Tua selv: ekko-mottakeren i motor.js. Score 3 er satt lavt med vilje så fail closed kan prøves (L blokkeres).'), test: true,
       status: async () => ({ klar: true }), send: sendTest },
   ]
+  if (process.env.TUA_TESTMOTTAKERE === '2') liste.push({ id: 'test2', label: 'Test 2 (ekko B — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test 2', 'Tua selv: andre ekko-mottaker i motor.js (TUA_TESTMOTTAKERE=2) — svarer annerledes enn Test så Forskjeller kan testes uten modell.'), test: true, status: async () => ({ klar: true }), send: sendTest2 })
+  return liste
 }
 // Lista til appen (GET /api/mottakere): uten send(), med status. Nøkkel: satt/ikke satt — aldri verdien.
 // standard (V18): lokal modell først når den finnes, ellers Claude når nøkkelen finnes, ellers ingen (test er aldri standard).
@@ -323,46 +359,265 @@ export async function mottakere() {
 }
 export const standardMottaker = async () => (await mottakere()).find((m) => m.standard)?.id || null
 
+// Vurdereren (skive 6, V21): Forskjeller og konklusjonen skrives av standardmodellen lokalt — Ollama når den kjører, ellers Claude med nøkkel,
+// ellers ikke tilgjengelig med grunn. TUA_VURDERER overstyrer (testene setter «test»). Går gjennom de samme trinnene som spor():
+// sjekkTillatt (svar-sakene på L — arver et svar Vault-merket, stoppes en ekstern vurderer) → skjerm → send → Utlevert-linje med mottaker.
+// Nivået en vurderer får lese svar-sakene på: det høyeste Trust Score tillater (L for lokal og Claude, M for test). Vault-arv stoppes
+// fortsatt hos en ekstern vurderer i sjekkTillatt — det klampes ikke ned til S i det stille (forskjeller av ingresser ville være verdiløse).
+export const maksNivå = (m) => { const score = Number(m?.trust?.score) || 1; return LEVELS.filter((l) => NIVÅ_KREVER_TRUST[l] <= score).at(-1) || 'S' }
+const svarKilde = (atoms, s, nivå) => { const a = s.id ? atoms.find((x) => x.id === s.id) : null; const tekst = a ? levelOf(a, nivå).text : String(s.tekst || ''); return { id: s.id || null, name: a?.name || `Svar fra ${s.label || s.mottaker}`, version: a?.version || s.version || 1, level: nivå, vault: a ? isVault(a) : false, tekst } }
+export async function vurderer() {
+  const alle = lagMottakere()
+  const ønsket = process.env.TUA_VURDERER
+  const rekke = ønsket ? alle.filter((m) => m.id === ønsket) : [alle.find((m) => m.id === 'ollama'), alle.find((m) => m.id === 'claude')]
+  const grunner = []
+  for (const m of rekke.filter(Boolean)) { const st = await m.status(); if (st.klar) return { m, modell: st.modeller?.[0] || m.modell }; grunner.push(`${m.label}: ${st.hvorfor}`) }
+  return { m: null, grunn: `Ingen modell kan vurdere svarene${grunner.length ? ` — ${grunner.join('; ')}` : ønsket ? ` — ukjent vurderer «${ønsket}»` : ''}. Start Ollama, eller legg inn en Claude-nøkkel under Innstillinger › AI-mottakere.` }
+}
+
 // ── 4) spor(): hele løpet, ingen vei utenom ────────────────────────────────
-// på(hendelse, data) får: skjermet {antall, treff, tokens:{ca}, ord, tekst (det som sendes), saker, notater} · del {tekst} · ferdig {svar, prompt, tokens, tekst}.
-// Feil kastes: Blokkert (fail closed) eller MotorFeil. Prompten lagres FØR sending (V16: den er brukerens investering, også når sendingen feiler).
+// på(hendelse, data) får: skjermet {mottaker, mottakere, antall, treff, tokens:{ca, per}, ord, tekst (det som sendes), saker, notater} ·
+// del {mottaker, tekst} · ferdig {mottaker, svar, prompt, tokens, tekst} — én per mottaker · (flere mottakere:) feil {mottaker, feil} når én svikter
+// underveis mens de andre fortsetter · vurderer {steg, mottaker} · forskjeller {enig, uenig, unikt, …} · konklusjon-del {tekst} · konklusjon {id, tekst, …} · slutt.
+// Feil kastes: Blokkert (fail closed — med flere mottakere stoppes HELE sendingen når én er blokkert, og linja sier hvilken, V21) eller MotorFeil.
+// Prompten lagres FØR sending (V16: den er brukerens investering, også når sendingen feiler) og får `ga` med hvert svar den ga.
 const tittelAv = (s) => (String(s || '').split('\n').find((l) => l.trim()) || 'Spørsmål').trim().replace(/^#+\s*/, '').slice(0, 70)
-export async function spor({ melding, saker = [], mottaker: mId, prosjekt, samtale, klient = 'app', signal, på = () => {} }) {
+export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds, prosjekt, samtale, klient = 'app', signal, på = () => {} }) {
   if (!melding || !String(melding).trim()) throw new MotorFeil('melding kreves')
-  const m = lagMottakere().find((x) => x.id === mId)
-  if (!m) throw new MotorFeil(`ukjent mottaker «${mId}» — en av ${lagMottakere().map((x) => x.id).join(', ')}`)
-  const st = await m.status()
-  if (!st.klar) throw new MotorFeil(`${m.label} er ikke klar: ${st.hvorfor}`)
+  const alle = lagMottakere()
+  const ids = [...new Set([...(Array.isArray(mIds) ? mIds : []), ...(mId ? [mId] : [])].map((x) => String(x || '').trim()).filter(Boolean))]
+  if (!ids.length) throw new MotorFeil('mottaker kreves')
+  const ms = ids.map((id) => { const m = alle.find((x) => x.id === id); if (!m) throw new MotorFeil(`ukjent mottaker «${id}» — en av ${alle.map((x) => x.id).join(', ')}`); return m })
+  for (const m of ms) { const st = await m.status(); if (!st.klar) throw new MotorFeil(`${m.label} er ikke klar: ${st.hvorfor}`) }
+  const flere = ms.length > 1
 
   const atoms = load()
   const { kontekst, kilder, notater } = minimer(atoms, saker, { prosjekt })
-  const { maks } = sjekkTillatt(m, kilder)                                   // fail closed — før noe skjermes eller sendes
+  // fail closed for ALLE mottakerne før noe skjermes eller sendes: er én blokkert, sendes ingenting til noen, og linja sier hvilken og hvorfor
+  const maks = {}
+  for (const m of ms) {
+    try { maks[m.id] = sjekkTillatt(m, kilder).maks } catch (e) {
+      if (!(e instanceof Blokkert)) throw e
+      const b = flere ? new Blokkert(`Stoppet hos ${m.label} — ingenting er sendt til noen av mottakerne. ${e.message}`, e.detaljer) : e
+      b.mottaker = m.id; throw b
+    }
+  }
 
   const sk = lagSkjermer(kjentePersoner(atoms))
   const meldingS = sk.skjerm(String(melding)), kontekstS = sk.skjerm(kontekst)
   const sendes = `${SYSTEM}\n\n${byggMelding(meldingS, kontekstS)}`
-  const tokensCa = anslåTokens(sendes, m.id)
+  const tokensCa = Object.fromEntries(ms.map((m) => [m.id, anslåTokens(sendes, m.id)]))
   if (sk.nye.size) kjentePersoner([], { lær: [...sk.nye] })                   // lista vokser av bruk
-  på('skjermet', { mottaker: m.id, antall: { ...sk.antall }, treff: sk.treff, ord: ord(sendes), tokens: { ca: tokensCa }, maks, tekst: sendes,
+  på('skjermet', { mottaker: ms[0].id, mottakere: ids, antall: { ...sk.antall }, treff: sk.treff, ord: ord(sendes), tokens: { ca: tokensCa[ms[0].id], per: tokensCa }, maks: maks[ms[0].id], maksPer: maks, tekst: sendes,
     saker: kilder.map(({ id, name, version, level, ord: o, tegn }) => ({ id, name, version, level, ord: o, tegn })), notater })
 
   const proj = prosjekt || atoms.find((x) => x.id === kilder[0]?.id)?.project || 'Uten prosjekt'
   const tittel = tittelAv(melding)
+  const til = ms.map((m) => m.label).join(' og ')
   const { atom: promptAtom } = upsert(atoms, { kind: 'prompt', content: String(melding), name: tittel, project: proj, convo: samtale || tittel, tags: ['prompt'], source: 'Tua', by: 'regel',
-    short: `Spørsmål stilt i Tua til ${m.label}${kilder.length ? ` med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} som kontekst` : ''}.` })
+    short: `Spørsmål stilt i Tua til ${til}${kilder.length ? ` med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} som kontekst` : ''}.`.slice(0, 300) })
   save(atoms)
 
-  let strømmet = ''
-  const r = await m.send({ system: SYSTEM, melding: meldingS, kontekst: kontekstS }, { signal, onDel: (t) => { strømmet += t; på('del', { tekst: t }) } })
-  const svarTekst = avskjerm(r.tekst || strømmet, sk.kobling)
+  const vaultArv = kilder.some((k) => k.vault)                                 // et svar bygget på en Vault-merket sak arver merket (V15): går aldri over S ut av maskinen
+  const nivåer = [...new Set(kilder.map((k) => k.level))].join('/')
+  // Samme skjermede og minimerte melding til alle, samtidig. Hvert svar blir egen sak og egen Utlevert-linje idet det kommer.
+  async function sendEn(m) {
+    let strømmet = ''
+    const r = await m.send({ system: SYSTEM, melding: meldingS, kontekst: kontekstS }, { signal, onDel: (t) => { strømmet += t; på('del', { mottaker: m.id, tekst: t }) } })
+    const svarTekst = avskjerm(r.tekst || strømmet, sk.kobling)
+    const tokens = { ca: tokensCa[m.id], inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
+    const { atom: svarAtom } = upsert(atoms, { kind: 'svar', content: svarTekst, name: `Svar fra ${m.label}: ${tittel}`.slice(0, 90), project: proj, convo: samtale || tittel, tags: ['svar', m.id, ...(vaultArv ? ['vault'] : [])], source: m.label, by: 'regel',
+      derivedFrom: [{ id: promptAtom.id, version: promptAtom.version || 1, level: 'L' }, ...kilder.map(({ id, version, level }) => ({ id, version, level }))],
+      short: `Svar fra ${m.label} (${r.modell}) på «${tittel}»${kilder.length ? `, med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} på nivå ${nivåer}` : ''}.`.slice(0, 300) })
+    promptAtom.ga = [...(promptAtom.ga || []).filter((g) => g.id !== svarAtom.id), { id: svarAtom.id, version: svarAtom.version || 1 }]
+    save(atoms)
+    logDelivery({ tool: 'spor', client: klient, mottaker: m.id, endpoint: m.endpoint, modell: r.modell, saker: kilder.map(({ id, version, level }) => ({ id, version, level })),
+      skjermet: { ...sk.antall }, ord: ord(sendes), tokens, prompt: promptAtom.id, svar: svarAtom.id, ...(prosjekt ? { context: prosjekt } : {}) })
+    const ferdig = { svar: svarAtom.id, prompt: promptAtom.id, mottaker: m.id, label: m.label, modell: r.modell, tokens, tekst: svarTekst }
+    på('ferdig', ferdig)
+    return ferdig
+  }
+  const utfall = await Promise.allSettled(ms.map(sendEn))
+  const ok = utfall.filter((u) => u.status === 'fulfilled').map((u) => u.value)
+  const feilet = utfall.map((u, i) => (u.status === 'rejected' ? { mottaker: ms[i].id, label: ms[i].label, feil: u.reason } : null)).filter(Boolean)
+  if (!flere) { if (feilet.length) throw feilet[0].feil; return ok[0] }
+
+  for (const f of feilet) på('feil', { mottaker: f.mottaker, feil: `${f.label}: ${f.feil?.message || f.feil}` })
+  if (!ok.length) throw new MotorFeil(`Ingen av mottakerne svarte — ${feilet.map((f) => `${f.label}: ${f.feil?.message || f.feil}`).join(' · ')}`)
+  // Forskjeller og konklusjon bare når mer enn én faktisk svarte (V21). Svikter vurdereren, står svarene likevel lagret — det sies med grunn.
+  let fsk = null, konk = null
+  if (ok.length > 1) {
+    const svar = ok.map((s) => ({ id: s.svar, mottaker: s.mottaker, label: s.label, modell: s.modell, tekst: s.tekst }))
+    try { fsk = await forskjeller(svar, { melding: String(melding), prosjekt: proj, klient, signal, på }) } catch (e) { fsk = { tilgjengelig: false, grunn: e.message, enig: [], uenig: [], unikt: [] } }
+    på('forskjeller', fsk)
+    try { konk = await konklusjon({ prompt: promptAtom.id, svar, forskjeller: fsk.tilgjengelig ? fsk : null, melding: String(melding), prosjekt: proj, samtale, klient, signal, på }) } catch (e) { konk = { tilgjengelig: false, grunn: e.message } }
+    på('konklusjon', konk)
+  }
+  const ut = { prompt: promptAtom.id, mottakere: ok.map((s) => s.mottaker), svar: ok.map((s) => s.svar), resultater: ok, feilet: feilet.map((f) => ({ mottaker: f.mottaker, label: f.label, feil: f.feil?.message || String(f.feil) })), forskjeller: fsk, konklusjon: konk }
+  på('slutt', { prompt: ut.prompt, svar: ut.svar, mottakere: ut.mottakere, forskjeller: !!fsk?.tilgjengelig, konklusjon: konk?.id || null })
+  return ut
+}
+
+// ── 5) Forskjeller (M20b, skive 6) ──────────────────────────────────────────
+// Tre lister — enig · uenig · unikt — vurdert av vurdereren ut fra svarene. Hvert punkt: tekst + hvilke mottakere (og svar-saker) det gjelder.
+// Modellen bes om JSON over bokstavene A, B …; tolkForskjeller() tåler kodeblokker, hengende komma, andre nøkkelnavn, og faller tilbake til
+// overskrifter med kulepunkter — og til slutt til «kunne ikke tolkes» med råteksten, aldri en feil. Svarene skjermes på nytt før de sendes
+// (de har originalene satt inn igjen), punktene får originalene tilbake lokalt. Én Utlevert-linje (tool: forskjeller) med vurdereren som mottaker.
+export async function forskjeller(svar, { melding = '', prosjekt, klient = 'app', signal, på = () => {} } = {}) {
+  const tom = { enig: [], uenig: [], unikt: [] }
+  if (!Array.isArray(svar) || svar.length < 2) return { tilgjengelig: false, grunn: 'Forskjeller vises bare når mer enn én har svart.', ...tom }
+  const v = await vurderer()
+  if (!v.m) return { tilgjengelig: false, grunn: v.grunn, ...tom }
+  const atoms = load()
+  const bokstaver = svar.map((_, i) => bokstav(i))
+  const nivå = maksNivå(v.m)
+  const kilder = svar.map((s) => svarKilde(atoms, s, nivå))
+  try { sjekkTillatt(v.m, kilder) } catch (e) { if (e instanceof Blokkert) return { tilgjengelig: false, grunn: `Vurdering hos ${v.m.label} er stoppet: ${e.message}`, ...tom, vurdert_av: v.m.id }; throw e }
+  const sk = lagSkjermer(kjentePersoner(atoms))
+  const meldingS = sk.skjerm(String(melding || '')).trim()
+  const kontekst = kilder.map((k, i) => `## Svar ${bokstaver[i]} (${svar[i].label || svar[i].mottaker}${svar[i].modell ? `, ${svar[i].modell}` : ''})\n\n${sk.skjerm(k.tekst).trim()}`).join('\n\n')
+  const oppgave = `Under står ${svar.length} svar (${bokstaver.join(', ')}) på samme spørsmål${meldingS ? `: «${meldingS}»` : ''}. Sammenlikn dem og svar med ett JSON-objekt på denne formen:\n` +
+    '{"enig": [{"punkt": "…", "svar": ["A", "B"]}], "uenig": [{"punkt": "…", "svar": ["A"]}], "unikt": [{"punkt": "…", "svar": ["B"]}]}\n' +
+    'enig = det svarene sier likt · uenig = der de motsier hverandre eller vektlegger ulikt (si kort hva hvert svar mener) · unikt = det bare ett svar har med. ' +
+    'Hvert punkt er én setning på norsk; «svar» er bokstavene på svarene punktet gjelder. Bruk plassholdere som [Person A] uendret.'
+  const sendes = `${SYSTEM}${JSON_KRAV}\n\n${byggMelding(oppgave, kontekst)}`
+  const tokensCa = anslåTokens(sendes, v.m.id)
+  på('vurderer', { steg: 'forskjeller', mottaker: v.m.id, modell: v.modell, tokens: { ca: tokensCa } })
+  const r = await v.m.send({ system: SYSTEM, melding: oppgave, kontekst, json: true, oppgave: 'forskjeller' }, { signal })
+  const tolket = tolkForskjeller(r.tekst, svar.map((s, i) => ({ ...s, bokstav: bokstaver[i] })))
+  for (const k of ['enig', 'uenig', 'unikt']) tolket[k] = tolket[k].map((p) => ({ ...p, tekst: avskjerm(p.tekst, sk.kobling) }))
+  if (tolket.rå) tolket.rå = avskjerm(tolket.rå, sk.kobling)
   const tokens = { ca: tokensCa, inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
-  const { atom: svarAtom } = upsert(atoms, { kind: 'svar', content: svarTekst, name: `Svar fra ${m.label}: ${tittel}`.slice(0, 90), project: proj, convo: samtale || tittel, tags: ['svar', m.id], source: m.label, by: 'regel',
-    derivedFrom: [{ id: promptAtom.id, version: promptAtom.version || 1, level: 'L' }, ...kilder.map(({ id, version, level }) => ({ id, version, level }))],
-    short: `Svar fra ${m.label} (${r.modell}) på «${tittel}»${kilder.length ? `, med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} på nivå ${[...new Set(kilder.map((k) => k.level))].join('/')}` : ''}.`.slice(0, 300) })
+  logDelivery({ tool: 'forskjeller', client: klient, mottaker: v.m.id, endpoint: v.m.endpoint, modell: r.modell, saker: kilder.filter((k) => k.id).map(({ id, version, level }) => ({ id, version, level })),
+    skjermet: { ...sk.antall }, ord: ord(sendes), tokens, ...(prosjekt ? { context: prosjekt } : {}) })
+  return { tilgjengelig: true, ...tolket, vurdert_av: v.m.id, modell: r.modell, tokens, nivå, svar: svar.map((s, i) => ({ bokstav: bokstaver[i], id: s.id || null, mottaker: s.mottaker, label: s.label || s.mottaker })) }
+}
+// Finn ett JSON-objekt i en modelltekst: kodeblokk først, så første «{» til siste «}», med reparasjon av hengende komma og typografiske anførselstegn.
+function plukkJson(t) {
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  for (const k of [fence?.[1], t]) {
+    if (!k) continue
+    const s = k.indexOf('{'), e = k.lastIndexOf('}')
+    if (s < 0 || e <= s) continue
+    const sub = k.slice(s, e + 1)
+    for (const forsøk of [sub, sub.replace(/,\s*([}\]])/g, '$1'), sub.replace(/[“”«»]/g, '"').replace(/,\s*([}\]])/g, '$1')]) { try { const j = JSON.parse(forsøk); if (j && typeof j === 'object') return j } catch {} }
+  }
+  return null
+}
+// svar: [{bokstav, id, mottaker, label, modell}] — det punktene kan peke på. Returnerer alltid {enig, uenig, unikt, tolket} og aldri kaster.
+export function tolkForskjeller(tekst, svar = []) {
+  const t = String(tekst || '')
+  const tom = () => ({ enig: [], uenig: [], unikt: [] })
+  const finnSvar = (x) => {
+    if (x == null) return null
+    if (typeof x === 'number') return svar[x - 1] || svar[x] || null
+    const s = String(x).trim().replace(/^svar\s+/i, '')
+    const låg = s.toLowerCase()
+    return svar.find((v) => v.bokstav && v.bokstav.toLowerCase() === låg) || svar.find((v) => v.mottaker && String(v.mottaker).toLowerCase() === låg) || svar.find((v) => v.id && v.id === s)
+      || svar.find((v) => v.label && (v.label.toLowerCase() === låg || v.label.toLowerCase().startsWith(låg) || låg.includes(v.label.toLowerCase().split(' ')[0])))
+      || svar.find((v) => v.modell && String(v.modell).toLowerCase() === låg) || null
+  }
+  const hvemTil = (hvem) => {
+    const liste = Array.isArray(hvem) ? hvem : hvem == null ? [] : String(hvem).split(/\s*(?:,|;|\/|&| og | and )\s*/i)
+    const funnet = liste.map((h) => [h, finnSvar(h)])
+    return { mottakere: [...new Set(funnet.map(([h, s]) => (s ? s.mottaker : String(h).trim())).filter(Boolean))], saker: [...new Set(funnet.map(([, s]) => s?.id).filter(Boolean))] }
+  }
+  const punkt = (p) => {
+    if (p == null) return null
+    if (typeof p === 'string' || Array.isArray(p)) { const tekst = (Array.isArray(p) ? p.map(String).join(' ') : p).trim(); return tekst ? { tekst, mottakere: [], saker: [] } : null }
+    if (typeof p !== 'object') return null
+    const tekst = String(p.punkt ?? p.tekst ?? p.text ?? p.point ?? p.beskrivelse ?? p.innhold ?? p.claim ?? '').trim()
+    const hvem = p.svar ?? p.mottakere ?? p.kilder ?? p.hvem ?? p.fra ?? p.sources ?? p.answers ?? p.models ?? p.modeller ?? []
+    return tekst ? { tekst, ...hvemTil(hvem) } : null
+  }
+  const obj = plukkJson(t)
+  if (obj) {
+    const alts = { enig: ['enig', 'enige', 'agree', 'agreed', 'likt', 'felles', 'samsvar'], uenig: ['uenig', 'uenige', 'disagree', 'disagreement', 'motstrid', 'ulikt', 'forskjell', 'forskjeller'], unikt: ['unikt', 'unike', 'unique', 'bare', 'eget', 'only'] }
+    const ut = tom(); let noe = false
+    for (const [k, navn] of Object.entries(alts)) {
+      const nøkkel = Object.keys(obj).find((n) => navn.includes(n.toLowerCase()))
+      if (!nøkkel) continue
+      const v = obj[nøkkel]; noe = true
+      const liste = Array.isArray(v) ? v : v && typeof v === 'object' ? Object.values(v) : v ? [v] : []
+      ut[k] = liste.map(punkt).filter(Boolean)
+    }
+    if (noe) return { ...ut, tolket: 'json' }
+  }
+  // Fallback: overskrifter «Enig» / «Uenig» / «Unikt» med kulepunkter; «(A, B)» eller «— svar A» på slutten av linja peker ut svarene.
+  const ut = tom(); let nå = null
+  for (const l of t.split('\n')) {
+    const h = l.match(/^\s*(?:#+\s*|\*\*|["']?)\s*(enig|uenig|unikt)\b/i)
+    if (h) { nå = h[1].toLowerCase(); continue }
+    const b = l.match(/^\s*(?:[-*•]|\d+[.)])\s+(.+?)\s*$/)
+    if (!b || !nå) continue
+    const m = b[1].match(/^(.*?)\s*[\(\[—–-]\s*(?:svar\s*)?([A-Z](?:\s*(?:,|\/|&|og)\s*[A-Z])*)\s*[\)\]]?\s*$/i)
+    ut[nå].push(m ? { tekst: m[1].trim(), ...hvemTil(m[2].split(/[^A-Za-z]+/).filter(Boolean)) } : { tekst: b[1].trim(), mottakere: [], saker: [] })
+  }
+  if (ut.enig.length + ut.uenig.length + ut.unikt.length) return { ...ut, tolket: 'tekst' }
+  return { ...tom(), tolket: 'ingen', rå: t.slice(0, 2000), merk: 'Vurderingen kunne ikke tolkes som tre lister — teksten vises som den kom.' }
+}
+
+// ── 6) Konklusjon (M20b, skive 6, V21) ──────────────────────────────────────
+// Vurdereren skriver et utkast ut fra spørsmålet, svarene og forskjellene. Lagres som sak kind: konklusjon, status utkast, med bygget_av →
+// prompten og alle svar-sakene, under nøkkelen konklusjon:<prompt-id> — så «kjør igjen» gir ny versjon av samme sak, ikke en ny sak.
+// Brukeren retter teksten (rettKonklusjon) og låser med POST /api/status (utkast → endelig). Én Utlevert-linje (tool: konklusjon).
+export async function konklusjon({ prompt: promptId, svar, forskjeller: f = null, melding, prosjekt, samtale, klient = 'app', signal, på = () => {} }) {
+  const atoms = load()
+  const promptAtom = atoms.find((a) => a.id === promptId) || null
+  const spørsmål = String(melding || promptAtom?.content || '').trim()
+  if (!spørsmål) throw new MotorFeil('konklusjon: fant ikke spørsmålet (prompt-saken)')
+  if (!Array.isArray(svar) || !svar.length) throw new MotorFeil('konklusjon: ingen svar å konkludere ut fra')
+  const v = await vurderer()
+  if (!v.m) return { tilgjengelig: false, grunn: v.grunn }
+  const bokstaver = svar.map((_, i) => bokstav(i))
+  const nivå = maksNivå(v.m)
+  const svarKilder = svar.map((s) => svarKilde(atoms, s, nivå))
+  const kilder = [
+    ...(promptAtom ? [{ id: promptAtom.id, name: promptAtom.name, version: promptAtom.version || 1, level: nivå, vault: isVault(promptAtom) }] : []),
+    ...svarKilder,
+  ]
+  try { sjekkTillatt(v.m, kilder) } catch (e) { if (e instanceof Blokkert) return { tilgjengelig: false, grunn: `Konklusjon hos ${v.m.label} er stoppet: ${e.message}`, vurdert_av: v.m.id }; throw e }
+  const sk = lagSkjermer(kjentePersoner(atoms))
+  const liste = (p) => (p || []).map((x) => `- ${sk.skjerm(x.tekst)}${x.mottakere?.length ? ` (${x.mottakere.map((m) => svar.find((s) => s.mottaker === m)?.label || m).join(', ')})` : ''}`).join('\n')
+  const kontekst = [`## Spørsmålet\n\n${sk.skjerm(spørsmål)}`,
+    ...svarKilder.map((k, i) => `## Svar ${bokstaver[i]} (${svar[i].label || svar[i].mottaker}${svar[i].modell ? `, ${svar[i].modell}` : ''})\n\n${sk.skjerm(k.tekst).trim()}`),
+    ...(f && (f.enig?.length || f.uenig?.length || f.unikt?.length) ? [`## Forskjeller\n\nEnig:\n${liste(f.enig) || '- (ingen)'}\n\nUenig:\n${liste(f.uenig) || '- (ingen)'}\n\nUnikt:\n${liste(f.unikt) || '- (ingen)'}`] : [])].join('\n\n')
+  const oppgave = 'Skriv et utkast til konklusjon på norsk ut fra svarene under: først det som er sikkert (der svarene er enige), så det som står åpent (der de er uenige, med hvem som mener hva), ' +
+    'så det bare ett svar fikk med og som bør sjekkes. Som en notis brukeren kan rette og låse: høyst 200 ord, ingen innledning, ingen overskrifter. Bruk plassholdere som [Person A] uendret.'
+  const sendes = `${SYSTEM}\n\n${byggMelding(oppgave, kontekst)}`
+  const tokensCa = anslåTokens(sendes, v.m.id)
+  på('vurderer', { steg: 'konklusjon', mottaker: v.m.id, modell: v.modell, tokens: { ca: tokensCa } })
+  const r = await v.m.send({ system: SYSTEM, melding: oppgave, kontekst, oppgave: 'konklusjon' }, { signal, onDel: (t) => på('konklusjon-del', { tekst: t }) })
+  const tekst = avskjerm(r.tekst, sk.kobling).trim()
+  const tokens = { ca: tokensCa, inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
+  const proj = prosjekt || promptAtom?.project || 'Uten prosjekt'
+  const tittel = tittelAv(spørsmål)
+  const { atom } = upsert(atoms, { key: `konklusjon:${promptId || tittel}`, kind: 'konklusjon', content: tekst, name: `Konklusjon: ${tittel}`.slice(0, 90), project: proj, convo: samtale || promptAtom?.convo || tittel, tags: ['konklusjon', ...(kilder.some((k) => k.vault) ? ['vault'] : [])], source: v.m.label, by: 'regel',
+    derivedFrom: kilder.filter((k) => k.id).map(({ id, version, level }) => ({ id, version, level })),
+    short: `Utkast til konklusjon fra ${v.m.label} (${r.modell}) på «${tittel}», ut fra ${svar.length} svar (${svar.map((s) => s.label || s.mottaker).join(', ')}). Rettes og låses av brukeren.`.slice(0, 300) })
+  setStatus(atom, 'utkast')
   save(atoms)
-  logDelivery({ tool: 'spor', client: klient, mottaker: m.id, endpoint: m.endpoint, modell: r.modell, saker: kilder.map(({ id, version, level }) => ({ id, version, level })),
-    skjermet: { ...sk.antall }, ord: ord(sendes), tokens, prompt: promptAtom.id, svar: svarAtom.id, ...(prosjekt ? { context: prosjekt } : {}) })
-  const ferdig = { svar: svarAtom.id, prompt: promptAtom.id, mottaker: m.id, modell: r.modell, tokens, tekst: svarTekst }
-  på('ferdig', ferdig)
-  return ferdig
+  logDelivery({ tool: 'konklusjon', client: klient, mottaker: v.m.id, endpoint: v.m.endpoint, modell: r.modell, saker: kilder.filter((k) => k.id).map(({ id, version, level }) => ({ id, version, level })),
+    skjermet: { ...sk.antall }, ord: ord(sendes), tokens, prompt: promptId || null, konklusjon: atom.id, ...(prosjekt ? { context: prosjekt } : {}) })
+  return { tilgjengelig: true, id: atom.id, tekst, status: 'utkast', version: atom.version || 1, mottaker: v.m.id, modell: r.modell, tokens, nivå, prompt: promptId || null, svar: svar.map((s) => s.id).filter(Boolean) }
+}
+// Brukerens rettelse av utkastet: ny versjon av samme konklusjon-sak (forrige bevares i .tua/versions), ingen modell, ingenting sendes. Status urørt — låsing er /api/status.
+export function rettKonklusjon({ id, tekst }) {
+  if (!id || !String(tekst || '').trim()) throw new MotorFeil('id og tekst kreves')
+  const atoms = load()
+  const a = atoms.find((x) => x.id === id)
+  if (!a) throw new MotorFeil(`fant ikke sak ${id}`)
+  if (a.kind !== 'konklusjon') throw new MotorFeil(`«${a.name}» er ikke en konklusjon`)
+  if (!a.key) a.key = `konklusjon:${a.derivedFrom?.[0]?.id || a.id}`
+  const { atom, status } = upsert(atoms, { key: a.key, kind: 'konklusjon', content: String(tekst), name: a.name, project: a.project, convo: a.convo, tags: a.tags, source: a.source, derivedFrom: a.derivedFrom })
+  if (status !== 'uendret') save(atoms)
+  return { id: atom.id, tekst: atom.content, status: statusOf(atom), version: atom.version || 1, endret: status }
+}
+// Svar-sakene en prompt ga, slik «kjør igjen» trenger dem (POST /api/konklusjon uten tekst): id, mottaker (fra taggen), label (kilden), teksten.
+export function svarFor(atoms, promptId, ids = null) {
+  const p = atoms.find((a) => a.id === promptId)
+  const ønsket = Array.isArray(ids) && ids.length ? ids : (p?.ga || []).map((g) => g.id)
+  const kjente = new Set(lagMottakere().map((m) => m.id))
+  return ønsket.map((id) => atoms.find((a) => a.id === id)).filter((a) => a && a.kind === 'svar')
+    .map((a) => ({ id: a.id, version: a.version || 1, mottaker: (a.tags || []).find((t) => kjente.has(t)) || a.source, label: a.source, modell: null, tekst: a.content }))
 }

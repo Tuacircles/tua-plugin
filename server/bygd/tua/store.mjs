@@ -208,10 +208,12 @@ function linksFor(a) {
 // En leveranse er et atom (kind 'leveranse') bygget av andre atomer: derivedFrom fryser
 // hvilken versjon av hvert kildeatom som ble lest, på hvilket nivå. Filene (html/pdf/artifact)
 // er gjengivelser (renders) av markdown-kilden — atomet er sannheten, fila kan være utdatert.
-const KINDS = ['capture', 'leveranse', 'samtale', 'minne', 'prompt', 'svar'];   // samtale (M14): importert samtale/økt · minne (M14): Claudes eget minne om brukeren, fra eksporten
+const KINDS = ['capture', 'leveranse', 'samtale', 'minne', 'prompt', 'svar', 'konklusjon'];   // samtale (M14): importert samtale/økt · minne (M14): Claudes eget minne om brukeren, fra eksporten
 // prompt (M20a/V16): spørsmålet brukeren stilte, eget atom, gjenbrukbart på tvers av modeller · svar (M20a): det en mottaker (modell) svarte,
 // bygget_av peker til prompten og kildene som ble sendt. Ikke «leveranse»: en leveranse settes sammen av arkivet selv (compose), et svar kommer
 // utenfra, fra én mottaker, og skal kunne stilles ved siden av andre svar (Forskjeller, M20b) før en konklusjon låses.
+// konklusjon (M20b, skive 6, V21): det brukeren til slutt står for når flere har svart — skrevet som utkast av standardmodellen (lokal først),
+// rettet og låst av brukeren; bygget_av peker til spørsmålet og alle svar-sakene. Prompt-saken får `ga` = [{id, version}] med alle svarene den ga (V16).
 const normalizeDerived = (list) => (Array.isArray(list) ? list : [])
   .filter((d) => d && d.id).map((d) => ({ id: String(d.id), version: Number(d.version) || 1, level: LEVELS.includes(d.level) ? d.level : 'L' }));
 const normalizeRenders = (list) => (Array.isArray(list) ? list : [])
