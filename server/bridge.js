@@ -56,7 +56,7 @@
 //        event: blokkert  {feil, detaljer, mottaker}  er ÉN mottaker blokkert, sendes ingenting til noen (V21 fail closed) — linja sier hvilken
 //        event: feil      {mottaker, feil}   én mottaker sviktet underveis; de andre fortsetter (uten mottaker: hele sendingen feilet)
 //        event: vurderer  {steg: forskjeller|konklusjon, mottaker, modell}  standardmodellen lokalt tar over (Ollama → Claude)
-//        event: forskjeller {tilgjengelig, enig, uenig, unikt, vurdert_av, modell, tokens | grunn}   bare når mer enn én svarte
+//        event: forskjeller {tilgjengelig, enig, uenig, unikt, sak, vurdert_av, modell, tokens | grunn}   bare når mer enn én svarte; sak = Forskjeller-saken (kind svar, tagg forskjeller)
 //        event: konklusjon-del {tekst} · event: konklusjon {tilgjengelig, id, tekst, status: utkast, mottaker, modell, tokens | grunn}
 //        event: slutt     {prompt, svar: [ids], mottakere}
 //   POST /api/konklusjon {id, tekst}            → brukerens rettelse av utkastet: ny versjon av samme sak, ingenting sendes → { konklusjon }

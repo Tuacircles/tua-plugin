@@ -11,6 +11,8 @@
 // konklusjonen lagres som utkast med riktig bygget_av, rettes som ny versjon (rettKonklusjon) og låses til endelig; og i broen: SSE-rekkefølgen
 // med mottaker-felt (skjermet → del/ferdig per mottaker → vurderer → forskjeller → konklusjon → slutt), blokkert med mottaker, POST /api/konklusjon
 // (rettelse og kjør igjen), POST /api/status på konklusjonen.
+// Tillegg (samme natt): Forskjeller lagres som egen sak (kind svar, tagg forskjeller, bygget_av → svar-sakene, nøkkel forskjeller:<prompt>,
+// Utlevert-linja peker til den, konklusjonen bygger også på den), og Mistral er mottaker (api.mistral.ai, ikke klar uten nøkkel, aldri kalt her).
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
 process.env.TUA_TESTMOTTAKERE = '2'
@@ -47,6 +49,7 @@ ok('testarkiv skrevet', fs.existsSync(path.join(ROOT, 'Testprosjekt')), ROOT)
 {
   const l = await mottakere()
   ok('mottakere: test og test2 finnes (TUA_TESTMOTTAKERE=2), begge aktive, ingen av dem standard', l.some((m) => m.id === 'test' && m.aktiv) && l.some((m) => m.id === 'test2' && m.aktiv && m.test) && !l.some((m) => m.test && m.standard), JSON.stringify(l.map((m) => [m.id, m.aktiv, m.standard])))
+  ok('mottakere: Mistral er mottaker (api.mistral.ai, EU, egen nøkkel) — ikke klar under testprefikset, aldri standard', (() => { const m = l.find((x) => x.id === 'mistral'); return m && m.endpoint === 'api.mistral.ai' && m.nøkkel === 'ikke satt' && m.aktiv === false && !m.standard && m.trust?.region === 'EU' && typeof m.tegnPerToken === 'number' })(), JSON.stringify(l.find((x) => x.id === 'mistral')?.hvorfor))
   const v = await vurderer()
   ok('vurderer: TUA_VURDERER=test gir test-mottakeren som vurderer', v.m?.id === 'test', v.grunn)
 }
@@ -114,12 +117,17 @@ let promptId, svarIds, konkId
   const f = h.find((x) => x[0] === 'forskjeller')[1]
   ok('forskjeller: tilgjengelig, tre lister, punktene peker på mottakere og svar-saker, vurdert av test', f.tilgjengelig && f.enig.length === 1 && f.uenig.length === 1 && f.unikt.length === 1 && f.enig[0].mottakere.join() === 'test,test2' && f.unikt[0].mottakere.join() === 'test2' && f.unikt[0].saker[0] === r.svar[1] && f.vurdert_av === 'test', JSON.stringify(f))
   ok('forskjeller: svar-lista med bokstav per mottaker (til kolonnene i Spør)', f.svar?.length === 2 && f.svar[0].bokstav === 'A' && f.svar[1].bokstav === 'B' && f.svar[1].mottaker === 'test2')
+  // Forskjeller som egen sak (tillegg)
+  const fa = all.find((a) => a.id === f.sak)
+  ok('forskjeller: lagret som sak — kind svar, tagg forskjeller og vurdereren, bygget_av → begge svar-sakene på M, nøkkel forskjeller:<prompt>', fa && fa.kind === 'svar' && fa.tags.includes('forskjeller') && fa.tags.includes('test') && fa.derivedFrom.length === 2 && r.svar.every((id) => fa.derivedFrom.some((d) => d.id === id && d.level === 'M')) && fa.key === `forskjeller:${p.id}` && fa.name.startsWith('Forskjeller:'), JSON.stringify([fa?.name, fa?.tags, fa?.key]))
+  ok('forskjeller-saken: lesbar markdown med Enig/Uenig/Unikt og mottakernavn, i spørsmålets prosjekt og samtale, utkast', /## Enig\n/.test(fa.content) && /## Uenig\n/.test(fa.content) && /## Unikt\n/.test(fa.content) && /\(Test 2/.test(fa.content) && fa.project === p.project && fa.convo === p.convo && statusOf(fa) === 'utkast', fa.content.slice(0, 120))
+  ok('Utlevert: forskjeller-linja peker til Forskjeller-saken', u.some((x) => x.tool === 'forskjeller' && x.forskjeller === fa.id))
   // konklusjon
   const k = h.find((x) => x[0] === 'konklusjon')[1]
   konkId = k.id
   const ka = all.find((a) => a.id === k.id)
   ok('konklusjon: tilgjengelig, sak kind konklusjon med status utkast i fila', k.tilgjengelig && k.status === 'utkast' && ka?.kind === 'konklusjon' && ka.status === 'utkast' && fs.readFileSync(fileOf(ka), 'utf8').includes('status: "utkast"') && fs.readFileSync(fileOf(ka), 'utf8').includes('kind: "konklusjon"'), JSON.stringify(k))
-  ok('konklusjon: bygget_av → prompten og begge svar-sakene (nivå M hos test-vurdereren)', ka.derivedFrom.length === 3 && ka.derivedFrom[0].id === p.id && r.svar.every((id) => ka.derivedFrom.some((d) => d.id === id && d.level === 'M')) && k.nivå === 'M', JSON.stringify(ka.derivedFrom))
+  ok('konklusjon: bygget_av → prompten, begge svar-sakene og Forskjeller-saken (nivå M hos test-vurdereren)', ka.derivedFrom.length === 4 && ka.derivedFrom[0].id === p.id && r.svar.every((id) => ka.derivedFrom.some((d) => d.id === id && d.level === 'M')) && ka.derivedFrom.some((d) => d.id === f.sak) && k.nivå === 'M', JSON.stringify(ka.derivedFrom))
   ok('konklusjon: nøkkel konklusjon:<prompt> så «kjør igjen» gir ny versjon av samme sak', ka.key === `konklusjon:${p.id}` && ka.version === 1)
   ok('konklusjon-del strømmet teksten', h.some((x) => x[0] === 'konklusjon-del') && h.filter((x) => x[0] === 'konklusjon-del').map((x) => x[1].tekst).join('') === k.tekst)
   const slutt = h.at(-1)[1]
@@ -140,6 +148,7 @@ let promptId, svarIds, konkId
   const f = await forskjeller(svar, { melding: 'Hva ble foreslått?', prosjekt: 'Testprosjekt' })
   const k = await konklusjon({ prompt: promptId, svar, forskjeller: f })
   const a2k = load().find((x) => x.id === konkId)
+  ok('kjør igjen: Forskjeller-saken er samme sak i ny versjon (nøkkelen), event har sak', f.sak && load().find((x) => x.id === f.sak)?.version === 2 && load().filter((x) => (x.tags || []).includes('forskjeller')).length === 1, JSON.stringify([f.sak, load().find((x) => x.id === f.sak)?.version]))
   ok('kjør igjen: forskjeller() og konklusjon() direkte → samme konklusjon-sak, versjon 3, utkast igjen, to nye Utlevert-linjer', f.tilgjengelig && k.id === konkId && k.version === 3 && a2k.version === 3 && statusOf(a2k) === 'utkast' && UTLEVERT().length === før + 2, JSON.stringify([k.id, k.version]))
   const én = await forskjeller([svar[0]])
   ok('forskjeller med ett svar → ikke tilgjengelig med grunn (V21: bare når mer enn én har svart)', !én.tilgjengelig && /mer enn én/.test(én.grunn))
@@ -156,7 +165,7 @@ let promptId, svarIds, konkId
   // lås
   const atoms = load(); const ka = atoms.find((x) => x.id === konkId); setStatus(ka, 'endelig'); save(atoms)
   const låst = load().find((x) => x.id === konkId)
-  ok('lås: status endelig i fila, bygget_av urørt', låst.status === 'endelig' && fs.readFileSync(fileOf(låst), 'utf8').includes('status: "endelig"') && låst.derivedFrom.length === 3)
+  ok('lås: status endelig i fila, bygget_av urørt', låst.status === 'endelig' && fs.readFileSync(fileOf(låst), 'utf8').includes('status: "endelig"') && låst.derivedFrom.length === 4)
 }
 
 // ── 6) broen ───────────────────────────────────────────────────────────────
@@ -176,6 +185,7 @@ async function sse(body) {
 }
 try {
   const m = await (await fetch(`http://127.0.0.1:${PORT}/api/mottakere`)).json()
+  ok('GET /api/mottakere: mistral med, ikke klar, aldri en nøkkelverdi', m.mottakere.some((x) => x.id === 'mistral' && x.aktiv === false && x.nøkkel === 'ikke satt') && !/Bearer|sk-/.test(JSON.stringify(m)))
   ok('GET /api/mottakere: test2 med i lista når TUA_TESTMOTTAKERE=2', m.mottakere.some((x) => x.id === 'test2' && x.aktiv))
   const r = await sse({ melding: `Hva foreslo ${PERSON}?`, saker: [{ id: a1.id, nivå: 'M' }], mottakere: ['test', 'test2'], prosjekt: 'Testprosjekt' })
   const navn = r.hendelser.map((h) => h[0])
@@ -184,6 +194,7 @@ try {
   ok('SSE ferdig: to, med mottaker-felt og hver sin svar-id', ferdige.length === 2 && ferdige.map((f) => f.mottaker).sort().join() === 'test,test2' && ferdige[0].svar !== ferdige[1].svar)
   ok('SSE del: alle med mottaker-felt', r.hendelser.filter((h) => h[0] === 'del').every((h) => h[1].mottaker))
   const f = r.hendelser.find((h) => h[0] === 'forskjeller')[1], k = r.hendelser.find((h) => h[0] === 'konklusjon')[1]
+  ok('SSE forskjeller: sak-id til Forskjeller-saken (lenken i Spør)', /^a_/.test(f.sak))
   ok('SSE forskjeller: tre lister; konklusjon: id og utkast', f.tilgjengelig && f.enig.length && f.uenig.length && f.unikt.length && k.tilgjengelig && /^a_/.test(k.id) && k.status === 'utkast', JSON.stringify([f.enig.length, k.id]))
   const enkel = await sse({ melding: 'Hei', saker: [], mottaker: 'test' })
   const en = enkel.hendelser.map((h) => h[0])
@@ -199,7 +210,7 @@ try {
   ok('POST /api/konklusjon {prompt}: kjør igjen → forskjeller + nytt utkast, samme sak, versjon 3', igjen.status === 200 && igjen.json.forskjeller.tilgjengelig && igjen.json.konklusjon.id === k.id && igjen.json.konklusjon.version === 3, JSON.stringify([igjen.status, igjen.json.konklusjon?.version, igjen.json.error]))
   ok('POST /api/konklusjon uten noe → 400, ukjent prompt → 404', (await post('/api/konklusjon', {})).status === 400 && (await post('/api/konklusjon', { prompt: 'a_finnes_ikke' })).status === 404)
   const lås = await post('/api/status', { id: k.id, status: 'endelig' })
-  ok('POST /api/status på konklusjonen: utkast → endelig, bygget_av med prompt og begge svar', lås.status === 200 && lås.json.atom.status === 'endelig' && lås.json.før === 'utkast' && lås.json.atom.derivedFrom.length === 3 && lås.json.atom.kind === 'konklusjon', JSON.stringify(lås.json.atom?.derivedFrom))
+  ok('POST /api/status på konklusjonen: utkast → endelig, bygget_av med prompt, begge svar og Forskjeller-saken', lås.status === 200 && lås.json.atom.status === 'endelig' && lås.json.før === 'utkast' && lås.json.atom.derivedFrom.length === 4 && lås.json.atom.kind === 'konklusjon', JSON.stringify(lås.json.atom?.derivedFrom))
   const at = await (await fetch(`http://127.0.0.1:${PORT}/api/atoms`)).json()
   const pa = at.atoms.find((x) => x.id === ferdige[0].prompt)
   ok('GET /api/atoms: prompt-saken har `ga` med begge svarene, konklusjonen har status', pa?.ga?.length === 2 && at.atoms.find((x) => x.id === k.id)?.status === 'endelig', JSON.stringify(pa?.ga))

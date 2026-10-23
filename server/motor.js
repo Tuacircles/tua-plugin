@@ -60,7 +60,8 @@ export class MotorFeil extends Error { constructor(msg) { super(msg); this.name 
 // Faktoren er per mottaker, målt 23.10.2026 på samme norske tekst: gemma3:4b (Ollama) ≈ 3,5 tegn per token (788 eksakt mot 826 anslått),
 // Claude Opus 5.5 ≈ 1,9 (1 645 eksakt mot 826 anslått med 3,5) — Claudes tokenizer deler norsk finere. Ukjent mottaker: 3,5.
 export const ord = (t) => (String(t || '').match(/\S+/g) || []).length
-export const TEGN_PER_TOKEN = { claude: 1.9, ollama: 3.5, test: 3.5, test2: 3.5 }
+// Mistral: 3,0 er et anslag (ikke målt ennå — rettes etter første ekte sending; eksakt usage kommer tilbake i Utlevert).
+export const TEGN_PER_TOKEN = { claude: 1.9, ollama: 3.5, mistral: 3.0, test: 3.5, test2: 3.5 }
 export const anslåTokens = (t, mottaker) => Math.round(String(t || '').length / (TEGN_PER_TOKEN[mottaker] || 3.5))
 
 // ── 1) Skjerming ────────────────────────────────────────────────────────────
@@ -300,6 +301,40 @@ async function sendOllama({ system, melding, kontekst, json }, { onDel = () => {
   return { tekst, modell: model, usage, stopp: 'end_turn' }
 }
 
+// Mistral (skive 6-tillegg, arbeidsstykke 30: «første skymodell å prøve for europeiske forretningsdata» — api.mistral.ai, EU). Egen nøkkel fra
+// Keychain (tua-ai-mistral), lest i kallet og glemt etterpå. Chat completions strømmet som SSE («data: {…}», «data: [DONE]»); siste bit har
+// usage. json → response_format json_object + JSON_KRAV i systemet. Modell: TUA_MISTRAL_MODELL eller mistral-large-latest. Aldri kalt i tester
+// (nøkkelen finnes ikke under testprefikset).
+export const MISTRAL_MODELL = process.env.TUA_MISTRAL_MODELL || 'mistral-large-latest'
+async function sendMistral({ system, melding, kontekst, json }, { onDel = () => {}, signal } = {}) {
+  let nøkkel = readKey('mistral')
+  if (!nøkkel) throw new MotorFeil('Ingen API-nøkkel for Mistral i Keychain. Legg den inn under Innstillinger › AI-mottakere (console.mistral.ai › API keys).')
+  const r = await fetch('https://api.mistral.ai/v1/chat/completions', {
+    method: 'POST', signal, headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${nøkkel}` },
+    body: JSON.stringify({ model: MISTRAL_MODELL, stream: true, ...(json ? { response_format: { type: 'json_object' } } : {}),
+      messages: [{ role: 'system', content: json ? system + JSON_KRAV : system }, { role: 'user', content: byggMelding(melding, kontekst) }] }),
+  })
+  nøkkel = null
+  if (!r.ok || !r.body) { const t = await r.text().catch(() => ''); throw new MotorFeil(`Mistral svarte ${r.status}${t ? `: ${t.slice(0, 200)}` : ''}`) }
+  let tekst = '', rest = '', modell = MISTRAL_MODELL, stopp = 'end_turn', usage = { input_tokens: null, output_tokens: null }
+  const dec = new TextDecoder()
+  for await (const chunk of r.body) {
+    rest += dec.decode(chunk, { stream: true })
+    const linjer = rest.split('\n'); rest = linjer.pop()
+    for (const l of linjer) {
+      const d = l.startsWith('data:') ? l.slice(5).trim() : ''
+      if (!d || d === '[DONE]') continue
+      let j; try { j = JSON.parse(d) } catch { continue }
+      const bit = j.choices?.[0]?.delta?.content
+      if (typeof bit === 'string' && bit) { tekst += bit; onDel(bit) }
+      if (j.choices?.[0]?.finish_reason) stopp = j.choices[0].finish_reason
+      if (j.model) modell = j.model
+      if (j.usage) usage = { input_tokens: j.usage.prompt_tokens ?? null, output_tokens: j.usage.completion_tokens ?? null }
+    }
+  }
+  return { tekst, modell, usage, stopp }
+}
+
 // Test-mottakerne: ekkoer det som ville blitt sendt, i biter, uten å sende noe ut av maskinen. Trust 3 → S og M går, L blokkeres (fail closed kan prøves).
 // Som vurderer (TUA_VURDERER=test) svarer «test» med faste, tolkbare forskjeller (JSON over bokstavene A, B … i konteksten) og en fast konklusjon.
 // «test2» (bare med TUA_TESTMOTTAKERE=2, til testene) ekkoer ANNERLEDES enn «test» — overskriftene i konteksten og et tilleggspunkt — så to
@@ -339,6 +374,9 @@ function lagMottakere() {
       status: async () => (hasKey('claude') ? { klar: true } : { klar: false, hvorfor: 'ingen API-nøkkel i Keychain (Innstillinger › AI-mottakere)' }), send: sendClaude },
     { id: 'ollama', label: 'Ollama (lokal)', endpoint: '127.0.0.1:11434', modell: process.env.TUA_OLLAMA_MODELL || null, trust: ts.ollama || null, local: true,
       status: async () => { const s = await ollamaStatus(); return s.running && s.models.length ? { klar: true, modeller: s.models } : { klar: false, hvorfor: s.running ? 'Ollama kjører, men har ingen modell' : 'Ollama kjører ikke' } }, send: sendOllama },
+    // Mistral (skive 6-tillegg): første ekstra skymodell. Raden blir av seg selv en rad i Innstillinger › AI-mottakere og en avkryssing i Spør.
+    { id: 'mistral', label: 'Mistral', endpoint: 'api.mistral.ai', modell: MISTRAL_MODELL, trust: ts.mistral || null, nøkkel: true,
+      status: async () => (hasKey('mistral') ? { klar: true } : { klar: false, hvorfor: 'ingen API-nøkkel i Keychain (Innstillinger › AI-mottakere)' }), send: sendMistral },
     { id: 'test', label: 'Test (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test', 'Tua selv: ekko-mottakeren i motor.js. Score 3 er satt lavt med vilje så fail closed kan prøves (L blokkeres).'), test: true,
       status: async () => ({ klar: true }), send: sendTest },
   ]
@@ -369,7 +407,7 @@ const svarKilde = (atoms, s, nivå) => { const a = s.id ? atoms.find((x) => x.id
 export async function vurderer() {
   const alle = lagMottakere()
   const ønsket = process.env.TUA_VURDERER
-  const rekke = ønsket ? alle.filter((m) => m.id === ønsket) : [alle.find((m) => m.id === 'ollama'), alle.find((m) => m.id === 'claude')]
+  const rekke = ønsket ? alle.filter((m) => m.id === ønsket) : [alle.find((m) => m.id === 'ollama'), alle.find((m) => m.id === 'claude'), alle.find((m) => m.id === 'mistral')]   // lokal først (V18), så egne nøkler
   const grunner = []
   for (const m of rekke.filter(Boolean)) { const st = await m.status(); if (st.klar) return { m, modell: st.modeller?.[0] || m.modell }; grunner.push(`${m.label}: ${st.hvorfor}`) }
   return { m: null, grunn: `Ingen modell kan vurdere svarene${grunner.length ? ` — ${grunner.join('; ')}` : ønsket ? ` — ukjent vurderer «${ønsket}»` : ''}. Start Ollama, eller legg inn en Claude-nøkkel under Innstillinger › AI-mottakere.` }
@@ -488,11 +526,30 @@ export async function forskjeller(svar, { melding = '', prosjekt, klient = 'app'
   for (const k of ['enig', 'uenig', 'unikt']) tolket[k] = tolket[k].map((p) => ({ ...p, tekst: avskjerm(p.tekst, sk.kobling) }))
   if (tolket.rå) tolket.rå = avskjerm(tolket.rå, sk.kobling)
   const tokens = { ca: tokensCa, inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
+  // Forskjeller lagres som egen sak (skive 6-tillegg; plan §3 regel 4: svarene er saker — vurderingen av dem er det også): kind svar med taggen
+  // forskjeller, bygget_av → svar-sakene på nivået de ble lest, nøkkel forskjeller:<prompt> så «kjør igjen» gir ny versjon av samme sak. Da står
+  // den i Oppslag (stikktittel FORSKJELLER) og Utlevert-linja peker til den. Innholdet er de tre listene som lesbar markdown (originalene satt inn igjen lokalt).
+  const svarAtomer = kilder.map((k) => (k.id ? atoms.find((x) => x.id === k.id) : null))
+  const promptAtom = svarAtomer.map((a) => a && atoms.find((x) => x.kind === 'prompt' && (a.derivedFrom || []).some((d) => d.id === x.id))).find(Boolean) || null
+  const tittel = tittelAv(melding || promptAtom?.content || svarAtomer.find(Boolean)?.name || 'Forskjeller')
+  const navnFor = (id) => svar.find((s) => s.mottaker === id)?.label || id
+  const { atom: fAtom } = upsert(atoms, { key: `forskjeller:${promptAtom?.id || tittel}`, kind: 'svar', content: forskjellerTilMarkdown(tolket, navnFor), name: `Forskjeller: ${tittel}`.slice(0, 90),
+    project: prosjekt || promptAtom?.project || svarAtomer.find(Boolean)?.project || 'Uten prosjekt', convo: promptAtom?.convo || svarAtomer.find(Boolean)?.convo || tittel,
+    tags: ['svar', 'forskjeller', v.m.id, ...(kilder.some((k) => k.vault) ? ['vault'] : [])], source: v.m.label, by: 'regel',
+    derivedFrom: kilder.filter((k) => k.id).map(({ id, version, level }) => ({ id, version, level })),
+    short: `Forskjeller mellom ${svar.length} svar på «${tittel}», vurdert av ${v.m.label} (${r.modell}): ${tolket.enig.length} enig · ${tolket.uenig.length} uenig · ${tolket.unikt.length} unikt.`.slice(0, 300) })
+  save(atoms)
   logDelivery({ tool: 'forskjeller', client: klient, mottaker: v.m.id, endpoint: v.m.endpoint, modell: r.modell, saker: kilder.filter((k) => k.id).map(({ id, version, level }) => ({ id, version, level })),
-    skjermet: { ...sk.antall }, ord: ord(sendes), tokens, ...(prosjekt ? { context: prosjekt } : {}) })
-  return { tilgjengelig: true, ...tolket, vurdert_av: v.m.id, modell: r.modell, tokens, nivå, svar: svar.map((s, i) => ({ bokstav: bokstaver[i], id: s.id || null, mottaker: s.mottaker, label: s.label || s.mottaker })) }
+    skjermet: { ...sk.antall }, ord: ord(sendes), tokens, forskjeller: fAtom.id, ...(prosjekt ? { context: prosjekt } : {}) })
+  return { tilgjengelig: true, ...tolket, sak: fAtom.id, vurdert_av: v.m.id, modell: r.modell, tokens, nivå, svar: svar.map((s, i) => ({ bokstav: bokstaver[i], id: s.id || null, mottaker: s.mottaker, label: s.label || s.mottaker })) }
 }
 // Finn ett JSON-objekt i en modelltekst: kodeblokk først, så første «{» til siste «}», med reparasjon av hengende komma og typografiske anførselstegn.
+// De tre listene som markdown til Forskjeller-saken. navnFor(mottaker-id) → mottakerens navn.
+export function forskjellerTilMarkdown(f, navnFor = (id) => id) {
+  if (f.tolket === 'ingen') return `## Forskjeller (ustrukturert)\n\n${f.merk || ''}\n\n${f.rå || ''}`.trim()
+  const del = (tittel, liste) => `## ${tittel}\n\n${liste.length ? liste.map((p) => `- ${p.tekst}${p.mottakere?.length ? ` (${p.mottakere.map(navnFor).join(', ')})` : ''}`).join('\n') : '_ingen_'}`
+  return [del('Enig', f.enig), del('Uenig', f.uenig), del('Unikt', f.unikt)].join('\n\n')
+}
 function plukkJson(t) {
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i)
   for (const k of [fence?.[1], t]) {
@@ -572,9 +629,11 @@ export async function konklusjon({ prompt: promptId, svar, forskjeller: f = null
   const bokstaver = svar.map((_, i) => bokstav(i))
   const nivå = maksNivå(v.m)
   const svarKilder = svar.map((s) => svarKilde(atoms, s, nivå))
+  const fAtom = f?.sak ? atoms.find((a) => a.id === f.sak) || null : null       // Forskjeller-saken (skive 6-tillegg): konklusjonen bygger også på den
   const kilder = [
     ...(promptAtom ? [{ id: promptAtom.id, name: promptAtom.name, version: promptAtom.version || 1, level: nivå, vault: isVault(promptAtom) }] : []),
     ...svarKilder,
+    ...(fAtom ? [{ id: fAtom.id, name: fAtom.name, version: fAtom.version || 1, level: nivå, vault: isVault(fAtom), tekst: '' }] : []),
   ]
   try { sjekkTillatt(v.m, kilder) } catch (e) { if (e instanceof Blokkert) return { tilgjengelig: false, grunn: `Konklusjon hos ${v.m.label} er stoppet: ${e.message}`, vurdert_av: v.m.id }; throw e }
   const sk = lagSkjermer(kjentePersoner(atoms))
