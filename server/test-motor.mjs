@@ -105,6 +105,11 @@ ok('gyldigFødselsnummer: ugyldig kontrollsiffer', !gyldigFødselsnummer(fnrUgyl
 
 // ── 3) fail closed ─────────────────────────────────────────────────────────
 const TEST = (await mottakere()).find((m) => m.id === 'test')
+{
+  const l = await mottakere()
+  const std = l.filter((m) => m.standard)
+  ok('mottakere: standard etter V18 — Ollama når den er aktiv, ellers Claude med nøkkel, aldri test', std.length <= 1 && !std.some((m) => m.test) && (l.find((m) => m.id === 'ollama').aktiv ? std[0]?.id === 'ollama' : std.length === 0), JSON.stringify(std.map((m) => m.id)))
+}
 ok('mottakere: test (trust 3), claude (ikke satt), ollama', TEST && TEST.trust.score === 3 && (await mottakere()).some((m) => m.id === 'claude' && m.nøkkel === 'ikke satt'), JSON.stringify((await mottakere()).map((m) => [m.id, m.aktiv, m.nøkkel])))
 {
   const all = load()

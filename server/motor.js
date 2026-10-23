@@ -295,13 +295,17 @@ function lagMottakere() {
   ]
 }
 // Lista til appen (GET /api/mottakere): uten send(), med status. Nøkkel: satt/ikke satt — aldri verdien.
+// standard (V18): lokal modell først når den finnes, ellers Claude når nøkkelen finnes, ellers ingen (test er aldri standard).
 export async function mottakere() {
-  return Promise.all(lagMottakere().map(async (m) => {
+  const liste = await Promise.all(lagMottakere().map(async (m) => {
     const st = await m.status()
     return { id: m.id, label: m.label, endpoint: m.endpoint, modell: st.modeller?.[0] || m.modell, trust: m.trust, local: !!m.local, test: !!m.test,
       ...(m.nøkkel ? { nøkkel: hasKey(m.id) ? 'satt' : 'ikke satt' } : {}), aktiv: st.klar, ...(st.hvorfor ? { hvorfor: st.hvorfor } : {}) }
   }))
+  const std = liste.find((m) => m.local && m.aktiv) || liste.find((m) => m.id === 'claude' && m.aktiv)
+  return liste.map((m) => ({ ...m, standard: !!std && m.id === std.id }))
 }
+export const standardMottaker = async () => (await mottakere()).find((m) => m.standard)?.id || null
 
 // ── 4) spor(): hele løpet, ingen vei utenom ────────────────────────────────
 // på(hendelse, data) får: skjermet {antall, treff, tokens:{ca}, ord, tekst (det som sendes), saker, notater} · del {tekst} · ferdig {svar, prompt, tokens, tekst}.
