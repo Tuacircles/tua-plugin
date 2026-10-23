@@ -90,6 +90,7 @@ ok('gyldigFødselsnummer: ugyldig kontrollsiffer', !gyldigFødselsnummer(fnrUgyl
 {
   const sk = lagSkjermer([])
   const a = sk.skjerm('Kari Nordmann skrev dette.'), b = sk.skjerm('Svar til Kari Nordmann og Per Hansen.')
+  ok('anslåTokens: faktor per mottaker (Claude deler norsk finere enn gemma)', anslåTokens('x'.repeat(1900), 'claude') === 1000 && anslåTokens('x'.repeat(3500), 'ollama') === 1000 && anslåTokens('x'.repeat(3500)) === 1000)
   ok('lagSkjermer: samme person → samme plassholder på tvers av melding og kontekst', a.includes('[Person A]') && b.includes('[Person A]') && b.includes('[Person B]'), b)
 }
 
