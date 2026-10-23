@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+// test-motor.mjs — motoren (M20a, skive 1) mot et testarkiv i scratch. ALDRI mot ~/Dropbox/Tua, ALDRI et ekte kall til en modell.
+//
+//   TUA_FILES_ROOT=/tmp/tua-test/arkiv TUA_DATA_DIR=/tmp/tua-test/data node server/test-motor.mjs
+//
+// Sjekker: skjerming (fødselsnummer gyldig/ugyldig, e-post, telefon, org.nr bare i formatet, adresse, beløp, navn fra arkivlista,
+// stoppliste), fail closed (Vault-tagg, Trust under terskel), Utlevert-linje uten originaler, prompt- og svar-sak med bygget_av,
+// og SSE-rekkefølgen i broen (skjermet → del… → ferdig, og blokkert) med mottaker «test» som ekkoer.
+// Keychain-prefikset settes til et navn som ikke finnes, så Claude-mottakeren er aldri «klar» her — uansett hva som ligger i Keychain.
+process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
+process.env.TUA_BRIDGE_VAKTER = '0'
+
+import fs from 'node:fs'
+import path from 'node:path'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const ROOT = process.env.TUA_FILES_ROOT, DATA = process.env.TUA_DATA_DIR
+if (!ROOT || !DATA || ROOT.includes('Dropbox') || ROOT.includes('iCloud')) { console.error('Sett TUA_FILES_ROOT og TUA_DATA_DIR til en tom testmappe først (aldri det ekte arkivet).'); process.exit(2) }
+fs.rmSync(ROOT, { recursive: true, force: true }); fs.rmSync(DATA, { recursive: true, force: true })
+fs.mkdirSync(ROOT, { recursive: true }); fs.mkdirSync(DATA, { recursive: true })
+
+const { load, save, upsert, deliveries, fileOf } = await import('./store.js')
+const { skjerm, lagSkjermer, avskjerm, gyldigFødselsnummer, kjentePersoner, minimer, sjekkTillatt, spor, mottakere, Blokkert, MotorFeil, anslåTokens } = await import('./motor.js')
+
+let feil = 0
+const ok = (navn, cond, info = '') => { console.log(`${cond ? '✓' : '✗'} ${navn}${info ? ` — ${info}` : ''}`); if (!cond) feil++ }
+
+// ── testarkiv: fire saker ──────────────────────────────────────────────────
+const atoms = []
+const PERSON = 'Xenia Fjeldstad'                       // fornavn som IKKE står i fornavn-lista → må komme fra arkivets kjent-liste
+const EPOST = 'xenia.fjeldstad@example.no'
+const a1 = upsert(atoms, { content: `# Møtenotat\n\n${PERSON} (${EPOST}) foreslo å flytte lageret til Industriveien 4, 2000 Lillestrøm. Budsjett 45 000 kr. ` + 'Lang tekst. '.repeat(300), name: 'Møtenotat lager', project: 'Testprosjekt', convo: `Møte med ${PERSON}`, short: `Flytte lageret til ny adresse; ${PERSON} foreslo det.`, by: 'menneske', tags: ['lager'] }).atom
+const a2 = upsert(atoms, { content: 'Hemmelig avtale: betingelsene i Vault-saken.', name: 'Vault-sak', project: 'Testprosjekt', short: 'En Vault-merket sak.', by: 'menneske', tags: ['vault'] }).atom
+const a3 = upsert(atoms, { content: 'Kort sak uten personopplysninger om lagerdrift.', name: 'Kort sak', project: 'Testprosjekt', by: 'menneske' }).atom
+const a4 = upsert(atoms, { content: 'Sak i et annet prosjekt, synlig på S for Testprosjekt.', name: 'Annen sak', project: 'Annet', short: 'Ingressen til annen sak.', by: 'menneske' }).atom
+a4.refs = ['Testprosjekt']; a4.share = { Testprosjekt: 'S' }
+save(atoms)
+ok('testarkiv skrevet', fs.existsSync(path.join(ROOT, 'Testprosjekt')), ROOT)
+
+// ── 1) skjerming ───────────────────────────────────────────────────────────
+// Fødselsnummer: kontrollsifrene regnes ut av testen selv fra en base som ikke kan være en dato (99.99.99) — aldri et ekte nummer.
+const V1 = [3, 7, 6, 1, 8, 9, 4, 5, 2], V2 = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
+const k = (d, v) => { const s = d.reduce((a, x, i) => a + x * v[i], 0); const r = 11 - (s % 11); return r === 11 ? 0 : r }
+let fnr = null
+for (let i = 100; i < 999 && !fnr; i++) { const d = ('999999' + i).split('').map(Number); const k1 = k(d, V1); if (k1 === 10) continue; const k2 = k([...d, k1], V2); if (k2 === 10) continue; fnr = d.join('') + k1 + k2 }
+const fnrUgyldig = fnr.slice(0, 10) + ((Number(fnr[10]) + 1) % 10)
+ok('gyldigFødselsnummer: gyldig', gyldigFødselsnummer(fnr))
+ok('gyldigFødselsnummer: ugyldig kontrollsiffer', !gyldigFødselsnummer(fnrUgyldig))
+{
+  const r = skjerm(`Fnr ${fnr} er gyldig, ${fnrUgyldig} er det ikke.`)
+  ok('skjerm: gyldig fødselsnummer → [Fødselsnummer 1]', r.tekst.includes('[Fødselsnummer 1]') && !r.tekst.includes(fnr), r.tekst)
+  ok('skjerm: ugyldig fødselsnummer slipper gjennom (ikke en opplysning)', r.tekst.includes(fnrUgyldig))
+}
+{
+  const r = skjerm('Skriv til kari.nordmann@example.no eller ring 912 34 567, +47 22 12 34 56 eller 98765432. Ikke 20261023.')
+  ok('skjerm: e-post', r.antall.epost === 1 && !r.tekst.includes('@'), r.tekst)
+  ok('skjerm: telefon (tre formater)', r.antall.telefon === 3, JSON.stringify(r.antall))
+  ok('skjerm: dato-liknende 8 siffer beholdes', r.tekst.includes('20261023'))
+}
+{
+  const r = skjerm('Org.nr 923 456 789 og NO 987 654 321 MVA er organisasjonsnummer; 123456789 og 555 666 777 er bare tall.')
+  ok('skjerm: org.nr bare i formatet (2 av 4 ni-sifrede)', r.antall.orgnr === 2 && r.tekst.includes('123456789') && r.tekst.includes('555 666 777'), r.tekst)
+  ok('skjerm: ordet «Org.nr» står igjen, tallet er borte', /Org\.nr \[Org\.nr 1\]/.test(r.tekst) && /NO \[Org\.nr 2\] MVA/.test(r.tekst), r.tekst)
+}
+{
+  const r = skjerm('Bor i Storgata 12, 0184 Oslo og jobber i Karl Johans gate 22. Regningen var kr 12 500,00, pluss 6 000 kr og NOK 300. Året 2024.')
+  ok('skjerm: adresser', r.antall.adresse === 2 && !r.tekst.includes('Storgata'), r.tekst)
+  ok('skjerm: beløp (tre former)', r.antall.beløp === 3 && r.tekst.includes('2024'), r.tekst)
+}
+{
+  const r = skjerm('Marius Holt og Kari Nordmann møttes hos Tua Circles. Kari sa ja. Claude Code brukes av Erik Teigen.')
+  ok('skjerm: navn fra fornavn-regelen, stabil plassholder for «Kari» alene', r.tekst.includes('[Person A]') && r.tekst.includes('[Person B]') && /\[Person B\] sa ja/.test(r.tekst), r.tekst)
+  ok('skjerm: stoppliste — «Tua Circles» og «Claude Code» står igjen', r.tekst.includes('Tua Circles') && r.tekst.includes('Claude Code'))
+  ok('skjerm: koblingen har originalene, bare hos kalleren', r.kobling['[Person B]'] === 'Kari Nordmann' && Object.keys(r.kobling).length === 3, JSON.stringify(Object.keys(r.kobling)))
+  ok('avskjerm setter originalene inn igjen', avskjerm('Svar til [Person B] og [Person A].', r.kobling) === 'Svar til Kari Nordmann og Marius Holt.')
+}
+{
+  const uten = skjerm(`${PERSON} skrev notatet.`)
+  ok('skjerm uten liste: ukjent fornavn slipper gjennom', uten.antall.navn == null, uten.tekst)
+  const liste = kjentePersoner(load())
+  ok('kjentePersoner: bygget av arkivets titler/samtale', liste.includes(PERSON), JSON.stringify(liste))
+  ok('kjentePersoner: lagret lokalt i .tua/kjente-personer.json', fs.existsSync(path.join(ROOT, '.tua', 'kjente-personer.json')))
+  const med = skjerm(`${PERSON} skrev notatet; Fjeldstad signerte.`, { kjente: liste })
+  ok('skjerm med liste: navnet og etternavnet alene → samme [Person A]', med.tekst === '[Person A] skrev notatet; [Person A] signerte.', med.tekst)
+  const vokst = kjentePersoner([], { lær: ['Ola Testmann'] })
+  ok('kjentePersoner: vokser av bruk', vokst.includes('Ola Testmann') && vokst.includes(PERSON))
+}
+{
+  const sk = lagSkjermer([])
+  const a = sk.skjerm('Kari Nordmann skrev dette.'), b = sk.skjerm('Svar til Kari Nordmann og Per Hansen.')
+  ok('lagSkjermer: samme person → samme plassholder på tvers av melding og kontekst', a.includes('[Person A]') && b.includes('[Person A]') && b.includes('[Person B]'), b)
+}
+
+// ── 2) minimering ──────────────────────────────────────────────────────────
+{
+  const all = load()
+  const r = minimer(all, [{ id: a1.id, nivå: 'S' }, { id: a1.id, nivå: 'L' }, { id: a4.id, nivå: 'L' }, { id: 'finnes-ikke', nivå: 'M' }], { prosjekt: 'Testprosjekt' })
+  ok('minimer: S gir ingressen, L gir alt', r.kilder[0].level === 'S' && r.kilder[0].tegn < 200 && r.kilder[1].level === 'L' && r.kilder[1].tegn > 3000, JSON.stringify(r.kilder.map((x) => [x.level, x.tegn])))
+  ok('minimer: nivået klampes til det prosjektet får se (V11)', r.kilder[2].level === 'S' && r.kilder[2].ønsket === 'L' && r.notater.some((n) => n.includes('ser bare S')), r.notater.join(' | '))
+  ok('minimer: ukjent sak noteres, stopper ikke', r.notater.some((n) => n.includes('fant ikke')) && r.kilder.length === 3)
+  ok('minimer: konteksten har tittel, versjon og nivå — ikke prosjektnavn', r.kontekst.includes('## Møtenotat lager') && r.kontekst.includes('nivå S') && !r.kontekst.includes('Testprosjekt'))
+}
+
+// ── 3) fail closed ─────────────────────────────────────────────────────────
+const TEST = (await mottakere()).find((m) => m.id === 'test')
+ok('mottakere: test (trust 3), claude (ikke satt), ollama', TEST && TEST.trust.score === 3 && (await mottakere()).some((m) => m.id === 'claude' && m.nøkkel === 'ikke satt'), JSON.stringify((await mottakere()).map((m) => [m.id, m.aktiv, m.nøkkel])))
+{
+  const all = load()
+  const vault = minimer(all, [{ id: a2.id, nivå: 'M' }]).kilder
+  let e = null; try { sjekkTillatt({ ...TEST, label: 'Test' }, vault) } catch (x) { e = x }
+  ok('fail closed: Vault-tagg på M → Blokkert med hva som må endres', e instanceof Blokkert && /Vault-merket/.test(e.message) && /Sett nivået til S/.test(e.message), e?.message)
+  e = null; try { sjekkTillatt({ ...TEST, label: 'Test', local: true }, vault) } catch (x) { e = x }
+  ok('fail closed: Vault på M til lokal modell er lov', e === null)
+  const L = minimer(all, [{ id: a3.id, nivå: 'L' }]).kilder
+  e = null; try { sjekkTillatt({ ...TEST, label: 'Test' }, L) } catch (x) { e = x }
+  ok('fail closed: L til Trust 3 → Blokkert (krever 4)', e instanceof Blokkert && /krever minst 4/.test(e.message) && /Sett «Kort sak» til M/.test(e.message), e?.message)
+  e = null; try { await spor({ melding: 'Hva står her?', saker: [{ id: a3.id, nivå: 'L' }], mottaker: 'test', prosjekt: 'Testprosjekt' }) } catch (x) { e = x }
+  ok('spor: blokkeres FØR noe sendes eller lagres', e instanceof Blokkert && !load().some((a) => a.kind === 'prompt'), e?.message)
+  e = null; try { await spor({ melding: 'Hei', saker: [], mottaker: 'claude' }) } catch (x) { e = x }
+  ok('spor: Claude uten nøkkel er ikke klar → MotorFeil, ingen sending', e instanceof MotorFeil && /ikke klar/.test(e.message), e?.message)
+}
+
+// ── 4) hele løpet med test-mottakeren ──────────────────────────────────────
+{
+  const hendelser = []
+  const melding = `Oppsummer hva ${PERSON} foreslo, og hva det koster.`
+  const r = await spor({ melding, saker: [{ id: a1.id, nivå: 'M' }, { id: a3.id, nivå: 'S' }], mottaker: 'test', prosjekt: 'Testprosjekt', samtale: 'Test av motoren', på: (ev, d) => hendelser.push([ev, d]) })
+  const navn = hendelser.map((h) => h[0])
+  ok('spor: rekkefølge skjermet → del… → ferdig', navn[0] === 'skjermet' && navn.at(-1) === 'ferdig' && navn.filter((n) => n === 'del').length >= 3, navn.join(' '))
+  const sk = hendelser[0][1]
+  ok('skjermet: navn, e-post, adresse og beløp er skjermet i det som sendes', sk.antall.navn >= 2 && sk.antall.epost === 1 && sk.antall.adresse === 1 && sk.antall.beløp === 1 && !sk.tekst.includes(PERSON) && !sk.tekst.includes(EPOST), JSON.stringify(sk.antall))
+  ok('skjermet: tokens er et anslag («ca.»), ord telles, nivå per sak', typeof sk.tokens.ca === 'number' && sk.ord > 20 && sk.saker[0].level === 'M' && sk.saker[1].level === 'S', JSON.stringify(sk.tokens))
+  const delTekst = hendelser.filter((h) => h[0] === 'del').map((h) => h[1].tekst).join('')
+  ok('del: bitene er svaret med plassholdere', delTekst.includes('[Person A]') && !delTekst.includes(PERSON))
+  ok('ferdig: svaret har originalene satt inn igjen, eksakt usage fra mottakeren', r.tekst.includes(PERSON) && r.tekst.includes(EPOST) && typeof r.tokens.inn === 'number' && typeof r.tokens.ut === 'number', JSON.stringify(r.tokens))
+  const all = load()
+  const prompt = all.find((a) => a.id === r.prompt), svar = all.find((a) => a.id === r.svar)
+  ok('prompt-sak (kind: prompt, V16) lagret med originalteksten', prompt?.kind === 'prompt' && prompt.content === melding && prompt.project === 'Testprosjekt')
+  ok('svar-sak (kind: svar) med bygget_av → prompten og kildene på riktig nivå', svar?.kind === 'svar' && svar.derivedFrom?.[0]?.id === prompt.id && svar.derivedFrom.some((d) => d.id === a1.id && d.level === 'M') && svar.derivedFrom.some((d) => d.id === a3.id && d.level === 'S'), JSON.stringify(svar?.derivedFrom))
+  ok('svar-sak ligger som fil med kind i frontmatter', fs.readFileSync(fileOf(svar), 'utf8').includes('kind: "svar"'))
+  const linjer = fs.readFileSync(path.join(ROOT, '.tua', 'utlevering.jsonl'), 'utf8').trim().split('\n')
+  const u = JSON.parse(linjer.at(-1))
+  ok('Utlevert: én linje per sending — mottaker, nivå per sak, antall skjermet per type, ord, tokens', u.tool === 'spor' && u.mottaker === 'test' && u.saker.length === 2 && u.saker[0].level === 'M' && u.skjermet.navn >= 2 && typeof u.ord === 'number' && typeof u.tokens.ca === 'number' && typeof u.tokens.inn === 'number' && u.svar === svar.id && u.prompt === prompt.id, linjer.at(-1))
+  ok('Utlevert: ingen originaler, ingen innhold', !linjer.at(-1).includes(PERSON) && !linjer.at(-1).includes(EPOST) && !linjer.at(-1).includes('Industriveien') && !linjer.at(-1).includes('[Person'))
+  ok('deliveries(id) finner sendingen på hver av sakene', deliveries(a1.id).some((e) => e.svar === svar.id) && deliveries(a3.id).some((e) => e.svar === svar.id))
+  ok('kjent-lista vokste av bruk (ingen navn i loggen)', kjentePersoner([]).includes(PERSON))
+}
+
+// ── 5) broen: SSE fra POST /api/spor ──────────────────────────────────────
+const PORT = 5299
+const bro = spawn(process.execPath, [path.join(HERE, 'bridge.js')], { env: { ...process.env, TUA_BRIDGE_PORT: String(PORT), TUA_KART_DIST: path.join(DATA, 'ingen-dist') }, stdio: ['ignore', 'ignore', 'pipe'] })
+let broLogg = ''
+bro.stderr.on('data', (d) => { broLogg += d })
+const vent = async (ms) => new Promise((r) => setTimeout(r, ms))
+for (let i = 0; i < 50 && !broLogg.includes('[tua-bro] kartet'); i++) await vent(100)
+ok('broen startet mot testarkivet', broLogg.includes(ROOT), broLogg.split('\n')[0])
+async function sse(body) {
+  const res = await fetch(`http://127.0.0.1:${PORT}/api/spor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const ut = { status: res.status, type: res.headers.get('content-type'), hendelser: [] }
+  const tekst = await res.text()
+  for (const blokk of tekst.split('\n\n')) { const ev = blokk.match(/^event: (.+)$/m)?.[1], data = blokk.match(/^data: (.+)$/m)?.[1]; if (ev && data) ut.hendelser.push([ev, JSON.parse(data)]) }
+  return ut
+}
+try {
+  const m = await (await fetch(`http://127.0.0.1:${PORT}/api/mottakere`)).json()
+  ok('GET /api/mottakere: liste med Trust Score, nøkkel satt/ikke satt, Ollama aktiv/ikke', m.mottakere.some((x) => x.id === 'claude' && x.nøkkel === 'ikke satt' && x.trust?.score === 4) && m.mottakere.some((x) => x.id === 'ollama' && typeof x.aktiv === 'boolean' && x.local) && m.mottakere.some((x) => x.id === 'test'), JSON.stringify(m.mottakere.map((x) => [x.id, x.aktiv, x.nøkkel])))
+  ok('GET /api/mottakere: aldri en nøkkelverdi', !JSON.stringify(m).includes('sk-ant'))
+  const r = await sse({ melding: `Hva foreslo ${PERSON}?`, saker: [{ id: a1.id, nivå: 'M' }], mottaker: 'test', prosjekt: 'Testprosjekt' })
+  const navn = r.hendelser.map((h) => h[0])
+  ok('POST /api/spor: text/event-stream, rekkefølge skjermet → del… → ferdig', r.status === 200 && /text\/event-stream/.test(r.type) && navn[0] === 'skjermet' && navn.at(-1) === 'ferdig' && navn.includes('del'), `${r.status} ${r.type} ${navn.slice(0, 3).join(' ')}…${navn.at(-1)}`)
+  ok('SSE skjermet: antall per type, tokens ca., «se hva som sendes» uten originaler', r.hendelser[0][1].antall.navn >= 1 && typeof r.hendelser[0][1].tokens.ca === 'number' && !r.hendelser[0][1].tekst.includes(PERSON))
+  ok('SSE ferdig: sak-id for svaret og eksakt usage', /^a_/.test(r.hendelser.at(-1)[1].svar) && typeof r.hendelser.at(-1)[1].tokens.inn === 'number', JSON.stringify(r.hendelser.at(-1)[1].tokens))
+  const b = await sse({ melding: 'Alt om Vault-saken', saker: [{ id: a2.id, nivå: 'L' }], mottaker: 'test' })
+  ok('POST /api/spor: Vault på L → event blokkert, ingen del/ferdig', b.hendelser.length === 1 && b.hendelser[0][0] === 'blokkert' && /Vault-merket/.test(b.hendelser[0][1].feil), JSON.stringify(b.hendelser.map((h) => h[0])))
+  const c = await sse({ melding: 'Hei', saker: [], mottaker: 'claude' })
+  ok('POST /api/spor: Claude uten nøkkel → event feil (ikke klar), ingen sending', c.hendelser.length === 1 && c.hendelser[0][0] === 'feil' && /ikke klar/.test(c.hendelser[0][1].feil), JSON.stringify(c.hendelser))
+  const d = await (await fetch(`http://127.0.0.1:${PORT}/api/spor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ melding: 'x' }) })).json()
+  ok('POST /api/spor uten mottaker → 400', d.error?.includes('mottaker'))
+} finally { bro.kill() }
+
+console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT} · tokens-anslag for denne fila: ca. ${anslåTokens(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8'))}`)
+process.exit(feil ? 1 : 0)

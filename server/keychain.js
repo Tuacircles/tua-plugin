@@ -5,7 +5,7 @@
 // Vi bruker `security` fra Apple, spawnet UTEN shell. Selve nøkkelen går inn på STDIN
 // (`security -i` leser kommandoer fra stdin), ikke som argument — da står den aldri i
 // prosesslista (ps), aldri i en fil, aldri i en logg. Ut av modulen kommer bare «satt / ikke satt».
-// Lesing av nøkkelen (-w) skjer først i M20, når broen faktisk ringer en modell.
+// Lesing av nøkkelen (-w) skjer i M20a (readKey): motoren leser den per kall og holder den ikke lenger enn kallet.
 // TUA_KEYCHAIN_PREFIX overstyrer tjenestenavnet (bare for tester).
 
 import { spawn, spawnSync } from 'node:child_process'
@@ -50,6 +50,16 @@ export function setKey(provider, key) {
 export function deleteKey(provider) {
   if (!onMac() || !isProvider(provider)) return false
   return spawnSync('security', ['delete-generic-password', '-a', ACCOUNT, '-s', service(provider)], { stdio: 'ignore' }).status === 0
+}
+
+// M20a: les nøkkelen — BARE for motoren (motor.js), per kall. Returnerer strengen eller null; logges aldri, holdes aldri i en modul-variabel.
+// `-w` skriver bare hemmeligheten til stdout; stderr kastes. Resultatet skal glemmes så snart kallet mot modellen er ferdig.
+export function readKey(provider) {
+  if (!onMac() || !isProvider(provider)) return null
+  const r = spawnSync('security', ['find-generic-password', '-a', ACCOUNT, '-s', service(provider), '-w'], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' })
+  if (r.status !== 0) return null
+  const k = String(r.stdout || '').trim()
+  return KEY_RE.test(k) ? k : null
 }
 
 // Status for alle leverandører — aldri nøkkelverdier.

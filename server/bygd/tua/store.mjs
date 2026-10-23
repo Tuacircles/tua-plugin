@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-21. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs from 'node:fs';
 import 'node:os';
 import path from 'node:path';
@@ -208,7 +208,10 @@ function linksFor(a) {
 // En leveranse er et atom (kind 'leveranse') bygget av andre atomer: derivedFrom fryser
 // hvilken versjon av hvert kildeatom som ble lest, på hvilket nivå. Filene (html/pdf/artifact)
 // er gjengivelser (renders) av markdown-kilden — atomet er sannheten, fila kan være utdatert.
-const KINDS = ['capture', 'leveranse', 'samtale', 'minne'];   // samtale (M14): importert samtale/økt · minne (M14): Claudes eget minne om brukeren, fra eksporten
+const KINDS = ['capture', 'leveranse', 'samtale', 'minne', 'prompt', 'svar'];   // samtale (M14): importert samtale/økt · minne (M14): Claudes eget minne om brukeren, fra eksporten
+// prompt (M20a/V16): spørsmålet brukeren stilte, eget atom, gjenbrukbart på tvers av modeller · svar (M20a): det en mottaker (modell) svarte,
+// bygget_av peker til prompten og kildene som ble sendt. Ikke «leveranse»: en leveranse settes sammen av arkivet selv (compose), et svar kommer
+// utenfra, fra én mottaker, og skal kunne stilles ved siden av andre svar (Forskjeller, M20b) før en konklusjon låses.
 const normalizeDerived = (list) => (Array.isArray(list) ? list : [])
   .filter((d) => d && d.id).map((d) => ({ id: String(d.id), version: Number(d.version) || 1, level: LEVELS.includes(d.level) ? d.level : 'L' }));
 const normalizeRenders = (list) => (Array.isArray(list) ? list : [])
@@ -265,10 +268,11 @@ function logDelivery(entry) {
     return true
   } catch { return false }
 }
+// M20a: en sending fra motoren (tool: 'spor') er ÉN linje med `saker: [{id, version, level}]` — den treffer på hver av sakene.
 function deliveries(id, limit = 10) {
   try {
     return fs.readFileSync(DELIVERY(), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } })
-      .filter((e) => e && (!id || e.id === id)).slice(-limit)
+      .filter((e) => e && (!id || e.id === id || (Array.isArray(e.saker) && e.saker.some((s) => s && s.id === id)))).slice(-limit)
   } catch { return [] }
 }
 // Sett sammen en leveranse av atomer lest på ett nivå. Vault-atomer går alltid inn som S.

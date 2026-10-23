@@ -26,6 +26,15 @@
 //   POST /api/keychain {provider, key}   → nøkkelen inn i macOS Keychain (security, uten shell, via stdin — aldri fil, aldri logg)
 //   DELETE /api/keychain {provider}      → nøkkelen ut av Keychain
 //   Trust Score per connector leses fra trust-scores.json (anslag — rettes der, uten kode).
+//   M20a (skive 1): motoren — lese → skjerme → minimere → sende → logge (motor.js). Ingen kodevei utenom.
+//   GET  /api/mottakere          → { mottakere: [{id, label, endpoint, modell, trust, nøkkel: satt/ikke satt, aktiv, local, test}] } — aldri nøkkelverdier
+//   POST /api/spor  {melding, saker: [{id, nivå}], mottaker, prosjekt?, samtale?}  → SSE (text/event-stream):
+//        event: skjermet  {antall per type, treff, ord, tokens: {ca}, tekst = «se hva som sendes», saker, notater}
+//        event: del       {tekst}            tekstbiter mens svaret strømmer (med plassholdere)
+//        event: ferdig    {svar, prompt, tokens: {ca, inn, ut}, tekst}   sak-id for svaret og prompten, eksakt usage, svaret med originalene satt inn igjen
+//        event: blokkert  {feil, detaljer}   fail closed: nivå over det Trust Score / Vault tillater — sier hva som må endres
+//        event: feil      {feil}             alt annet (mottaker ikke klar, nettverk, avslag)
+//        mottaker «test» ekkoer uten å sende noe ut av maskinen. TUA_BRIDGE_VAKTER=0 slår av Innboks/Desktop/Finder-vaktene (tester).
 //
 // Lytter kun på 127.0.0.1, og slipper bare kartets origin inn (CORS).
 // Kjør: npm run bridge   (i tua-plugin/). Ingen avhengigheter.
@@ -43,11 +52,10 @@ import { load, save, setShare, upsert, search, FILE, FILES_ROOT, DATA_DIR, files
 import { watchInbox, watchDesktop } from './import.js'      // M14: Innboks — eksporter som legges i mappa blir atomer · M17: Desktop-cachen
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
+import { spor, mottakere, trustScores, Blokkert } from './motor.js'                                  // M20a: motoren — eneste vei ut til en modell
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
-// M15: Trust Score per connector — én JSON-fil, leses ved hvert kall så rettelser virker uten omstart.
-const TRUST_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'trust-scores.json')
-const trustScores = () => { try { return JSON.parse(fs.readFileSync(TRUST_FILE, 'utf8')) } catch (e) { return { _merk: `trust-scores.json kunne ikke leses: ${e.message}`, sky: {}, ai: {} } } }
+// M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
 const countMd = (dir, depth = 2) => {   // hvor mange atomer (.md) ligger i en mappe — for «hva ville skjedd» ved bytte av arkivsted
   let n = 0
   try { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (e.name.startsWith('.') || e.name === 'Innboks') continue; if (e.isFile() && e.name.endsWith('.md')) n++; else if (e.isDirectory() && depth > 0) n += countMd(path.join(dir, e.name), depth - 1) } } catch {}
@@ -293,6 +301,29 @@ http
           return json(res, 403, { error: e.message })
         }
       }
+      // ── M20a: motoren ──
+      if (req.method === 'GET' && url.pathname === '/api/mottakere') return json(res, 200, { mottakere: await mottakere(), trust: { merk: trustScores()._merk || '' } })
+      if (req.method === 'POST' && url.pathname === '/api/spor') {
+        const b = await readBody(req)
+        if (!b.melding || !String(b.melding).trim()) return json(res, 400, { error: 'melding kreves' })
+        if (!b.mottaker) return json(res, 400, { error: 'mottaker kreves (se /api/mottakere)' })
+        const saker = Array.isArray(b.saker) ? b.saker.filter((s) => s && s.id) : []
+        // SSE: hendelsene skrives etter hvert — broen er ren http, ingenting bufrer (K9). Lukker klienten, avbrytes kallet mot mottakeren.
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, data) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`) }
+        const ctl = new AbortController()
+        req.on('close', () => ctl.abort())
+        try {
+          const r = await spor({ melding: String(b.melding), saker, mottaker: String(b.mottaker), prosjekt: b.prosjekt || undefined, samtale: b.samtale || undefined, klient: 'app', signal: ctl.signal, på: hendelse })
+          console.error(`[tua-bro] spor → ${b.mottaker} · ${saker.length} saker · svar ${r.svar} · tokens ca. ${r.tokens.ca}${r.tokens.inn != null ? ` (eksakt ${r.tokens.inn}+${r.tokens.ut})` : ''}`)
+        } catch (e) {
+          const blokkert = e instanceof Blokkert
+          console.error(`[tua-bro] spor → ${b.mottaker} ${blokkert ? 'BLOKKERT' : 'FEIL'}: ${e.message}`)
+          hendelse(blokkert ? 'blokkert' : 'feil', { feil: e.message, ...(blokkert ? { detaljer: e.detaljer } : {}) })
+        }
+        return res.end()
+      }
       // ── M15: innstillinger ──
       if (req.method === 'GET' && url.pathname === '/api/settings') return json(res, 200, await settingsView())
       if (req.method === 'POST' && url.pathname === '/api/settings') {
@@ -347,7 +378,7 @@ http
   })
   .listen(PORT, '127.0.0.1', () => {
     const built = fs.existsSync(path.join(DIST, 'kart.html'))
-    console.error(`[tua-bro] kartet: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} · innstillinger: http://127.0.0.1:${PORT}/innstillinger · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
+    console.error(`[tua-bro] kartet: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} · innstillinger: http://127.0.0.1:${PORT}/innstillinger · spør: POST /api/spor (mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
     const log = (m) => console.error(`[tua-bro] ${m}`)
-    watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log })     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
+    if (process.env.TUA_BRIDGE_VAKTER !== '0') { watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log }) }     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
   })
