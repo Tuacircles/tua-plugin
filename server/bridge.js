@@ -14,6 +14,12 @@
 //   POST /api/link   {id, project, level?}   → gjør atomet synlig i prosjektet (referanse), valgfritt nivå S/M/L;
 //                                        kall igjen med level for å endre nivået på en eksisterende referanse
 //   POST /api/unlink {id, project}   → fjerner referansen
+//   M23 (skive 4) — sak-panelet i Oppslag (/oppslag): alt om én sak skjer ved siden av saken (V21 §4). Tre små dører til lageret:
+//   GET  /api/utlevert?id=<sak>&limit → { id, utlevert: [...] }  hver sending som har tatt med saken (deliveries i store.js): til hvem, modell,
+//                                 nivå for DENNE saken, antall skjermet per type, ord, tokens, når, svar/prompt-id — aldri innhold, aldri originaler
+//   GET  /api/versions?id=<sak>  → { id, versions: [{name, size, mtime}] }  tidligere versjoner av fila (.tua/versions/<id>/), lageret som før
+//   POST /api/status {id, status: utkast|endelig} → status på saken (frontmatter `status`; standard: svar = utkast, alt annet = endelig)
+//   /api/atoms og /api/search gir `status` per sak (statusOf).
 //   Passord (valgfritt): `node bridge.js --sett-passord` setter et passord (scrypt-hash i <arkiv>/.tua/passord.json).
 //   Da krever alt — appen og /api/* — innlogging på /logg-inn (HttpOnly-cookie, 30 dager). `--fjern-passord` fjerner det.
 //   /api/* svarer da 401 { error, login: '/logg-inn' } og appen sender brukeren til /logg-inn?next=… (skive 3); sider omdirigeres dit direkte.
@@ -53,7 +59,7 @@ import { openSpawn, FILE_MANAGER } from './platform.js'   // M18: «Åpne i …�
 import os from 'node:os'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { load, save, setShare, upsert, search, levelOf, LEVELS, isVault, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive, archiveOptions, archiveInfo, chooseArchive, finderFolders, FINDER_DEFAULTS, setFinderFolders, CONFIG_FILE } from './store.js'
+import { load, save, setShare, upsert, search, levelOf, LEVELS, isVault, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive, archiveOptions, archiveInfo, chooseArchive, finderFolders, FINDER_DEFAULTS, setFinderFolders, CONFIG_FILE, deliveries, versions, statusOf, setStatus, STATUSER } from './store.js'
 import { watchInbox, watchDesktop } from './import.js'      // M14: Innboks — eksporter som legges i mappa blir atomer · M17: Desktop-cachen
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
@@ -271,7 +277,7 @@ http
         const offset = num(url.searchParams.get('offset'), 0), limit = num(url.searchParams.get('limit'), all.length)
         // lenker regnes ut ved lesing, lagres ikke her. ord/tegn per nivå, max og vault (skive 3): det forsiden sender med til Spør om en sak —
         // samme tall som /api/search gir, fra lageret (levelOf), så anslaget i Spør er det samme uansett hvor saken ble valgt. max er L: eget arkiv (V11).
-        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a) }))
+        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a) }))
         return json(res, 200, { atoms, total: all.length, offset, file: ARKIV() })
       }
       if (req.method === 'GET' && url.pathname === '/api/search') {
@@ -283,7 +289,7 @@ http
         return json(res, 200, {
           q, total: hits.total, offset: num(url.searchParams.get('offset'), 0),
           // ord per nivå kommer fra lageret (levelOf) — Spør-skjermen (skive 2) regner ikke selv, så ordantallet er det samme som motoren sender
-          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet })),
+          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), status: statusOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet })),
         })
       }
       if (req.method === 'POST' && url.pathname === '/api/save') {
@@ -311,6 +317,35 @@ http
           console.error(`[tua-bro] open ${target} «${a.name}» AVVIST: ${e.message}`)
           return json(res, 403, { error: e.message })
         }
+      }
+      // ── M23 (skive 4): sak-panelet — Utlevert, versjoner og status på én sak. Bare metadata fra lageret; motoren røres ikke. ──
+      if (req.method === 'GET' && url.pathname === '/api/utlevert') {
+        const id = url.searchParams.get('id') || ''
+        if (!id) return json(res, 400, { error: 'id kreves' })
+        // Hver linje i .tua/utlevering.jsonl som har tatt med saken: motorens sendinger (saker[]) og MCP-døras (id). Nivået som gjelder DENNE saken
+        // plukkes ut, så panelet slipper å lete. Linjene har aldri innhold eller originaler (V15 regel 3) — de sendes som de er.
+        const utlevert = deliveries(id, num(url.searchParams.get('limit'), 50)).map((e) => ({ ...e, nivå: (Array.isArray(e.saker) && e.saker.find((s) => s && s.id === id)?.level) || e.level || null })).reverse()
+        return json(res, 200, { id, utlevert })
+      }
+      if (req.method === 'GET' && url.pathname === '/api/versions') {
+        const id = url.searchParams.get('id') || ''
+        if (!id) return json(res, 400, { error: 'id kreves' })
+        const a = load().find((x) => x.id === id)
+        if (!a) return json(res, 404, { error: `fant ikke atom ${id}` })
+        return json(res, 200, { id, version: a.version || 1, versions: versions(id) })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/status') {
+        const { id, status } = await readBody(req)
+        if (!id || !status) return json(res, 400, { error: 'id og status kreves' })
+        if (!STATUSER.includes(status)) return json(res, 400, { error: `status må være ${STATUSER.join(' eller ')}` })
+        const atoms = load()
+        const a = atoms.find((x) => x.id === id)
+        if (!a) return json(res, 404, { error: `fant ikke atom ${id}` })
+        const før = statusOf(a)
+        setStatus(a, status)
+        save(atoms)                                              // versjonen som før: fila skrives om, forrige tilstand bevares i .tua/versions
+        console.error(`[tua-bro] status «${a.name}»: ${før} → ${status}`)
+        return json(res, 200, { atom: { ...a, links: linksFor(a), file: fileOf(a), status: statusOf(a) }, før })
       }
       // ── M20a: motoren ──
       if (req.method === 'GET' && url.pathname === '/api/mottakere') return json(res, 200, { mottakere: await mottakere(), trust: { merk: trustScores()._merk || '' } })
@@ -380,7 +415,7 @@ http
         }
         save(atoms)
         console.error(`[tua-bro] ${isLink ? 'link' : 'unlink'} «${a.name}» ${isLink ? '→' : '⤫'} ${p}${level ? ` (${level})` : ''}`)
-        return json(res, 200, { atom: a })
+        return json(res, 200, { atom: { ...a, status: statusOf(a) } })
       }
       return json(res, 404, { error: 'ukjent rute' })
     } catch (e) {
@@ -389,7 +424,7 @@ http
   })
   .listen(PORT, '127.0.0.1', () => {
     const built = fs.existsSync(path.join(DIST, APP_FIL))
-    console.error(`[tua-bro] appen: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} (forsiden · /spor · /kart · /innstillinger · /sandkasse; POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
+    console.error(`[tua-bro] appen: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} (forsiden · /spor · /oppslag · /kart · /innstillinger · /sandkasse; POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
     const log = (m) => console.error(`[tua-bro] ${m}`)
     if (process.env.TUA_BRIDGE_VAKTER !== '0') { watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log }) }     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
   })

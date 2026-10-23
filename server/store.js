@@ -277,6 +277,15 @@ export function exportRenders(a) {
   return n
 }
 
+// M23 (skive 4, V21 «arbeidsløp som status på sak»): status utkast | endelig. Standard uten nøkkel i fila: et svar fra en modell
+// er utkast til noen låser det («Lås som endelig» i sak-panelet); alt annet er endelig. Nøkkelen `status` skrives bare når den er satt.
+export const STATUSER = ['utkast', 'endelig']
+export const statusOf = (a) => (STATUSER.includes(a?.status) ? a.status : a?.kind === 'svar' ? 'utkast' : 'endelig')
+export function setStatus(a, status) {
+  if (!STATUSER.includes(status)) throw new Error(`status må være ${STATUSER.join(' eller ')}`)
+  a.status = status
+  return a
+}
 // Utleveringslogg (V15 regel 3): hver gang innhold går UT av arkivet til en modell — hva, hvilken versjon,
 // hvilket nivå, til hvem. Bare metadata, aldri innhold. .tua/utlevering.jsonl, én linje per utlevering.
 export function logDelivery(entry) {

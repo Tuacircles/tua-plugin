@@ -56,6 +56,7 @@ function serialize(atom) {
     versjon: atom.version || 1,
     ...(atom.key ? { key: atom.key } : {}),
     ...(atom.kind ? { kind: atom.kind } : {}),
+    ...(atom.status ? { status: atom.status } : {}),           // M23 (skive 4): utkast | endelig — bare når satt; standard regnes av lageret (statusOf)
     tagger: atom.tags || [],
     synlig_i: atom.refs || [],
     ...(atom.links?.length ? { lenker: atom.links } : {}),
@@ -133,6 +134,7 @@ function parse(text, { fallbackId } = {}) {
     summary: why || (fm.S_av ? '' : ingress),
   };
   if (fm.key) atom.key = fm.key;
+  if (fm.status === 'utkast' || fm.status === 'endelig') atom.status = fm.status;   // M23: status på saken (V21: arbeidsløp som status på sak)
   if (fm.nivaa && typeof fm.nivaa === 'object') atom.share = fm.nivaa;
   if (Array.isArray(fm.lenker) && fm.lenker.length) atom.links = fm.lenker.filter((l) => l && l.href);
   if (Array.isArray(fm.bygget_av) && fm.bygget_av.length) atom.derivedFrom = fm.bygget_av.filter((d) => d && d.id);

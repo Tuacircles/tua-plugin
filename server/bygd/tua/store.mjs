@@ -257,7 +257,6 @@ function exportRenders(a) {
   }
   return n
 }
-
 // Utleveringslogg (V15 regel 3): hver gang innhold går UT av arkivet til en modell — hva, hvilken versjon,
 // hvilket nivå, til hvem. Bare metadata, aldri innhold. .tua/utlevering.jsonl, én linje per utlevering.
 function logDelivery(entry) {
