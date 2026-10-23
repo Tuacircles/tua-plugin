@@ -91,7 +91,7 @@ try {
   ok('GET /api/utlevert?id: samme sending, nivå S for den andre saken', u2.utlevert.length === 1 && u2.utlevert[0].nivå === 'S')
   ok('GET /api/utlevert: antall skjermet per type, ord og tokens — aldri innhold eller originaler', typeof u1.utlevert[0].skjermet === 'object' && typeof u1.utlevert[0].ord === 'number' && typeof u1.utlevert[0].tokens?.inn === 'number' && !JSON.stringify(u1).includes(PERSON) && !JSON.stringify(u1).includes(EPOST) && !JSON.stringify(u1).includes('lageret'))
   ok('GET /api/utlevert for en sak som aldri har gått ut → tom liste', JSON.parse((await hent(`/api/utlevert?id=${a3.id}`)).tekst).utlevert.length === 0)
-  ok('GET /api/utlevert uten id → 400', (await hent('/api/utlevert')).status === 400)
+  ok('GET /api/utlevert uten id → hele loggen samlet (skive 5, Innstillinger), ikke 400', (await hent('/api/utlevert')).status === 200 && JSON.parse((await hent('/api/utlevert')).tekst).total === 1)
 
   // Versjoner
   const v = JSON.parse((await hent(`/api/versions?id=${a2.id}`)).tekst)

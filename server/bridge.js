@@ -15,6 +15,9 @@
 //                                        kall igjen med level for å endre nivået på en eksisterende referanse
 //   POST /api/unlink {id, project}   → fjerner referansen
 //   M23 (skive 4) — sak-panelet i Oppslag (/oppslag): alt om én sak skjer ved siden av saken (V21 §4). Tre små dører til lageret:
+//   GET  /api/utlevert?limit&offset&mottaker&dager → { utlevert, total, limit, offset }  hele Utlevert-loggen (skive 5, Innstillinger): alle
+//        sendinger nyeste først, hver med saker[{id, version, level, name, project}] slått opp fra lageret (navn, aldri innhold); filter på mottaker og «siste N dager»
+//   GET  /api/utlevert.csv?mottaker&dager → text/csv (semikolon, BOM, for norsk Excel) med samme kolonner — aldri innhold
 //   GET  /api/utlevert?id=<sak>&limit → { id, utlevert: [...] }  hver sending som har tatt med saken (deliveries i store.js): til hvem, modell,
 //                                 nivå for DENNE saken, antall skjermet per type, ord, tokens, når, svar/prompt-id — aldri innhold, aldri originaler
 //   GET  /api/versions?id=<sak>  → { id, versions: [{name, size, mtime}] }  tidligere versjoner av fila (.tua/versions/<id>/), lageret som før
@@ -87,6 +90,33 @@ async function settingsView() {
     platform: process.platform,
   }
 }
+// ── Skive 5: Utlevert-loggen samlet ─────────────────────────────────────────
+// Alle linjer i .tua/utlevering.jsonl (deliveries uten id), nyeste først, med saknavn fra lageret. Aldri innhold: linjene har bare id/versjon/nivå,
+// og her legges bare `name` og `project` til. Eldre MCP-linjer (tool get/compose: `id`, `level`) normaliseres til saker[] så tabellen og CSV-en er like.
+function utlevertSamlet(mottaker = '', dager = 0) {
+  const navn = new Map(load().map((a) => [a.id, { name: a.name, project: a.project }]))
+  const siden = dager > 0 ? Date.now() - dager * 86400e3 : 0
+  return deliveries(null, Number.MAX_SAFE_INTEGER)
+    .filter((e) => (!mottaker || (e.mottaker || e.tool) === mottaker) && (!siden || (e.at || 0) >= siden))
+    .map((e) => {
+      const rå = Array.isArray(e.saker) ? e.saker : e.id ? [{ id: e.id, version: e.version, level: e.level }] : []
+      const saker = rå.filter((s) => s && s.id).map((s) => ({ id: s.id, version: s.version ?? null, level: s.level || null, ...(navn.get(s.id) || { name: null, project: null }) }))
+      return { ...e, saker, mottaker: e.mottaker || e.tool || null }
+    })
+    .sort((a, b) => (b.at || 0) - (a.at || 0))      // nyeste først etter tidsstempel, ikke filrekkefølge (MCP- og motor-linjer kan komme om hverandre)
+}
+const TYPE_NAVN = { navn: 'navn', epost: 'e-post', telefon: 'telefon', fødselsnummer: 'fødselsnummer', orgnr: 'org.nr', adresse: 'adresse', beløp: 'beløp' }
+// CSV for norsk Excel: semikolon, CRLF, BOM (settes av kalleren), felt med ; " eller linjeskift i anførselstegn. Én rad per sending; sakene som «navn (nivå)» adskilt med « | ».
+export const UTLEVERT_KOLONNER = ['når', 'mottaker', 'endepunkt', 'modell', 'klient', 'saker', 'nivåer', 'skjermet', 'ord', 'tokens_ca', 'tokens_inn', 'tokens_ut', 'prosjekt', 'spørsmål_id', 'svar_id']
+export function utlevertCsv(linjer) {
+  const felt = (v) => { const t = v == null ? '' : String(v); return /[;"\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
+  const når = (ts) => (ts ? new Date(ts).toLocaleString('sv-SE', { hour12: false }).replace('T', ' ') : '')     // sv-SE gir ISO-liknende «2026-10-23 23:41:05» som Excel leser rett
+  const rad = (e) => [når(e.at), e.mottaker || '', e.endpoint || '', e.modell || '', e.client || '', (e.saker || []).map((s) => `${s.name || s.id}${s.level ? ` (${s.level})` : ''}`).join(' | '),
+    [...new Set((e.saker || []).map((s) => s.level).filter(Boolean))].join('/'), Object.entries(e.skjermet || {}).filter(([, n]) => n > 0).map(([k, n]) => `${TYPE_NAVN[k] || k} ${n}`).join(' | '),
+    e.ord ?? '', e.tokens?.ca ?? '', e.tokens?.inn ?? '', e.tokens?.ut ?? '', e.context || '', e.prompt || '', e.svar || '']
+  return [UTLEVERT_KOLONNER, ...linjer.map(rad)].map((r) => r.map(felt).join(';')).join('\r\n') + '\r\n'
+}
+
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 // npm run build:kart. Kartet bygges fra tua2-sandbox i Tua-repoet (ved siden av tua-plugin/); utenfor repoet: sett TUA_KART_DIST.
 const DIST = process.env.TUA_KART_DIST || [path.join(HERE, '..', '..', 'tua2-sandbox', 'dist'), path.join(HERE, '..', 'tua2-sandbox', 'dist')].find((p) => fs.existsSync(p)) || path.join(HERE, '..', '..', 'tua2-sandbox', 'dist')
@@ -319,6 +349,18 @@ http
         }
       }
       // ── M23 (skive 4): sak-panelet — Utlevert, versjoner og status på én sak. Bare metadata fra lageret; motoren røres ikke. ──
+      if (req.method === 'GET' && (url.pathname === '/api/utlevert.csv' || (url.pathname === '/api/utlevert' && !url.searchParams.get('id')))) {
+        // Skive 5: hele loggen samlet (Innstillinger › Utlevert). Nyeste først, filter på mottaker og dager, limit/offset. Saknavn slås opp i lageret
+        // per linje så lista kan vise «saknavn · nivå» — aldri innhold, aldri originaler (V15 regel 3). Linjer fra MCP-døra (id/level) får saker[] av det.
+        const alle = utlevertSamlet(url.searchParams.get('mottaker') || '', num(url.searchParams.get('dager'), 0))
+        if (url.pathname === '/api/utlevert.csv') {
+          const csv = utlevertCsv(alle)
+          res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="tua-utlevert-${new Date().toISOString().slice(0, 10)}.csv"`, ...cors })
+          return res.end('\ufeff' + csv)
+        }
+        const limit = num(url.searchParams.get('limit'), 50), offset = num(url.searchParams.get('offset'), 0)
+        return json(res, 200, { utlevert: alle.slice(offset, offset + limit), total: alle.length, limit, offset })
+      }
       if (req.method === 'GET' && url.pathname === '/api/utlevert') {
         const id = url.searchParams.get('id') || ''
         if (!id) return json(res, 400, { error: 'id kreves' })

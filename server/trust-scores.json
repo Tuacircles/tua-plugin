@@ -1,6 +1,6 @@
 {
-  "_merk": "anslag 19.10.2026 — verifiser mot leverandørens DPA",
-  "_om": "Trust Score 1–5 per connector (CLAUDE.md §2.3). Fire parametre: metadata-eksponering, innholds-eksponering, mining (trening/produktutvikling/reklame), retensjon og jurisdiksjon. Tallene og tekstene her er anslag fra generell kunnskap om vilkårene — ikke juridisk verifisert. Rett i denne fila, ingen kode trengs. Vises på innstillinger-siden (M15) og i «Spør»-raden (M20).",
+  "_merk": "anslag 19.10.2026, endepunkt-form 24.10.2026 — verifiser mot leverandørens DPA; Erik retter",
+  "_om": "Trust Score 1–5 per connector (CLAUDE.md §2.3). Fire parametre: metadata-eksponering, innholds-eksponering, mining (trening/produktutvikling/reklame), retensjon og jurisdiksjon. «sky» er per skytjeneste. «endepunkter» (skive 5, arbeidsstykke 30 §7: Trust Score per endepunkt, ikke per leverandør) er én rad per endepunkt en modell nås på: id, leverandør, label, endpoint, region, score, de fire parametrene, anbefaling, svakest (parameteren som trekker ned — vises i gull), kilde (hva vurderingen bygger på) og dato (sist vurdert). Samme modell kan få flere rader (f.eks. «via Tua-pakke», Azure, EU-API) når de finnes. Tallene og tekstene er anslag fra generell kunnskap om vilkårene — ikke juridisk verifisert. Rett i denne fila, ingen kode trengs; motoren leser den ved hvert kall. Vises i Innstillinger › AI-mottakere (M15) og i Spør-raden (M20). Den gamle forma («ai» per leverandør) leses fortsatt av motoren.",
   "sky": {
     "icloud": {
       "label": "iCloud Drive",
@@ -39,51 +39,85 @@
       "anbefaling": "Flytt følsomme ting til iCloud (Advanced Data Protection) eller Tua Vault. Slå av Gemini i Drive hvis du ikke bruker det."
     }
   },
-  "ai": {
-    "claude": {
+  "endepunkter": [
+    {
+      "id": "claude",
+      "leverandør": "claude",
       "label": "Claude (Anthropic)",
+      "endpoint": "api.anthropic.com",
+      "region": "USA",
       "score": 4,
       "metadata": "Ser teksten som sendes (S+M) og kontonavn/API-nøkkel. Tua sender ikke frontmatter, prosjektnavn eller tagger.",
       "innhold": "Det du sender — S+M som standard, L bare når du ber om det (V15).",
       "mining": "API-trafikk brukes ikke til trening som standard (Commercial Terms). Gjelder ikke forbrukerappen uten valg.",
       "retensjon": "Inndata og utdata slettes innen 30 dager som standard; zero-data-retention på avtale. USA; CLOUD Act-eksponert.",
-      "anbefaling": "Bruk egen API-nøkkel (console.anthropic.com), ikke abonnementet — da gjelder API-vilkårene."
+      "anbefaling": "Bruk egen API-nøkkel (console.anthropic.com), ikke abonnementet — da gjelder API-vilkårene.",
+      "svakest": "retensjon",
+      "kilde": "Anthropic Commercial Terms of Service og Privacy Policy, lest 19.10.2026; arbeidsstykke 30 §5.4 (30 dagers retensjon, ZDR bare på avtale) — anslag, Erik retter",
+      "dato": "2026-10-19"
     },
-    "openai": {
+    {
+      "id": "openai",
+      "leverandør": "openai",
       "label": "OpenAI (GPT)",
+      "endpoint": "api.openai.com",
+      "region": "USA",
       "score": 3,
       "metadata": "Ser teksten som sendes og organisasjons-id/API-nøkkel.",
       "innhold": "Det du sender — S+M som standard.",
       "mining": "API-trafikk brukes ikke til trening som standard (kan velges til). ChatGPT-appen trener som standard på forbrukerkontoer.",
       "retensjon": "30 dagers misbrukslogg som standard; zero-data-retention for godkjente kontoer. Et rettspålegg i 2025 krevde lagring av forbrukersamtaler ut over 30 dager. USA; CLOUD Act-eksponert.",
-      "anbefaling": "Søk om zero-data-retention på platform.openai.com hvis du sender forretningsdata regelmessig."
+      "anbefaling": "Søk om zero-data-retention på platform.openai.com hvis du sender forretningsdata regelmessig.",
+      "svakest": "retensjon",
+      "kilde": "OpenAI API data usage policies og Enterprise privacy, lest 19.10.2026 — anslag, Erik retter",
+      "dato": "2026-10-19"
     },
-    "gemini": {
+    {
+      "id": "gemini",
+      "leverandør": "gemini",
       "label": "Gemini (Google)",
+      "endpoint": "generativelanguage.googleapis.com",
+      "region": "USA",
       "score": 2,
       "metadata": "Ser teksten som sendes, prosjekt-id og API-nøkkel.",
       "innhold": "Det du sender — S+M som standard.",
       "mining": "Gratisnivået (AI Studio uten fakturering) brukes til å forbedre produktene og kan leses av mennesker. Betalt nivå (fakturering på) brukes ikke til trening.",
       "retensjon": "Betalt: logg i 55 dager for misbruk. Gratis: ubestemt. USA; CLOUD Act-eksponert.",
-      "anbefaling": "Slå på fakturering i Google Cloud før du legger inn nøkkelen — ellers er innholdet treningsdata. Vurder 3/5 med betalt nivå."
+      "anbefaling": "Slå på fakturering i Google Cloud før du legger inn nøkkelen — ellers er innholdet treningsdata. Vurder 3/5 med betalt nivå.",
+      "svakest": "mining",
+      "kilde": "Gemini API Additional Terms of Service (betalt vs. gratis nivå), lest 19.10.2026 — anslag, Erik retter",
+      "dato": "2026-10-19"
     },
-    "mistral": {
+    {
+      "id": "mistral",
+      "leverandør": "mistral",
       "label": "Mistral",
+      "endpoint": "api.mistral.ai",
+      "region": "EU",
       "score": 4,
       "metadata": "Ser teksten som sendes og API-nøkkel.",
       "innhold": "Det du sender — S+M som standard.",
       "mining": "La Plateforme (API) trener ikke på kundedata som standard; zero-data-retention kan velges.",
       "retensjon": "30 dager som standard, 0 med ZDR. Paris, EU — GDPR, ikke CLOUD Act.",
-      "anbefaling": "Første skymodell å prøve for europeiske forretningsdata."
+      "anbefaling": "Første skymodell å prøve for europeiske forretningsdata.",
+      "svakest": "retensjon",
+      "kilde": "Mistral La Plateforme Terms of Use og Privacy Policy, lest 19.10.2026 — anslag, Erik retter",
+      "dato": "2026-10-19"
     },
-    "ollama": {
+    {
+      "id": "ollama",
+      "leverandør": "ollama",
       "label": "Ollama (lokal)",
+      "endpoint": "127.0.0.1:11434",
+      "region": "lokalt",
       "score": 5,
       "metadata": "Ingen — modellen kjører på denne maskinen (127.0.0.1:11434).",
       "innhold": "Forlater aldri maskinen. Den eneste modellen som får lese L av Vault-merkede atomer.",
       "mining": "Ingen.",
       "retensjon": "Ingen logg utover det Tua selv skriver (utlevering.jsonl, bare metadata). Jurisdiksjon: din egen maskin.",
-      "anbefaling": "Installer fra ollama.com og kjør «ollama pull» på en modell. Tua oppdager den av seg selv."
+      "anbefaling": "Installer fra ollama.com og kjør «ollama pull» på en modell. Tua oppdager den av seg selv.",
+      "kilde": "Egen vurdering: modellen kjører på denne maskinen; Tua skriver bare metadata til utlevering.jsonl (store.js). 19.10.2026",
+      "dato": "2026-10-19"
     }
-  }
+  ]
 }

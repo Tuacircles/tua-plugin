@@ -31,7 +31,19 @@ import { readKey, hasKey, ollamaStatus } from './keychain.js'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const TRUST_FILE = path.join(HERE, 'trust-scores.json')
 // Trust Score per connector — én JSON-fil, leses ved hvert kall så rettelser virker uten omstart (M15). Anslag; rettes i fila.
-export const trustScores = () => { try { return JSON.parse(fs.readFileSync(TRUST_FILE, 'utf8')) } catch (e) { return { _merk: `trust-scores.json kunne ikke leses: ${e.message}`, sky: {}, ai: {} } } }
+// Skive 5 (arbeidsstykke 30 §7): fila har `endepunkter` — én rad per endepunkt (id, leverandør, label, endpoint, region, score, de fire
+// parametrene, anbefaling, svakest, kilde, dato). `ai` avledes av den (første rad per leverandør) så Spør-raden, /api/settings og alt
+// som leser ts.ai.<leverandør> virker som før. Den gamle forma (bare `ai`) leses også: da avledes `endepunkter` fra den.
+export const trustScores = () => {
+  let ts
+  try { ts = JSON.parse(fs.readFileSync(TRUST_FILE, 'utf8')) } catch (e) { return { _merk: `trust-scores.json kunne ikke leses: ${e.message}`, sky: {}, ai: {}, endepunkter: [] } }
+  const endepunkter = Array.isArray(ts.endepunkter) ? ts.endepunkter
+    : Object.entries(ts.ai || {}).map(([id, v]) => ({ id, leverandør: id, ...v }))
+  const ai = {}
+  for (const e of endepunkter) { const lev = e.leverandør || e.id; if (lev && !ai[lev]) ai[lev] = e }
+  return { ...ts, sky: ts.sky || {}, endepunkter, ai: { ...ai, ...(Array.isArray(ts.endepunkter) ? {} : ts.ai || {}) } }
+}
+export const trustFor = (id) => { const ts = trustScores(); return ts.endepunkter.find((e) => e.id === id) || ts.ai[id] || null }
 
 export class Blokkert extends Error { constructor(msg, detaljer = []) { super(msg); this.name = 'Blokkert'; this.kode = 'blokkert'; this.detaljer = detaljer } }
 export class MotorFeil extends Error { constructor(msg) { super(msg); this.name = 'MotorFeil'; this.kode = 'feil' } }
@@ -293,7 +305,7 @@ function lagMottakere() {
       status: async () => (hasKey('claude') ? { klar: true } : { klar: false, hvorfor: 'ingen API-nøkkel i Keychain (Innstillinger › AI-mottakere)' }), send: sendClaude },
     { id: 'ollama', label: 'Ollama (lokal)', endpoint: '127.0.0.1:11434', modell: process.env.TUA_OLLAMA_MODELL || null, trust: ts.ollama || null, local: true,
       status: async () => { const s = await ollamaStatus(); return s.running && s.models.length ? { klar: true, modeller: s.models } : { klar: false, hvorfor: s.running ? 'Ollama kjører, men har ingen modell' : 'Ollama kjører ikke' } }, send: sendOllama },
-    { id: 'test', label: 'Test (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: { score: 3, label: 'Test', innhold: 'Forlater aldri maskinen; viser bare det som ville blitt sendt.' }, test: true,
+    { id: 'test', label: 'Test (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: { score: 3, label: 'Test', endpoint: 'lokalt', region: 'lokalt', metadata: 'Ingen — ingenting sendes.', innhold: 'Forlater aldri maskinen; viser bare det som ville blitt sendt.', mining: 'Ingen.', retensjon: 'Bare Tuas egen Utlevert-linje (metadata).', svakest: null, kilde: 'Tua selv: ekko-mottakeren i motor.js. Score 3 er satt lavt med vilje så fail closed kan prøves (L blokkeres).', dato: '2026-10-23' }, test: true,
       status: async () => ({ klar: true }), send: sendTest },
   ]
 }
