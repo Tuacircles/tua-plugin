@@ -634,7 +634,7 @@ export async function forskjeller(svar, { melding = '', prosjekt, klient = 'app'
     'Hvert punkt er én setning på norsk; «svar» er bokstavene på svarene punktet gjelder. Bruk plassholdere som [Person A] uendret.'
   const sendes = `${SYSTEM}${JSON_KRAV}\n\n${byggMelding(oppgave, kontekst)}`
   const tokensCa = anslåTokens(sendes, v.m.id)
-  på('vurderer', { steg: 'forskjeller', mottaker: v.m.id, modell: v.modell, tokens: { ca: tokensCa } })
+  på('vurderer', { steg: 'forskjeller', mottaker: v.m.id, modell: v.modell, tokens: { ca: tokensCa }, svar: svar.length })   // runde 2c: appen sier «leser N svar …» til første ord kommer
   let tegn = 0   // runde 1 (arb. 32 §6): fremdrift mens Forskjeller vurderes — hver bit fra modellen gir event vurderer-del {steg, tegn} (ikke teksten: den er JSON med plassholdere)
   const r = await v.m.send({ system: SYSTEM, melding: oppgave, kontekst, json: true, oppgave: 'forskjeller' }, { signal, onDel: (t) => { tegn += String(t || '').length; på('vurderer-del', { steg: 'forskjeller', tegn }) } })
   const tolket = tolkForskjeller(r.tekst, svar.map((s, i) => ({ ...s, bokstav: bokstaver[i] })))
