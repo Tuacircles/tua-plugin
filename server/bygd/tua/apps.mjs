@@ -1,6 +1,6 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
-import fs from 'node:fs';
-import path from 'node:path';
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+import fs__default from 'node:fs';
+import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FILE_MANAGER, openSpawn } from './platform.mjs';
 import { N3, K3, p } from '../vendor/@modelcontextprotocol/ext-apps/src/server/index.mjs';
@@ -20,7 +20,7 @@ import { booleanType, numberType, stringType, enumType } from '../vendor/zod/v3/
 // Claude Code rendrer ikke MCP Apps: der ser modellen structuredContent som JSON. Derfor er den
 // kompakt og selvforklarende. Lokal stdio-server: ingen ui.domain (Claude-dokumentasjonen).
 
-const HERE = path.dirname(fileURLToPath(new URL("../../apps.js", import.meta.url).href));
+const HERE = path__default.dirname(fileURLToPath(new URL("../../apps.js", import.meta.url).href));
 const KORT_URI = 'ui://tua/kort';
 const DRYRUN = !!process.env.TUA_OPEN_DRYRUN;
 
@@ -28,12 +28,12 @@ const DRYRUN = !!process.env.TUA_OPEN_DRYRUN;
 let htmlCache = null;
 function kortHtml() {
   if (htmlCache && !process.env.TUA_APPS_DEV) return htmlCache
-  const tpl = fs.readFileSync(path.join(HERE, 'apps', 'kort.html'), 'utf8');
+  const tpl = fs__default.readFileSync(path__default.join(HERE, 'apps', 'kort.html'), 'utf8');
   // 0.5.5: kortets klientbibliotek ligger ved siden av malen som tekstdeler apps/kort-bibliotek.1.js, .2.js … (lagt dit av
   // bygg.mjs, ubyggd og hver under 256 KiB så katalogens skanning kan lese dem); delene settes sammen i rekkefølge. Da virker kortet
   // også når pluginen kjører uten node_modules (konto-pluginen fra katalogen). Finnes ingen deler, hentes biblioteket fra node_modules (dev).
-  const parts = fs.readdirSync(path.join(HERE, 'apps')).filter((f) => /^kort-bibliotek\.\d+\.js$/.test(f)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));
-  let bundle = parts.length ? parts.map((f) => fs.readFileSync(path.join(HERE, 'apps', f), 'utf8')).join('') : fs.readFileSync(fileURLToPath(import.meta.resolve('@modelcontextprotocol/ext-apps/app-with-deps')), 'utf8');
+  const parts = fs__default.readdirSync(path__default.join(HERE, 'apps')).filter((f) => /^kort-bibliotek\.\d+\.js$/.test(f)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));
+  let bundle = parts.length ? parts.map((f) => fs__default.readFileSync(path__default.join(HERE, 'apps', f), 'utf8')).join('') : fs__default.readFileSync(fileURLToPath(import.meta.resolve('@modelcontextprotocol/ext-apps/app-with-deps')), 'utf8');
   const m = bundle.match(/export\s*\{([^}]*)\};?\s*$/);
   if (!m) throw new Error('fant ikke export-lista i kortets klientbibliotek')
   const appName = (m[1].match(/(\w+)\s+as\s+App\b/) || [])[1] || 'App';
@@ -83,7 +83,7 @@ const atomText = (a) =>
 
 // ── «Åpne i …» fra kortet: samme faste liste som broen (V13). Aldri shell. macOS: open · Windows: explorer/rundll32 · Linux: xdg-open (platform.js)
 const run = (kind, target) => openSpawn(kind, target, { dryrun: DRYRUN });
-const realpath = (p) => { try { return fs.realpathSync(p) } catch { return null } };
+const realpath = (p) => { try { return fs__default.realpathSync(p) } catch { return null } };
 async function openTarget(a, target) {
   const ls = linksFor(a);
   if (target === 'finder') {
@@ -92,7 +92,7 @@ async function openTarget(a, target) {
     return run('reveal', want)
   }
   if (target === 'code') {
-    const repo = ls.filter((l) => l.kind === 'repo').map((l) => realpath(l.href)).find((p) => p && fs.statSync(p).isDirectory());
+    const repo = ls.filter((l) => l.kind === 'repo').map((l) => realpath(l.href)).find((p) => p && fs__default.statSync(p).isDirectory());
     if (!repo) throw new Error('Code: ingen repo-lenke på atomet')
     const q = `Hent atom ${a.id} («${a.name}») fra Tua med tua_get(level=M) og fortsett derfra.`;
     return run('url', `claude-cli://open?cwd=${encodeURIComponent(repo)}&q=${encodeURIComponent(q)}`)

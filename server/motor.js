@@ -32,7 +32,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, LONG_L, FILES_ROOT, filesMode, DATA_DIR } from './store.js'
+import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, LONG_L, FILES_ROOT, filesMode, DATA_DIR, hashOf } from './store.js'
 import { readKey, hasKey, ollamaStatus } from './keychain.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -508,8 +508,12 @@ export async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, k
 // underveis mens de andre fortsetter · vurderer {steg, mottaker} · forskjeller {enig, uenig, unikt, …} · konklusjon-del {tekst} · konklusjon {id, tekst, …} · slutt.
 // Feil kastes: Blokkert (fail closed — med flere mottakere stoppes HELE sendingen når én er blokkert, og linja sier hvilken, V21) eller MotorFeil.
 // Prompten lagres FØR sending (V16: den er brukerens investering, også når sendingen feiler) og får `ga` med hvert svar den ga.
+// M19 (skive 8): prompt-saken har nøkkel prompt:spor:<sha8(tekst)> i prosjektet — samme spørsmål igjen gir SAMME sak og `ga` vokser (samlingen
+// vokser av bruk). «Kjør igjen» fra sak-panelet sender `prompt` (id på en prompt-sak): den brukes som den er; er teksten endret, blir det ny
+// versjon av samme sak (versjon bare når teksten endres), og svaret kobles til den.
 const tittelAv = (s) => (String(s || '').split('\n').find((l) => l.trim()) || 'Spørsmål').trim().replace(/^#+\s*/, '').slice(0, 70)
-export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds, prosjekt, samtale, klient = 'app', signal, på = () => {} }) {
+const førsteSetning = (t, maks = 300) => { const s = String(t || '').replace(/\s+/g, ' ').trim(); if (s.length <= maks) return s; const m = s.slice(0, maks).match(/^[\s\S]*?[.!?](?=\s|$)/); return m && m[0].length >= 20 ? m[0] : s.slice(0, maks - 1).trimEnd() + '…' }
+export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds, prosjekt, samtale, prompt: promptId, klient = 'app', signal, på = () => {} }) {
   if (!melding || !String(melding).trim()) throw new MotorFeil('melding kreves')
   const alle = lagMottakere()
   const ids = [...new Set([...(Array.isArray(mIds) ? mIds : []), ...(mId ? [mId] : [])].map((x) => String(x || '').trim()).filter(Boolean))]
@@ -538,11 +542,16 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
   på('skjermet', { mottaker: ms[0].id, mottakere: ids, antall: { ...sk.antall }, treff: sk.treff, ord: ord(sendes), tokens: { ca: tokensCa[ms[0].id], per: tokensCa }, maks: maks[ms[0].id], maksPer: maks, tekst: sendes,
     saker: kilder.map(({ id, name, version, level, ord: o, tegn }) => ({ id, name, version, level, ord: o, tegn })), notater })
 
-  const proj = prosjekt || atoms.find((x) => x.id === kilder[0]?.id)?.project || 'Uten prosjekt'
   const tittel = tittelAv(melding)
   const til = ms.map((m) => m.label).join(' og ')
-  const { atom: promptAtom } = upsert(atoms, { kind: 'prompt', content: String(melding), name: tittel, project: proj, convo: samtale || tittel, tags: ['prompt'], source: 'Tua', by: 'regel',
-    short: `Spørsmål stilt i Tua til ${til}${kilder.length ? ` med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} som kontekst` : ''}.`.slice(0, 300) })
+  const gammel = promptId ? atoms.find((x) => x.id === promptId && x.kind === 'prompt') || null : null
+  if (promptId && !gammel) throw new MotorFeil(`fant ingen prompt-sak ${promptId} å kjøre igjen`)
+  if (gammel && !gammel.key) gammel.key = `prompt:spor:${hashOf(gammel.content)}`          // eldre prompt-saker fra Spør (uten nøkkel) får en nå
+  const proj = gammel?.project || prosjekt || atoms.find((x) => x.id === kilder[0]?.id)?.project || 'Uten prosjekt'
+  const { atom: promptAtom } = upsert(atoms, { key: gammel ? gammel.key : `prompt:spor:${hashOf(melding)}`, kind: 'prompt', content: String(melding), name: gammel && gammel.content.trim() === String(melding).trim() ? gammel.name : tittel,
+    project: proj, convo: gammel ? gammel.convo : samtale || tittel, tags: ['prompt'], source: gammel?.source || 'Tua', by: 'regel', short: førsteSetning(melding),   // gammel: samme samtale (også tom) → ingen falsk ny versjon
+    summary: gammel ? gammel.summary : `Spørsmål stilt i Tua til ${til}${kilder.length ? ` med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} som kontekst` : ''}.`.slice(0, 300) })
+  const samtaleNavn = samtale || promptAtom.convo || tittel
   save(atoms)
 
   const vaultArv = kilder.some((k) => k.vault)                                 // et svar bygget på en Vault-merket sak arver merket (V15): går aldri over S ut av maskinen
@@ -553,7 +562,7 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
     const r = await m.send({ system: SYSTEM, melding: meldingS, kontekst: kontekstS }, { signal, onDel: (t) => { strømmet += t; på('del', { mottaker: m.id, tekst: t }) } })
     const svarTekst = avskjerm(r.tekst || strømmet, sk.kobling)
     const tokens = { ca: tokensCa[m.id], inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
-    const { atom: svarAtom } = upsert(atoms, { kind: 'svar', content: svarTekst, name: `Svar fra ${m.label}: ${tittel}`.slice(0, 90), project: proj, convo: samtale || tittel, tags: ['svar', m.id, ...(vaultArv ? ['vault'] : [])], source: m.label, by: 'regel',
+    const { atom: svarAtom } = upsert(atoms, { kind: 'svar', content: svarTekst, name: `Svar fra ${m.label}: ${tittel}`.slice(0, 90), project: proj, convo: samtaleNavn, tags: ['svar', m.id, ...(vaultArv ? ['vault'] : [])], source: m.label, by: 'regel',
       derivedFrom: [{ id: promptAtom.id, version: promptAtom.version || 1, level: 'L' }, ...kilder.map(({ id, version, level }) => ({ id, version, level }))],
       short: `Svar fra ${m.label} (${r.modell}) på «${tittel}»${kilder.length ? `, med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} på nivå ${nivåer}` : ''}.`.slice(0, 300) })
     promptAtom.ga = [...(promptAtom.ga || []).filter((g) => g.id !== svarAtom.id), { id: svarAtom.id, version: svarAtom.version || 1 }]
@@ -577,7 +586,7 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
     const svar = ok.map((s) => ({ id: s.svar, mottaker: s.mottaker, label: s.label, modell: s.modell, tekst: s.tekst }))
     try { fsk = await forskjeller(svar, { melding: String(melding), prosjekt: proj, klient, signal, på }) } catch (e) { fsk = { tilgjengelig: false, grunn: e.message, enig: [], uenig: [], unikt: [] } }
     på('forskjeller', fsk)
-    try { konk = await konklusjon({ prompt: promptAtom.id, svar, forskjeller: fsk.tilgjengelig ? fsk : null, melding: String(melding), prosjekt: proj, samtale, klient, signal, på }) } catch (e) { konk = { tilgjengelig: false, grunn: e.message } }
+    try { konk = await konklusjon({ prompt: promptAtom.id, svar, forskjeller: fsk.tilgjengelig ? fsk : null, melding: String(melding), prosjekt: proj, samtale: samtaleNavn, klient, signal, på }) } catch (e) { konk = { tilgjengelig: false, grunn: e.message } }
     på('konklusjon', konk)
   }
   const ut = { prompt: promptAtom.id, mottakere: ok.map((s) => s.mottaker), svar: ok.map((s) => s.svar), resultater: ok, feilet: feilet.map((f) => ({ mottaker: f.mottaker, label: f.label, feil: f.feil?.message || String(f.feil) })), forskjeller: fsk, konklusjon: konk }

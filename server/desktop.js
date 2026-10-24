@@ -165,10 +165,13 @@ export function convFromJson(j, { id = null } = {}) {
   const artifacts = [], attachments = [], files = []
   const tools = {}
   let thinking = 0, created = [], firstUser = ''
+  const pairs = []                                          // M19 (skive 8): brukermelding + svarene som fulgte — import.js lager prompt- og svar-saker av dem
   const lines = chain.map((m) => {
     const who = m.sender === 'human' ? 'Bruker' : 'Claude'
     const parts = []
     const blocks = Array.isArray(m.content) && m.content.length ? m.content : [{ type: 'text', text: m.text || '' }]
+    const txt = (textOfBlocks(blocks) || String(m.text || '')).trim()
+    if (m.sender === 'human') pairs.push({ prompt: txt, at: ms(m.created_at) || null, answers: [] }); else if (txt) pairs.at(-1)?.answers.push(txt)
     for (const b of blocks) {
       if (!b) continue
       if (b.type === 'text' && b.text) parts.push(b.text)
@@ -203,7 +206,7 @@ export function convFromJson(j, { id = null } = {}) {
     id: id || j.uuid, title: flat(j.name || j.title) || 'Uten tittel', created: ms(j.created_at) || Math.min(...created.filter(Boolean), Infinity) || null,
     updated: ms(j.updated_at) || ms(j.created_at) || null, projectUuid: j.project_uuid || j.project?.uuid || null, projectName: j.project?.name || null,
     summary: flat(j.summary || ''), model: j.model || '', firstUser, transcript: lines.join('\n\n'), messages: chain.length,
-    artifacts, attachments, files, tools, thinking, branches,
+    artifacts, attachments, files, tools, thinking, branches, pairs,
   }
 }
 

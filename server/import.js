@@ -20,6 +20,11 @@
 //   node import.js <zip|mappe> [--dry-run] [--project <navn>] [--min-tegn <n>] [--etter <ÅÅÅÅ-MM-DD>]
 //   node import.js --innboks [--dry-run] [--project <navn>]   én gjennomgang av Innboks nå — eksporter, lenkefiler og (skive 7) løse dokumenter (PDF, tekst, md, html, csv, docx) → saker
 //
+// M19 (skive 8, V16): PROMPTER SOM EGNE SAKER. Hver substansiell brukermelding (worthKeeping: ≥ 80 tegn, ikke slash-kommando, ikke ren
+// bekreftelse) i Code-, Cowork-, Desktop- og eksport-samtaler blir en sak `kind: prompt` med nøkkel prompt:<økt8>:<sha8> (samme hash i
+// hook og import — hashOf), S etter regel (første setning, ≤ 300 tegn), `ga` → svar-saken(e) den ga, og svar-saken får prompten først i
+// bygget_av. Lagres i prosjektets mappe, tagg «prompt», deles ikke som standard (ingen synlig_i). Idempotent: samme prompt igjen = uendret.
+//
 // Eksport-atomer (V13/V14): kind «samtale», prosjekt fra eksporten (ellers «Claude-samtaler»/«ChatGPT-samtaler»),
 // links med claude://claude.ai/chat/<uuid> eller https://chatgpt.com/c/<id>, S = tittel + første brukermelding (≤ 300),
 // M bare via «ny gjennomgang» (review.js). Dokumenter/artifacts/vedlegg som egne atomer. Én rapport per import (prosjekt «Tua»).
@@ -33,8 +38,9 @@ import { fileURLToPath } from 'node:url'
 import { unzipToTemp } from './unzip.js'   // 19.10.2026: utpakking uten shell, skilt ut (validatoren så fetch + spawn i samme fil)
 import {
   load, save, upsert, FILES_ROOT, INBOX_DIR, ensureArchive, registerProject, projectOf as registeredProject, claudeProjectHref,
-  finishOnboarding, noteImport, importState, S_MAX, SHORT_L, filesMode, erTuaSak,
+  finishOnboarding, noteImport, importState, S_MAX, SHORT_L, filesMode, erTuaSak, mergeGa, sha8, hashOf,
 } from './store.js'
+export { sha8, hashOf }
 import { collectDesktop, countDesktopConversations, importedDesktop, noteImportedDesktop, cacheAvailable, CACHE_DIR, desktopFolderGrants, desktopStaleness } from './desktop.js'   // M17 · 20.10: samtalelageret + stillhetsvakt
 import { scanFinder, countFinderCandidates, DEFAULT_FOLDERS } from './finder.js'                                                         // M17
 import { CLAUDE_APP_DIR, posix } from './platform.js'                                                                                     // M18: Windows/Linux
@@ -59,7 +65,33 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s)
 const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'))
 const exists = (p) => { try { fs.accessSync(p); return true } catch { return false } }
 const stem = (f) => String(f || '').replace(/\.(md|markdown|txt|pdf|docx?|csv|json|html?)$/i, '')   // «plan.md» → «plan» (fila får .md uansett)
-const sha8 = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 } return h.toString(16).padStart(8, '0') }
+// ── M19 (skive 8, V16): prompter ──────────────────────────────────────────────
+// ÉN hash for hook og import (sha8/hashOf i store.js; før: sha1 i hooken, FNV i importen → samme svar kunne bli to atomer).
+export const promptKey = (sid, text) => `prompt:${String(sid || '').slice(0, 8)}:${hashOf(text)}`
+// Terskelen: 80 tegn er omtrent én hel setning med innhold. «ja», «fortsett», «commit og push», «se på fila» ligger langt under, og en
+// prompt under det har sjelden noe å kjøre igjen mot en annen modell. Slash-kommandoer, avbrudd og rene bekreftelser hoppes alltid over.
+export const PROMPT_MIN = 80
+const BEKREFTELSE = /^(ja|jo|ok|okay|okei|nei|fortsett|videre|commit|kjør|go|yes|no|y|n|takk|bra|fint|flott|gjør det|neste|ferdig|stopp|avbryt)[\s.!…,]*$/i
+export function worthKeeping(text) {
+  const t = stripReminders(text).trim()
+  if (t.length < PROMPT_MIN) return false
+  if (/^\//.test(t) || isTuaCommand(t) || /^\[Request interrupted/.test(t)) return false
+  if (BEKREFTELSE.test(t)) return false
+  if (/^\S+$/.test(t)) return false                              // bare en lenke eller en filsti
+  return true
+}
+export const PROMPT_L_MAX = 20000                                  // lange innliminger skal ikke bli 300 kB-filer; resten står i samtalens transkript
+export const promptL = (t) => { const s = String(t || '').trim(); return s.length > PROMPT_L_MAX ? s.slice(0, PROMPT_L_MAX) + `\n\n_(forkortet: ${s.length - PROMPT_L_MAX} tegn til i samtalen)_` : s }
+// S etter regel: første setning, aldri over 300 tegn (klippes på ordgrense med … når setningen er lengre)
+export function firstSentence(t, max = S_MAX) {
+  const s = flat(t)
+  if (s.length <= max) return s
+  const m = s.slice(0, max).match(/^[\s\S]*?[.!?](?=\s|$)/)
+  return m && m[0].length >= 20 ? m[0] : clip(s, max)
+}
+export const promptTitle = (t) => titleOf(firstSentence(t, 80), 'Spørsmål')
+// Et par = én brukermelding og svarene som kom etter den (til neste brukermelding). Leserne leverer pairs = [{prompt, at, answers: [tekst]}].
+export const nyttPar = (prompt, at) => ({ prompt: String(prompt || ''), at: at || null, answers: [] })
 // S etter regel: «Tittel: første brukermelding» innenfor 300 tegn
 export const ruleS = (title, firstUser) => clip(flat(title ? `${title}: ${firstUser}` : firstUser) || flat(title), S_MAX)
 // Datalinjer: nesten bare tall og skilletegn («10027245·450000 10059885·140000», tabellrader med id/pris). En tittel tas fra
@@ -119,7 +151,7 @@ export function projectOfCwd(cwd) {
 export const stripReminders = (t) => String(t || '').replace(/<system-reminder[\s\S]*?<\/system-reminder>/g, '').replace(/<(command-name|command-message|command-args|local-command-stdout|local-command-caveat)>[\s\S]*?<\/\1>/g, '').trim()
 const TEXT_FILE = /\.(md|markdown|txt|rst)$/i
 export function parseCodeSession(file, { maxChars = 300_000 } = {}) {
-  const s = { id: '', cwd: '', title: '', prompts: [], answers: [], files: new Map(), edited: new Set(), lastAssistant: '', first: null, last: null, turns: 0, lines: [] }
+  const s = { id: '', cwd: '', title: '', prompts: [], answers: [], pairs: [], files: new Map(), edited: new Set(), lastAssistant: '', first: null, last: null, turns: 0, lines: [] }
   let text = ''
   try { text = fs.readFileSync(file, 'utf8') } catch { return s }
   for (const line of text.split('\n')) {
@@ -133,10 +165,10 @@ export function parseCodeSession(file, { maxChars = 300_000 } = {}) {
     const blocks = Array.isArray(o.message?.content) ? o.message.content : typeof o.message?.content === 'string' ? [{ type: 'text', text: o.message.content }] : []
     if (o.type === 'user') {
       const t = stripReminders(blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n'))
-      if (t && !/^\[Request interrupted/.test(t)) { s.prompts.push(t); s.turns++; s.first ??= when; s.last = when || s.last; s.lines.push(`**Bruker:** ${t}`) }
+      if (t && !/^\[Request interrupted/.test(t)) { s.prompts.push(t); s.pairs.push(nyttPar(t, when)); s.turns++; s.first ??= when; s.last = when || s.last; s.lines.push(`**Bruker:** ${t}`) }
     } else if (o.type === 'assistant') {
       const t = blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n').trim()
-      if (t) { s.lastAssistant = t; s.lines.push(`**Claude:** ${t}`); if (t.length >= MIN_SVAR) s.answers.push(t) }
+      if (t) { s.lastAssistant = t; s.lines.push(`**Claude:** ${t}`); if (t.length >= MIN_SVAR) { s.answers.push(t); s.pairs.at(-1)?.answers.push(t) } }   // M19: svaret hører til siste prompt
       for (const b of blocks) {
         if (b.type !== 'tool_use' || !b.input?.file_path) continue
         if (b.name === 'Write' && typeof b.input.content === 'string') s.files.set(b.input.file_path, b.input.content)
@@ -213,7 +245,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
   const srcLabel = source === 'cowork' ? 'Claude Cowork' : 'Claude Code'
   const srcRoot = source === 'cowork' ? COWORK_ROOT : CODE_PROJECTS
   const atoms = load()
-  const stats = { økter: list.length, nye: 0, oppdatert: 0, uendret: 0, korte: 0, filtrert: 0, svar: 0, filer: 0, datadump: 0, feil: 0 }
+  const stats = { økter: list.length, nye: 0, oppdatert: 0, uendret: 0, korte: 0, filtrert: 0, svar: 0, filer: 0, datadump: 0, feil: 0, prompter: 0, prompterAlle: 0, korteprompter: 0 }
   const perProject = {}
   const afterMs = after ? Date.parse(after) : null
   const put = (data, when) => {
@@ -246,13 +278,27 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
       }, s.last)
       count(status); perProject[proj] = (perProject[proj] || 0) + 1
       const derived = [{ id: atom.id, version: atom.version || 1, level: 'L' }]
+      // M19: prompt-sakene først, så svaret får prompten først i bygget_av og prompten får svaret i ga (V16: prompten bevares med svaret)
+      const promptFor = new Map()                                              // svar-tekst → prompt-saken den hører til
+      for (const p of s.pairs || []) {
+        if (!worthKeeping(p.prompt)) { stats.korteprompter++; continue }
+        stats.prompterAlle++
+        const r = put({
+          key: promptKey(s.id, p.prompt), kind: 'prompt', name: promptTitle(p.prompt), content: promptL(p.prompt), project: proj, convo: s.convo, source: srcLabel, by: 'regel',
+          tags: ['prompt', source], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i ${srcLabel}-økta «${s.convo}».`,
+        }, p.at || s.last)
+        if (r.status !== 'uendret') stats.prompter++
+        for (const a of p.answers) promptFor.set(a, r.atom)
+      }
       for (const a of s.answers) {
         if (isDataDump(a)) { stats.datadump++; continue }
+        const pa = promptFor.get(a) || null
         const r = put({
           key: `svar:${s.id.slice(0, 8)}:${sha8(a)}`, kind: 'capture', name: titleOf(a, `Svar i ${s.convo}`), content: a, project: proj, convo: s.convo, source: 'Claude', by: 'regel',
-          tags: ['svar', 'auto'], links, derivedFrom: derived, short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i Code-økta «${s.convo}».`,
+          tags: ['svar', 'auto'], links, derivedFrom: [...(pa ? [{ id: pa.id, version: pa.version || 1, level: 'L' }] : []), ...derived], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i Code-økta «${s.convo}».`,
         }, s.last)
         if (r.status !== 'uendret') stats.svar++
+        if (pa) pa.ga = mergeGa(pa.ga, [{ id: r.atom.id, version: r.atom.version || 1 }])
       }
       for (const [fp, content] of s.files) {
         const fq = posix(fp)
@@ -277,10 +323,12 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
     `- **Økter:** ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret`,
     `- **Hoppet over:** ${stats.korte} under ${minChars} tegn${stats.filtrert ? ` · ${stats.filtrert} utenfor filter` : ''}${stats.tuaprat ? ` · ${stats.tuaprat} Tua-prat om Tua (samtaler som starter med /tua…)` : ''}`,
     `- **Egne atomer:** ${stats.svar} substansielle svar (≥ ${MIN_SVAR} tegn) · ${stats.filer} tekstdokumenter skrevet i øktene${stats.datadump ? ` · ${stats.datadump} data-dumper (mest tall) hoppet over` : ''}`,
+    `- **Prompter (V16):** ${stats.prompter} nye/oppdaterte av ${stats.prompterAlle} spørsmål som egne saker (≥ ${PROMPT_MIN} tegn)${stats.korteprompter ? ` · ${stats.korteprompter} korte («ja», «fortsett», kommandoer) hoppet over` : ''}`,
     `- **Prosjekter:** ${projLine}`,
     `- **Filter:** ${filters}`,
     stats.feil ? `- **Feil:** ${stats.feil} (se loggen)` : null, '',
     'Hver økt er ett atom (kind «samtale») med transkript av brukerens meldinger og Claudes svar (verktøyresultater er ikke med). ' +
+    'Hvert substansielt spørsmål er en egen sak (kind «prompt») koblet til svaret det ga (ga / bygget_av) — deles ikke som standard. ' +
     `Svar og filer som er lagret av pluginens hooks har samme nøkler og dupliseres ikke. Øktfilene (${srcRoot}) er bare lest.`,
     source === 'cowork' ? 'Kilde per økt: audit.jsonl (HMAC-signert strøm); økt-id = mappenavnet local_<uuid>.' : 'Desktop-samtaler fanges fra appens cache (tua_import kilde=desktop); web/mobil via delt lenke eller eksport i Innboks.',
   ].filter((l) => l !== null).join('\n')
@@ -354,10 +402,11 @@ export function parseClaude(dir, { extraProjects = [] } = {}) {
     const msgs = (c.chat_messages || []).slice().sort((a, b) => (ms(a.created_at) || 0) - (ms(b.created_at) || 0))
     const pid = projectField ? (typeof c[projectField] === 'object' ? c[projectField]?.uuid : c[projectField]) : null
     const proj = pid ? projByUuid.get(pid) : null
-    const artifacts = [], attachments = []
+    const artifacts = [], attachments = [], pairs = []
     const lines = msgs.map((m) => {
       const who = m.sender === 'human' ? 'Bruker' : 'Claude'
       let t = blockText(m)
+      if (m.sender === 'human') pairs.push(nyttPar(t, ms(m.created_at))); else if (t.trim()) pairs.at(-1)?.answers.push(t.trim())   // M19
       for (const a of m.attachments || []) {
         if (a.extracted_content) attachments.push({ name: a.file_name || 'vedlegg', content: String(a.extracted_content) })
         t += `\n[vedlegg: ${a.file_name || 'fil'}]`
@@ -372,7 +421,7 @@ export function parseClaude(dir, { extraProjects = [] } = {}) {
       id: c.uuid, title: flat(c.name) || 'Uten tittel', created: ms(c.created_at), updated: ms(c.updated_at) || ms(c.created_at),
       project: proj?.name ? cleanName(proj.name) : null, projectUuid: proj?.uuid || pid || null, source: 'Claude',
       href: c.uuid ? `claude://claude.ai/chat/${c.uuid}` : '', summary: flat(c.summary || ''),
-      firstUser, transcript: lines.join('\n\n'), messages: msgs.length, artifacts, attachments,
+      firstUser, transcript: lines.join('\n\n'), messages: msgs.length, artifacts, attachments, pairs,
     }
   })
   // Design-samtaler (Claude Design): har prosjekt-kobling, i motsetning til vanlige samtaler. Samme atom-form, kilde «Claude Design».
@@ -380,11 +429,12 @@ export function parseClaude(dir, { extraProjects = [] } = {}) {
     const msgs = (d.messages || []).filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
     const textOf = (m) => (typeof m.content === 'string' ? m.content : typeof m.content?.content === 'string' ? m.content.content : '')
     const lines = msgs.map((m) => `**${m.role === 'user' ? 'Bruker' : 'Claude Design'}:** ${textOf(m).trim()}${m.content?.attachments?.length ? `\n[${m.content.attachments.length} vedlegg]` : ''}`)
+    const pairs = []; for (const m of msgs) { if (m.role === 'user') pairs.push(nyttPar(textOf(m), ms(m.created_at))); else if (textOf(m).trim()) pairs.at(-1)?.answers.push(textOf(m).trim()) }
     const projName = cleanName(d.project?.name || projByUuid.get(d.project?.uuid)?.name || '')
     convs.push({
       id: d.uuid, title: flat(d.title) || 'Design uten tittel', created: ms(d.created_at), updated: ms(d.updated_at) || ms(d.created_at),
       project: projName || null, projectUuid: d.project?.uuid || null, source: 'Claude Design', href: '', summary: '',
-      firstUser: textOf(msgs.find((m) => m.role === 'user') || {}), transcript: lines.join('\n\n'), messages: msgs.length, artifacts: [], attachments: [],
+      firstUser: textOf(msgs.find((m) => m.role === 'user') || {}), transcript: lines.join('\n\n'), messages: msgs.length, artifacts: [], attachments: [], pairs,
     })
   }
   // Claudes eget minne om brukeren: ett atom per prosjektminne (prosjekt fra uuid-mappingen), ett for det generelle. memory_files telles.
@@ -433,12 +483,13 @@ export function parseChatGPT(dir) {
       .map((m) => ({ role: m.author.role, text: (m.content?.parts || []).map(partText).filter(Boolean).join('\n'), t: ms(m.create_time) }))
       .filter((m) => m.text.trim())
     const id = c.conversation_id || c.id
+    const pairs = []; for (const m of msgs) { if (m.role === 'user') pairs.push(nyttPar(m.text, m.t)); else pairs.at(-1)?.answers.push(m.text.trim()) }   // M19
     return {
       id, title: flat(c.title) || 'Uten tittel', created: ms(c.create_time), updated: ms(c.update_time) || ms(c.create_time),
       project: null, projectUuid: null, source: 'ChatGPT', href: id ? `https://chatgpt.com/c/${id}` : '', summary: '',
       firstUser: msgs.find((m) => m.role === 'user')?.text || '',
       transcript: msgs.map((m) => `**${m.role === 'user' ? 'Bruker' : 'ChatGPT'}:** ${m.text.trim()}`).join('\n\n'),
-      messages: msgs.length, artifacts: [], attachments: [],
+      messages: msgs.length, artifacts: [], attachments: [], pairs,
     }
   })
   return { kind: 'chatgpt', convs, docs: [], projects: [], format: { felter: [...seen].sort(), prosjektkobling: null, prosjekterIFila: 0 } }
@@ -567,7 +618,7 @@ export function importParsed(data, {
 } = {}) {
   const afterMs = after ? Date.parse(after) : null
   const atoms = load()
-  const stats = { nye: 0, oppdatert: 0, uendret: 0, flyttet: 0, korte: 0, filtrert: 0, dokumenter: 0, artifacts: 0, vedlegg: 0, minner: 0, feil: 0 }
+  const stats = { nye: 0, oppdatert: 0, uendret: 0, flyttet: 0, korte: 0, filtrert: 0, dokumenter: 0, artifacts: 0, vedlegg: 0, minner: 0, feil: 0, prompter: 0, prompterAlle: 0, svar: 0, korteprompter: 0 }
   const perProject = {}
   const byKey = (key) => atoms.find((a) => a.key === key)
   const put = (data2, when, { moveFromDefault = false } = {}) => {
@@ -614,6 +665,28 @@ export function importParsed(data, {
           if (r.status !== 'uendret') stats[statKey]++
         }
       }
+      // M19 (V16): hvert substansielt spørsmål i samtalen → prompt-sak, og svaret det ga (≥ MIN_SVAR) → svar-sak med prompten først i bygget_av;
+      // prompten får svaret i ga. Samme form og nøkler som Code-importen (prompt:<samtale8>:<sha8>, svar:<samtale8>:<sha8>) — én modell på tvers av kilder.
+      const sid = String(c.id).replace(/^share:/, '')
+      const samtaleRef = [{ id: atom.id, version: atom.version || 1, level: 'L' }]
+      for (const p of c.pairs || []) {
+        if (!worthKeeping(p.prompt)) { stats.korteprompter++; continue }
+        stats.prompterAlle++
+        const pr = put({
+          key: promptKey(sid, p.prompt), kind: 'prompt', name: promptTitle(p.prompt), content: promptL(p.prompt), project: atom.project, convo: c.title, source: c.source, by: 'regel',
+          tags: ['prompt', ...(c.tags || [])], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i samtalen «${c.title}» (${c.source}).`,
+        }, p.at || c.updated, { moveFromDefault: !!c.project })
+        if (pr.status !== 'uendret') stats.prompter++
+        for (const a of p.answers) {
+          if (a.length < MIN_SVAR || isDataDump(a)) continue
+          const sv = put({
+            key: `svar:${sid.slice(0, 8)}:${sha8(a)}`, kind: 'capture', name: titleOf(a, `Svar i ${c.title}`), content: a, project: atom.project, convo: c.title, source: c.source, by: 'regel',
+            tags: ['svar', 'auto'], links, derivedFrom: [{ id: pr.atom.id, version: pr.atom.version || 1, level: 'L' }, ...samtaleRef], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i samtalen «${c.title}» (${c.source}).`,
+          }, p.at || c.updated, { moveFromDefault: !!c.project })
+          if (sv.status !== 'uendret') stats.svar++
+          pr.atom.ga = mergeGa(pr.atom.ga, [{ id: sv.atom.id, version: sv.atom.version || 1 }])
+        }
+      }
     } catch (e) { stats.feil++; log(`  ⚠ ${c.title}: ${e.message}`) }
   }
   for (const d of data.docs || []) {
@@ -651,6 +724,7 @@ export function importParsed(data, {
     `- **Samtaler:** ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret${stats.flyttet ? ` · ${stats.flyttet} flyttet fra «${defaultProject}» til prosjektmappa` : ''}`,
     `- **Hoppet over:** ${stats.korte} under ${minChars} tegn${stats.filtrert ? ` · ${stats.filtrert} utenfor filter` : ''}${stats.tuaprat ? ` · ${stats.tuaprat} Tua-prat om Tua (samtaler som starter med /tua…)` : ''}`,
     `- **Egne atomer:** ${stats.dokumenter} prosjektdokumenter · ${stats.artifacts} artifacts/filer · ${stats.vedlegg} vedlegg${kind === 'claude' && f ? ` · ${stats.minner} Claude-minner (kind minne)` : ''}`,
+    `- **Prompter (V16):** ${stats.prompter} nye/oppdaterte av ${stats.prompterAlle} spørsmål som egne saker (≥ ${PROMPT_MIN} tegn) · ${stats.svar} svar (≥ ${MIN_SVAR} tegn) koblet til dem${stats.korteprompter ? ` · ${stats.korteprompter} korte hoppet over` : ''}`,
     kind === 'claude' && data.memoryFiles?.length ? `- **Venter:** ${data.memoryFiles.length} minne-filer (memory_files, markdown-notater Claude har skrevet om deg) — blir atomer i en senere milepæl` : null,
     `- **Prosjekter:** ${projLine}`,
     `- **Filter:** ${filters}`,
@@ -668,7 +742,7 @@ export function importParsed(data, {
 
   let written = 0
   if (!dryRun) {
-    const changed = stats.nye + stats.oppdatert + stats.flyttet + stats.dokumenter + stats.artifacts + stats.vedlegg + stats.minner
+    const changed = stats.nye + stats.oppdatert + stats.flyttet + stats.dokumenter + stats.artifacts + stats.vedlegg + stats.minner + stats.prompter + stats.svar
     if (afterSave) afterSave(atoms, stats)
     upsert(atoms, {
       key: reportKey || `import:${name}`, name: reportName || `Import: ${name}`, content: report, project: 'Tua', convo: reportConvo, source: 'Tua', by: 'regel', tags: ['import'],
@@ -709,7 +783,7 @@ export function desktopData({ log = () => {}, all = false } = {}) {
     return {
       id: c.id, title: c.title, created: c.created, updated: c.updated, project: c.projectName ? c.projectName.replace(/[. ]+$/, '') : null, projectUuid: c.projectUuid,
       source: c.snapshot ? 'Claude (delt lenke)' : c.store?.cowork ? 'Claude Cowork' : 'Claude Desktop', href: c.snapshot ? `https://claude.ai/share/${c.id.replace(/^share:/, '')}` : `claude://claude.ai/chat/${c.id}`,
-      summary: c.summary, firstUser: c.firstUser, transcript: c.transcript, messages: c.messages, artifacts: c.artifacts, attachments: c.attachments, meta,
+      summary: c.summary, firstUser: c.firstUser, transcript: c.transcript, messages: c.messages, artifacts: c.artifacts, attachments: c.attachments, pairs: c.pairs || [], meta,
       tags: c.snapshot ? ['delt'] : c.store?.cowork ? ['desktop', 'cowork'] : ['desktop'],
     }
   })
@@ -869,16 +943,44 @@ export async function processInboxShares({ dryRun = false, log = () => {} } = {}
 export function importFinder({ dryRun = false, log = () => {}, folders = null, desktop = null, minChars = DEFAULT_MIN } = {}) {
   return scanFinder({ dryRun, log, folders, desktop: desktop || (cacheAvailable() ? desktopData({ all: true }) : null), minChars })
 }
-export async function importAll(opts = {}) {
+// M19/M14 (skive 8): «alt» som stegvis løp med hendelser — på('start', {kilde, label}) før hvert steg og på('del', {kilde, label, stats, report | feil})
+// etter, med et pust i hendelsesløkka mellom stegene så broen får skrevet SSE-hendelsene ut mens neste kilde leses (fremdrift i onboardingen).
+// Samme funksjoner som før (importCode/importDesktop/importFinder/processInbox/processInboxShares) — ingen logikk dupliseres.
+export const IMPORT_STEG = [['code', 'Claude Code-økter'], ['cowork', 'Cowork-økter'], ['desktop', 'Desktop-samtaler'], ['finder', 'Dokumenter med AI-opphav'], ['innboks', 'Innboks']]
+export async function importAlt(opts = {}) {
+  const { på = () => {}, kilder = null, ...rest } = opts                     // kilder: bare disse stegene (f.eks. ['code']); null = alle
+  const tick = () => new Promise((r) => setImmediate(r))
+  const kjør = {
+    code: () => importCode({ ...rest, source: 'code' }),
+    cowork: () => importCode({ ...rest, source: 'cowork' }),
+    desktop: () => importDesktop(rest),
+    finder: () => importFinder(rest),
+    innboks: async () => { const d = [...processInbox(rest), ...(await processInboxShares(rest))]; return { deler: d, stats: { filer: d.length, nye: d.reduce((n, r) => n + (r.stats?.nye || 0), 0) }, report: d.length ? d.map((r) => r.report).join('\n\n---\n\n') : `Innboks: ingenting å ta med${rest.dryRun ? ' (dry-run)' : ''}.` } },
+  }
   const parts = []
-  const safe = (label, fn) => { try { return fn() } catch (e) { opts.log?.(`${label}: ${e.message}`); return { report: `${label}: ${e.message}` } } }
-  parts.push(safe('Code', () => importCode({ ...opts, source: 'code' })))
-  parts.push(safe('Cowork', () => importCode({ ...opts, source: 'cowork' })))
-  parts.push(safe('Desktop', () => importDesktop(opts)))
-  parts.push(safe('Finder', () => importFinder(opts)))
-  const inbox = processInbox(opts); for (const r of inbox) parts.push(r)
-  for (const r of await processInboxShares(opts)) parts.push(r)
+  for (const [kilde, label] of IMPORT_STEG.filter(([k]) => !kilder || kilder.includes(k))) {
+    på('start', { kilde, label }); await tick()
+    try {
+      const r = await kjør[kilde]()
+      parts.push(...(r.deler || [r]))
+      på('del', { kilde, label, stats: r.stats || {}, report: r.report || '' })
+    } catch (e) { rest.log?.(`${label}: ${e.message}`); parts.push({ report: `${label}: ${e.message}` }); på('del', { kilde, label, feil: e.message }) }
+    await tick()
+  }
   return { report: parts.map((p) => p.report).join('\n\n---\n\n'), parts }
+}
+export const importAll = (opts = {}) => importAlt(opts)
+// Tallet til onboardingen (skive 8, steg 3): hvor mange substansielle prompter ligger i Code- og Cowork-øktene på maskinen. Leser øktfilene
+// (ikke Desktop-cachen — den koster sekunder); huskes 10 minutter. {prompter, økter}
+let promptMemo = null
+export function countPrompts({ fresh = false } = {}) {
+  if (!fresh && promptMemo && Date.now() - promptMemo.at < 10 * 60 * 1000) return promptMemo
+  let prompter = 0, økter = 0
+  for (const { file } of [...listCodeSessions(), ...listCoworkSessions()]) {
+    try { const s = parseCodeSession(file); if (!s.prompts.length) continue; økter++; prompter += (s.pairs || []).filter((p) => worthKeeping(p.prompt)).length } catch {}
+  }
+  promptMemo = { at: Date.now(), prompter, økter }
+  return promptMemo
 }
 // «Jeg fant N Code-økter, N Cowork-økter, N Desktop-samtaler, N dokumenter — vil du ta dem med?» Tallene koster ~1–12 s
 // første gang (Desktop-cachen har 60 000 filer); huskes i 10 minutter per prosess.
@@ -904,7 +1006,7 @@ export function historyCounts({ fresh = false, quick = false } = {}) {
   return c
 }
 export const historyLine = (c = historyCounts()) => {
-  const parts = [c.code && `${c.code} Code-økt${c.code === 1 ? '' : 'er'}`, c.cowork && `${c.cowork} Cowork-økt${c.cowork === 1 ? '' : 'er'}`, c.desktopNew > 0 && `${c.desktopNew} Desktop-samtale${c.desktopNew === 1 ? '' : 'r'}`, c.dokumenter && `${c.dokumenter} dokument${c.dokumenter === 1 ? '' : 'er'}`].filter(Boolean)
+  const parts = [c.code && `${c.code} Code-økt${c.code === 1 ? '' : 'er'}`, c.cowork && `${c.cowork} Cowork-økt${c.cowork === 1 ? '' : 'er'}`, c.desktopNew > 0 && `${c.desktopNew} Desktop-samtale${c.desktopNew === 1 ? '' : 'r'}`, c.dokumenter && `${c.dokumenter} dokument${c.dokumenter === 1 ? '' : 'er'}`, c.prompter && `${c.prompter} prompt${c.prompter === 1 ? '' : 'er'}`].filter(Boolean)
   return parts.length ? `Jeg fant ${parts.join(', ')} på denne maskinen som ikke er i Tua — vil du ta dem med?` : ''
 }
 

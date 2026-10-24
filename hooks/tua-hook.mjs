@@ -6,6 +6,10 @@
 //   svar   Stop          → lagre siste substansielle svar (≥ 1 500 tegn) som atom
 //   fil    PostToolUse   → Write|Edit på et tekstdokument (.md/.txt/…) → atom med file-lenke; samme fil = ny versjon
 //   okt    PreCompact/SessionEnd → økt-sammendrag (oppgaver, filer, siste svar) som atom, key per økt
+//   prompt UserPromptSubmit → M19 (skive 8, V16): prompten som egen sak idet den sendes (≥ 80 tegn, ikke kommando/bekreftelse), nøkkel
+//                          prompt:<økt8>:<sha8> — samme som importen, så importen etterpå gir «uendret». STUM: stdout blir kontekst for modellen.
+//          svar-modusen lagrer også prompten (siste brukermelding i transkriptet) FØR lengdesjekken, og kobler: svaret får prompten i
+//          bygget_av, prompten får svaret i ga. Samme svar-hash som importen (sha8), så hook og import aldri lager to atomer av ett svar.
 //
 // Leser hook-input som JSON på stdin. Skriver gjennom samme store.js (og fil-lås) som serveren — ikke via MCP,
 // fordi en hook må kunne filtrere (lengde, filtype) før den eventuelt lagrer, og `mcp_tool`-typen kan ikke det.
@@ -33,8 +37,8 @@ const store = await import(mod('store.js'))
 const imp = await import(mod('import.js'))
 const desk = await import(mod('desktop.js'))
 const { posix, insideTmp } = await import(mod('platform.js'))
-const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState } = store
-const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts } = imp
+const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState, mergeGa } = store
+const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts, sha8, promptKey, worthKeeping, promptTitle, promptL, firstSentence } = imp
 
 // 0.5.1: innstillingen «arkivmappe» → ~/.tua/config.json, samme fil og samme skrivemåte som tua_setup (store.chooseArchive),
 // så serveren finner arkivet uten TUA_FILES_ROOT — også i Cowork, der innstillingen aldri når serveren. Bare når innstillingen
@@ -66,8 +70,11 @@ try {
   const project = projectOfCwd(cwd)
   const sid = input.session_id || ''
   const tr = input.transcript_path ? parseCodeSession(input.transcript_path) : null
-  const convo = tr?.title || (tr?.prompts[0] ? clip(flat(tr.prompts[0]), 60) : `Code-økt ${sid.slice(0, 8)}`)
-  const repo = [{ kind: 'repo', href: repoRootOf(cwd) }]
+  // samtalenavnet: tittelen, ellers første prompt — i prompt-modus er transkriptet ennå uten denne meldingen, så den første prompten er input.prompt
+  const convo = tr?.title || (tr?.prompts[0] ? clip(flat(tr.prompts[0]), 60) : input.prompt ? clip(flat(input.prompt), 60) : `Code-økt ${sid.slice(0, 8)}`)
+  const repo = [{ kind: 'repo', href: repoRootOf(cwd), label: `Repo — ${project}` }]   // samme lenke (med etikett) som import.js, så import etter hook gir «uendret»
+  // M19: prompt-saken for én brukermelding — samme nøkkel, navn, S og tagger som import.js, så importen etterpå sier «uendret»
+  const promptSak = (atoms, p) => upsert(atoms, { key: promptKey(sid, p), kind: 'prompt', name: promptTitle(p), content: promptL(p), project, convo, source: 'Claude Code', by: 'regel', tags: ['prompt', 'code'], links: repo, short: firstSentence(p), summary: `Spørsmål stilt i Claude Code-økta «${convo}».` })
 
   if (mode === 'start') {
     // Påminnelse — standard i pluginen. Stdout fra SessionStart blir kontekst for Claude.
@@ -105,19 +112,33 @@ try {
     if (parts.length || extra.length) process.stdout.write(`Tua: ${[...parts, ...extra].join('. ')}. ${parts.length ? 'Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. ' : ''}Ikke kjør noe uten at brukeren sier ja.\n`)
     log({ pending, pendingCw, desktop: hc?.desktopNew, dokumenter: hc?.dokumenter, inbox: inbox.length, days, daysCw, first: !st.last, repoOffer: extra.length > (st.last ? 0 : 1) })
     if (konfigurert) log({ arkivmappe: konfigurert.root, before: konfigurert.before, note: 'innstillingen «arkivmappe» skrevet til ~/.tua/config.json' })
+  } else if (mode === 'prompt') {
+    // M19: UserPromptSubmit. Skriver ALDRI til stdout (det ville blitt kontekst i prompten). Svaret kobles på i svar-modus.
+    const p = String(input.prompt || '')
+    if (!worthKeeping(p)) { log({ skipped: 'kort/kommando', len: p.length }); process.exit(0) }
+    const atoms = load()
+    const { atom, status } = promptSak(atoms, p)
+    if (status !== 'uendret') save(atoms)
+    log({ status, id: atom.id, project, len: p.length })
   } else if (mode === 'svar') {
     const msg = String(input.last_assistant_message || '').trim()
-    if (msg.length < MIN_SVAR) { log({ skipped: 'kort', len: msg.length }); process.exit(0) }
-    if (isDataDump(msg)) { log({ skipped: 'data-dump', len: msg.length }); process.exit(0) }
-    if (imp.isTuaEcho(msg)) { log({ skipped: 'tua-ekko', len: msg.length }); process.exit(0) }   // 20.10: et svar som bare gjengir et Tua-søk/-kort er ikke nytt innhold
     const atoms = load()
-    const sha = crypto.createHash('sha1').update(msg).digest('hex').slice(0, 8)
+    // M19: prompten som ga svaret (siste brukermelding i transkriptet) lagres FØR lengdesjekken — den er brukerens investering også når svaret er kort (V16)
+    const par = tr?.pairs?.length ? tr.pairs.at(-1) : null
+    let pa = null, endret = false
+    if (par && worthKeeping(par.prompt)) { const r = promptSak(atoms, par.prompt); pa = r.atom; endret = r.status !== 'uendret' }
+    const stopp = (why) => { if (endret) save(atoms); log({ skipped: why, len: msg.length, prompt: pa?.id }); process.exit(0) }
+    if (msg.length < MIN_SVAR) stopp('kort')
+    if (isDataDump(msg)) stopp('data-dump')
+    if (imp.isTuaEcho(msg)) stopp('tua-ekko')   // 20.10: et svar som bare gjengir et Tua-søk/-kort er ikke nytt innhold
     const { atom, status } = upsert(atoms, {
-      key: `svar:${sid.slice(0, 8)}:${sha}`, name: titleOf(msg, `Svar i ${convo}`), content: msg, project, convo, source: 'Claude', by: 'regel',
-      tags: ['svar', 'auto'], links: repo, short: clip(firstPara(msg), S_MAX), summary: 'Svar fra Claude Code, lagret automatisk (Stop-hook).',
+      key: `svar:${sid.slice(0, 8)}:${sha8(msg)}`, kind: 'capture', name: titleOf(msg, `Svar i ${convo}`), content: msg, project, convo, source: 'Claude', by: 'regel',
+      tags: ['svar', 'auto'], links: repo, ...(pa ? { derivedFrom: [{ id: pa.id, version: pa.version || 1, level: 'L' }] } : {}),
+      short: clip(firstPara(msg), S_MAX), summary: `Substansielt svar i Code-økta «${convo}».`,   // samme tekst som import.js — ellers gir importen etterpå en falsk ny versjon
     })
-    if (status !== 'uendret') save(atoms)
-    log({ status, id: atom.id, project, len: msg.length })
+    if (pa) { const før = JSON.stringify(pa.ga || []); pa.ga = mergeGa(pa.ga, [{ id: atom.id, version: atom.version || 1 }]); endret = endret || JSON.stringify(pa.ga) !== før }
+    if (status !== 'uendret' || endret) save(atoms)
+    log({ status, id: atom.id, project, len: msg.length, prompt: pa?.id })
   } else if (mode === 'fil') {
     const fp = input.tool_input?.file_path
     // bare tekstdokumenter; ikke kode, ikke avhengigheter, ikke Claude-oppsett (men worktree-mapper under .claude/worktrees/ er ekte arbeid), ikke temp, ikke arkivet selv

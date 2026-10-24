@@ -1,7 +1,7 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
-import fs from 'node:fs';
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+import fs__default from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
+import path__default from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 // unzip.js — pakker ut en zip (bare json-filene) til en temp-mappe, uten shell.
@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 
 // hasRoot(dir) → true når utpakkingen ga noe brukbart (kalleren avgjør hva det er).
 function unzipToTemp(zipPath, hasRoot) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tua-import-'));
+  const tmp = fs__default.mkdtempSync(path__default.join(os.tmpdir(), 'tua-import-'));
   const tries = process.env.TUA_NO_UNZIP ? [] : [['unzip', ['-o', '-q', zipPath, '*.json', '-d', tmp]]];
   tries.push(['tar', ['-xf', zipPath, '-C', tmp, '--include=*.json']], ['tar', ['-xf', zipPath, '-C', tmp]]);
   let last = '';
@@ -22,7 +22,7 @@ function unzipToTemp(zipPath, hasRoot) {
     if (hasRoot(tmp)) return tmp
     last = r.error ? `${cmd}: ${r.error.message}` : (r.stderr || r.stdout || '').trim();
   }
-  throw new Error(`kunne ikke pakke ut ${path.basename(zipPath)}: ${last || 'ingen json-filer i zip-en'} (trenger unzip eller tar)`)
+  throw new Error(`kunne ikke pakke ut ${path__default.basename(zipPath)}: ${last || 'ingen json-filer i zip-en'} (trenger unzip eller tar)`)
 }
 
 export { unzipToTemp };

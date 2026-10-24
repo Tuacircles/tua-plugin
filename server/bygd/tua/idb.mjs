@@ -1,6 +1,6 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
-import fs from 'node:fs';
-import path from 'node:path';
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+import fs__default from 'node:fs';
+import path__default from 'node:path';
 
 // idb.js — leser Chromiums IndexedDB (LevelDB på disk) i ren Node, uten native avhengigheter.
 //
@@ -151,11 +151,11 @@ function* logRecords(buf) {
 // ── hele databasen: nyeste sekvensnummer per nøkkel vinner ──────────────────
 function loadLevelDb(dir) {
   const best = new Map();                     // nøkkel (latin1) → { ukey, seq, live, value }
-  const files = fs.readdirSync(dir).filter((f) => /^[0-9a-f]{6}\.(ldb|log|sst)$/i.test(f)).sort();
+  const files = fs__default.readdirSync(dir).filter((f) => /^[0-9a-f]{6}\.(ldb|log|sst)$/i.test(f)).sort();
   let errors = 0;
   for (const f of files) {
     let buf;
-    try { buf = fs.readFileSync(path.join(dir, f)); } catch { errors++; continue }
+    try { buf = fs__default.readFileSync(path__default.join(dir, f)); } catch { errors++; continue }
     try {
       const it = f.toLowerCase().endsWith('.log') ? logRecords(buf) : ldbRecords(buf);
       for (const r of it) {
@@ -325,7 +325,7 @@ class ChromeIndexedDb {
     }
     const num = this.blobCache.get(ck)[index];
     if (num == null || !this.blobDir) return null
-    return path.join(this.blobDir, dbId.toString(16), (num >> 8).toString(16).padStart(2, '0'), num.toString(16))
+    return path__default.join(this.blobDir, dbId.toString(16), (num >> 8).toString(16).padStart(2, '0'), num.toString(16))
   }
   decode(buf, dbId, storeId, rawKey) {
     if (buf[0] !== 0xff) throw new Error('Blink: mangler versjonstagg')
@@ -335,7 +335,7 @@ class ChromeIndexedDb {
         off++; const [, a] = varint(buf, off); off += a; const [idx, b] = varint(buf, off); off += b;
         const p = this.blobPath(dbId, storeId, rawKey, idx);
         if (!p) throw new Error('Blink: blob-info mangler')
-        return this.decode(fs.readFileSync(p), dbId, storeId, rawKey)                   // ENOENT → posten hoppes over
+        return this.decode(fs__default.readFileSync(p), dbId, storeId, rawKey)                   // ENOENT → posten hoppes over
       }
       if (buf[off] === 2) return this.decode(snappyDecompress(buf.subarray(off + 1)), dbId, storeId, rawKey)
       throw new Error('Blink: ukjent 0x11-undertype')

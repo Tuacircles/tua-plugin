@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import 'node:os';
 import path__default from 'node:path';
@@ -124,6 +124,9 @@ function erTuaSak(p) {
   try { const fd = fs__default.openSync(p, 'r'); const b = Buffer.alloc(600); const n = fs__default.readSync(fd, b, 0, 600, 0); fs__default.closeSync(fd); const h = b.subarray(0, n).toString('utf8'); return h.startsWith('---\n') && /\ntua_id:/.test(h) } catch { return false }
 }
 const stableId = (rel) => 'f_' + crypto__default.createHash('sha1').update(rel).digest('hex').slice(0, 12);
+// Kort innholdshash (FNV-1a, 8 hex) for nøkler som svar:<økt>:<sha8> og prompt:<økt>:<sha8>. ÉN funksjon for import, hooks og motor (M19).
+const sha8 = (s) => { let h = 0x811c9dc5; const t = String(s || ''); for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16).padStart(8, '0') };
+const hashOf = (s) => sha8(String(s || '').replace(/\s+/g, ' ').trim());   // whitespace flatet: samme prompt med annen linjedeling er samme prompt
 const sha256 = (s) => crypto__default.createHash('sha256').update(s).digest('hex');
 const sha256File = (p) => { try { return sha256(fs__default.readFileSync(p)) } catch { return null } };
 const readWritten = () => { try { return JSON.parse(fs__default.readFileSync(WRITTEN(), 'utf8')) } catch { return {} } };
@@ -488,7 +491,10 @@ function setShare(a, project, level) {
 
 // Proveniens festes automatisk. Ingen mappe å velge — prosjektet ER mappa.
 // short/medium = S/M som flate felt; by = hvem som skrev dem (Claude · regel · menneske).
-function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders }) {
+// M19 (skive 8, V16): `ga` = [{id, version}] — svarene en prompt-sak ga. Normaliseres som derivedFrom; upsert slår lista SAMMEN (union på id), aldri erstatter.
+const normalizeGa = (list) => (Array.isArray(list) ? list : []).filter((g) => g && g.id).map((g) => ({ id: String(g.id), version: Number(g.version) || 1 }));
+const mergeGa = (gammel = [], ny = []) => { const ut = [...normalizeGa(gammel)]; for (const g of normalizeGa(ny)) { const i = ut.findIndex((x) => x.id === g.id); if (i < 0) ut.push(g); else ut[i] = g; } return ut };
+function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga }) {
   const body = String(content || '').replace(/\r\n?/g, '\n').trim();   // M17: fila leses tilbake uten \r (files.js) — lagre likt, ellers blir hver import en «ny versjon»
   const now = Date.now();
   const a = {
@@ -516,6 +522,7 @@ function makeAtom({ content, name, source, project, convo, summary, tags, short,
   if (ln.length) a.links = ln;
   const df = normalizeDerived(derivedFrom); if (df.length) { a.derivedFrom = df; if (!kind) a.kind = 'leveranse'; }
   const rd = normalizeRenders(renders); if (rd.length) a.renders = rd;
+  const g = normalizeGa(ga); if (g.length) a.ga = g;
   return a
 }
 
@@ -559,17 +566,19 @@ function upsert(atoms, { key, ...data }) {
   const links = fresh.links?.length ? fresh.links : old.links;          // nye lenker erstatter; ingen sendt = behold
   const derivedFrom = fresh.derivedFrom?.length ? fresh.derivedFrom : old.derivedFrom;
   const renders = fresh.renders?.length ? fresh.renders : old.renders;
+  const ga = fresh.ga?.length || old.ga?.length ? mergeGa(old.ga, fresh.ga) : undefined;   // M19: `ga` vokser av bruk — union, aldri erstatning
   const kind = data.kind || (derivedFrom?.length ? 'leveranse' : old.kind);
   const attach = (a) => {
     if (levels) a.levels = levels; else delete a.levels;
     if (links) a.links = links; else delete a.links;
     if (derivedFrom) a.derivedFrom = derivedFrom; else delete a.derivedFrom;
     if (renders) a.renders = renders; else delete a.renders;
+    if (ga) a.ga = ga; else delete a.ga;
     a.kind = kind;
     return a
   };
   if (bodySame) {
-    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && kind === old.kind) return { atom: old, status: 'uendret' }
+    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old });
     return { atom: atoms[i], status: 'nivåer' }
   }
@@ -644,10 +653,12 @@ function score(a, tokens, max = 'L') {
 // Treff svarer med S (+ utdrag bare når søkeordene ikke står i S). Med context
 // søkes og vises aldri mer enn det prosjektet har lov til å se. Rangert (M12), paginert
 // med offset/limit; `total` ligger på resultatet.
-function search(atoms, query, { project, context, limit = 8, offset = 0 } = {}) {
+// `kind` (M19, skive 8): bare saker av én type — prompt-samlingen i appen og forslagene i Spør søker med kind=prompt.
+function search(atoms, query, { project, context, kind, limit = 8, offset = 0 } = {}) {
   const tokens = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
   const all = atoms
     .filter((a) => !project || a.project.toLowerCase() === project.toLowerCase())
+    .filter((a) => !kind || (a.kind || 'capture') === kind)
     .filter((a) => visibleIn(a, context))
     .map((a) => ({ a, max: maxLevel(a, context) }))
     .filter(({ a, max }) => tokens.every((t) => hay(a, max).includes(t)))
@@ -733,4 +744,4 @@ function ensureArchive() {
   return { created: true, root: FILES_ROOT }
 }
 
-export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, maxLevel, needsLevel, noteImport, onboardingActive, projectOf, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sources, staleSources, upsert, vaultClamp, versions, visibleIn, welcomeAtom };
+export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, hashOf, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, maxLevel, mergeGa, needsLevel, noteImport, onboardingActive, projectOf, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sha8, sources, staleSources, upsert, vaultClamp, versions, visibleIn, welcomeAtom };

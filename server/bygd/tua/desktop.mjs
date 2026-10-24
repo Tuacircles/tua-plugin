@@ -1,7 +1,7 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
-import fs from 'node:fs';
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+import fs__default from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
+import path__default from 'node:path';
 import zlib from 'node:zlib';
 import 'node:crypto';
 import { DATA_DIR } from './store.mjs';
@@ -27,14 +27,14 @@ import { ChromeIndexedDb } from './idb.mjs';
 
 
 // macOS: ~/Library/Application Support/Claude · Windows: %APPDATA%\Claude · Linux: ~/.config/Claude (platform.js)
-const CACHE_DIR = process.env.TUA_DESKTOP_CACHE || path.join(CLAUDE_APP_DIR, 'Cache', 'Cache_Data');
+const CACHE_DIR = process.env.TUA_DESKTOP_CACHE || path__default.join(CLAUDE_APP_DIR, 'Cache', 'Cache_Data');
 // 20.10.2026: fra Desktop 2.42304 (ca. 15.09.2026) ligger samtaleinnholdet ikke lenger i HTTP-cachen, men i appens IndexedDB
 // («claude-conversation-store», objektlageret «trees»): de sist åpnede samtalene — chat og Cowork («hub») — med hele
 // meldingstreet for korte samtaler og et utsnitt (historyWindow «windowed», fra floorIndex) for lange. HTTP-cachen har
 // fortsatt listesvarene (tittel + prosjekt) og eldre samtaler, så begge leses og nyeste versjon per uuid vinner.
-const IDB_DIR = process.env.TUA_DESKTOP_IDB || path.join(CLAUDE_APP_DIR, 'IndexedDB', 'https_claude.ai_0.indexeddb.leveldb');
+const IDB_DIR = process.env.TUA_DESKTOP_IDB || path__default.join(CLAUDE_APP_DIR, 'IndexedDB', 'https_claude.ai_0.indexeddb.leveldb');
 const IDB_BLOB_DIR = IDB_DIR.replace(/\.leveldb$/, '.blob');
-const idbAvailable = () => { try { return fs.statSync(IDB_DIR).isDirectory() } catch { return false } };
+const idbAvailable = () => { try { return fs__default.statSync(IDB_DIR).isDirectory() } catch { return false } };
 // zstd-dekoding kom i Node 22.15 / 23.8. Eldre Node: cachen kan ikke leses, og det sies i stedet for å feile stille.
 const ZSTD_OK = typeof zlib.zstdDecompressSync === 'function';
 const zstd = (b) => { if (!ZSTD_OK) throw new Error(`Desktop-cachen er zstd-komprimert og trenger Node ≥ 22.15 (har ${process.version})`); return zlib.zstdDecompressSync(b) };
@@ -43,7 +43,7 @@ const FINAL_MAGIC = Buffer.from('d8410d97456ffaf4', 'hex');        // 0xf4fa6f45
 const ZSTD_MAGIC = Buffer.from('28b52ffd', 'hex');
 const HEADER = 24, EOF = 24, KEY_MAX = 4096;
 // Tilstanden er maskin-spesifikk (cachen er på denne maskinen) og ~2 MB — den ligger i den lokale datamappa, ikke i arkivet (Dropbox)
-const STATE = () => path.join(DATA_DIR, 'desktop-state.json');
+const STATE = () => path__default.join(DATA_DIR, 'desktop-state.json');
 const UUID = '[0-9a-f-]{36}';
 
 // ── nøkkel → hva slags svar ─────────────────────────────────────────────────
@@ -70,22 +70,22 @@ function classify(key) {
 function readKey(file) {
   let fd = null;
   try {
-    fd = fs.openSync(file, 'r');
+    fd = fs__default.openSync(file, 'r');
     const head = Buffer.alloc(HEADER);
-    if (fs.readSync(fd, head, 0, HEADER, 0) < HEADER || !head.subarray(0, 8).equals(INITIAL_MAGIC)) return null
+    if (fs__default.readSync(fd, head, 0, HEADER, 0) < HEADER || !head.subarray(0, 8).equals(INITIAL_MAGIC)) return null
     const keyLen = head.readUInt32LE(12);
     if (keyLen < 8 || keyLen > KEY_MAX) return null
     const key = Buffer.alloc(keyLen);
-    if (fs.readSync(fd, key, 0, keyLen, HEADER) < keyLen) return null
+    if (fs__default.readSync(fd, key, 0, keyLen, HEADER) < keyLen) return null
     return key.toString('latin1')
-  } catch { return null } finally { if (fd !== null) fs.closeSync(fd); }
+  } catch { return null } finally { if (fd !== null) fs__default.closeSync(fd); }
 }
 // Hele svaret: kopi → dekod → slett kopien. Returnerer { key, status, json } eller null (ufullstendig/ugyldig fil).
 function readEntry(file, tmpDir) {
-  const copy = path.join(tmpDir, path.basename(file));
+  const copy = path__default.join(tmpDir, path__default.basename(file));
   try {
-    fs.copyFileSync(file, copy);
-    const b = fs.readFileSync(copy);
+    fs__default.copyFileSync(file, copy);
+    const b = fs__default.readFileSync(copy);
     if (b.length < HEADER + EOF * 2 || !b.subarray(0, 8).equals(INITIAL_MAGIC)) return null
     const keyLen = b.readUInt32LE(12);
     const key = b.subarray(HEADER, HEADER + keyLen).toString('latin1');
@@ -104,15 +104,15 @@ function readEntry(file, tmpDir) {
     let json = null;
     try { json = JSON.parse(text); } catch { return { key, status, json: null } }
     return { key, status, json }
-  } catch { return null } finally { try { fs.unlinkSync(copy); } catch {} }
+  } catch { return null } finally { try { fs__default.unlinkSync(copy); } catch {} }
 }
 
 // ── tilstand per fil ────────────────────────────────────────────────────────
-const readState = () => { try { return JSON.parse(fs.readFileSync(STATE(), 'utf8')) } catch { return {} } };
+const readState = () => { try { return JSON.parse(fs__default.readFileSync(STATE(), 'utf8')) } catch { return {} } };
 function writeState(s) {
-  try { fs.mkdirSync(path.dirname(STATE()), { recursive: true }); const tmp = STATE() + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(s) + '\n'); fs.renameSync(tmp, STATE()); } catch {}
+  try { fs__default.mkdirSync(path__default.dirname(STATE()), { recursive: true }); const tmp = STATE() + '.tmp'; fs__default.writeFileSync(tmp, JSON.stringify(s) + '\n'); fs__default.renameSync(tmp, STATE()); } catch {}
 }
-const cacheAvailable = () => { try { return fs.statSync(CACHE_DIR).isDirectory() } catch { return false } };
+const cacheAvailable = () => { try { return fs__default.statSync(CACHE_DIR).isDirectory() } catch { return false } };
 
 // Alle relevante filer i cachen: { file, kind, id, size, mtime } — nøkler fra forrige runde gjenbrukes når fila er uendret.
 // Tilstanden per fil er kompakt: [størrelse, mtime] for uinteressante filer, [størrelse, mtime, kind, id, id2] for svar fra claude.ai/api.
@@ -122,10 +122,10 @@ function scanCache({ state = readState(), log = () => {} } = {}) {
   const files = state.files || {};
   const seen = new Set();
   let opened = 0;
-  for (const name of fs.readdirSync(CACHE_DIR)) {
+  for (const name of fs__default.readdirSync(CACHE_DIR)) {
     if (!name.endsWith('_0')) continue
-    const file = path.join(CACHE_DIR, name);
-    let st; try { st = fs.statSync(file); } catch { continue }
+    const file = path__default.join(CACHE_DIR, name);
+    let st; try { st = fs__default.statSync(file); } catch { continue }
     if (st.size < HEADER + EOF * 2) continue
     seen.add(name);
     const prev = files[name];
@@ -167,10 +167,13 @@ function convFromJson(j, { id = null } = {}) {
   const artifacts = [], attachments = [], files = [];
   const tools = {};
   let thinking = 0, created = [], firstUser = '';
+  const pairs = [];                                          // M19 (skive 8): brukermelding + svarene som fulgte — import.js lager prompt- og svar-saker av dem
   const lines = chain.map((m) => {
     const who = m.sender === 'human' ? 'Bruker' : 'Claude';
     const parts = [];
     const blocks = Array.isArray(m.content) && m.content.length ? m.content : [{ type: 'text', text: m.text || '' }];
+    const txt = (textOfBlocks(blocks) || String(m.text || '')).trim();
+    if (m.sender === 'human') pairs.push({ prompt: txt, at: ms(m.created_at) || null, answers: [] }); else if (txt) pairs.at(-1)?.answers.push(txt);
     for (const b of blocks) {
       if (!b) continue
       if (b.type === 'text' && b.text) parts.push(b.text);
@@ -181,7 +184,7 @@ function convFromJson(j, { id = null } = {}) {
         const inp = b.input || {};
         if (name === 'create_file' && typeof inp.file_text === 'string') {
           const p = String(inp.path || inp.file_path || 'fil');
-          artifacts.push({ id: p, title: path.basename(p), content: inp.file_text, type: 'file', path: p });
+          artifacts.push({ id: p, title: path__default.basename(p), content: inp.file_text, type: 'file', path: p });
           parts.push(`[fil skrevet: ${p}]`);
         } else if (/artifacts?/i.test(name) && (inp.content || inp.new_str) && ['create', 'rewrite', 'update', undefined].includes(inp.command)) {
           artifacts.push({ id: inp.id || '', title: inp.title || inp.id || 'Artifact', content: String(inp.content || inp.new_str || ''), type: inp.type || '' });
@@ -205,7 +208,7 @@ function convFromJson(j, { id = null } = {}) {
     id: id || j.uuid, title: flat(j.name || j.title) || 'Uten tittel', created: ms(j.created_at) || Math.min(...created.filter(Boolean), Infinity) || null,
     updated: ms(j.updated_at) || ms(j.created_at) || null, projectUuid: j.project_uuid || j.project?.uuid || null, projectName: j.project?.name || null,
     summary: flat(j.summary || ''), model: j.model || '', firstUser, transcript: lines.join('\n\n'), messages: chain.length,
-    artifacts, attachments, files, tools, thinking, branches,
+    artifacts, attachments, files, tools, thinking, branches, pairs,
   }
 }
 
@@ -225,7 +228,7 @@ function shortTitle(s) {
 function desktopFolderGrants() {
   const bySession = new Map(), byConversation = new Map();
   try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(CLAUDE_APP_DIR, 'claude_desktop_config.json'), 'utf8'));
+    const cfg = JSON.parse(fs__default.readFileSync(path__default.join(CLAUDE_APP_DIR, 'claude_desktop_config.json'), 'utf8'));
     const p = cfg?.preferences || {};
     for (const [k, v] of Object.entries(p.remoteSessionFolderGrants || {})) if (Array.isArray(v)) bySession.set(k.replace(/^session_/, ''), v.map(String));
     for (const [k, v] of Object.entries(p.remoteChatFolderGrants || {})) if (Array.isArray(v?.folders)) byConversation.set(k, v.folders.map(String));
@@ -239,10 +242,10 @@ function desktopFolderGrants() {
 function collectDesktopStore({ log = () => {} } = {}) {
   const out = [];
   if (!idbAvailable()) return { entries: out, stats: { lagerSamtaler: 0, lagerHoppet: 0 } }
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tua-idb-'));
+  const tmp = fs__default.mkdtempSync(path__default.join(os.tmpdir(), 'tua-idb-'));
   const stats = { lagerSamtaler: 0, lagerHoppet: 0 };
   try {
-    for (const f of fs.readdirSync(IDB_DIR)) if (/^[0-9a-f]{6}\.(ldb|log|sst)$/i.test(f)) { try { fs.copyFileSync(path.join(IDB_DIR, f), path.join(tmp, f)); } catch {} }
+    for (const f of fs__default.readdirSync(IDB_DIR)) if (/^[0-9a-f]{6}\.(ldb|log|sst)$/i.test(f)) { try { fs__default.copyFileSync(path__default.join(IDB_DIR, f), path__default.join(tmp, f)); } catch {} }
     const db = new ChromeIndexedDb(tmp, IDB_BLOB_DIR);
     const skipped = {};
     for (const { value: v } of db.records('claude-conversation-store', 'trees', skipped)) {
@@ -258,7 +261,7 @@ function collectDesktopStore({ log = () => {} } = {}) {
     log(`Desktop-lager: ${db.files} LevelDB-filer, ${db.errors} feil, ${out.length} samtaler, ${stats.lagerHoppet} poster hoppet over`);
   } catch (e) {
     log(`Desktop-lager: ${e.message}`);
-  } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+  } finally { try { fs__default.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   return { entries: out, stats }
 }
 
@@ -267,7 +270,7 @@ function collectDesktopStore({ log = () => {} } = {}) {
 function collectDesktop({ log = () => {}, since = null } = {}) {
   const state = readState();
   const entries = scanCache({ state, log });
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tua-desktop-'));
+  const tmp = fs__default.mkdtempSync(path__default.join(os.tmpdir(), 'tua-desktop-'));
   const projects = new Map();                   // uuid → navn
   const listed = new Map();                     // samtale-uuid → { project_uuid, updated_at, is_archived, name }
   const bestFile = new Map();                   // samtale-uuid → { file, updated, n }
@@ -363,7 +366,7 @@ function collectDesktop({ log = () => {}, since = null } = {}) {
     state.convs = convFiles;
     writeState(state);
     return { convs, projects, docs: [...docs.values()], artifacts, snapshots, listed, stats, best: bestFile }
-  } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+  } finally { try { fs__default.rmSync(tmp, { recursive: true, force: true }); } catch {} }
 }
 
 // Hvor mange Desktop-samtaler ligger i cachen (onboarding + SessionStart). Bare nøkler, ingen dekoding (~1 s når
@@ -387,7 +390,7 @@ const DAY = 24 * 60 * 60 * 1000;
 function desktopStaleness({ maxDays = 14 } = {}) {
   let newest = 0;
   for (const [k, v] of Object.entries(importedDesktop())) if (!k.startsWith('share:') && Number(v) > newest) newest = Number(v);
-  const mtime = (p) => { try { return fs.statSync(p).mtimeMs } catch { return 0 } };
+  const mtime = (p) => { try { return fs__default.statSync(p).mtimeMs } catch { return 0 } };
   const active = Math.max(mtime(IDB_DIR), mtime(CACHE_DIR)) > Date.now() - 2 * DAY;
   const days = newest ? Math.floor((Date.now() - newest) / DAY) : null;
   return { newest, days, active, stale: active && newest > 0 && days >= maxDays }

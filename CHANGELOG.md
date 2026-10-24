@@ -2,6 +2,15 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.8 — 2026-10-24 (prompts are first-class atoms — V16)
+
+- **Every substantial prompt becomes its own atom** (`kind: prompt`, key `prompt:<session8>:<sha8>`): in the Code/Cowork import, in the Desktop-cache and export readers, and live in Claude Code through a new `UserPromptSubmit` hook (silent — it writes nothing to stdout). S is the first sentence (≤ 300 chars), the atom lives in the project folder with the tag `prompt`, and it is never shared by default. Threshold: ≥ 80 characters, not a slash command, not a bare confirmation («ja», «fortsett»).
+- **Prompt ↔ answer, both ways:** the answer atom gets the prompt first in `bygget_av`; the prompt gets the answer in `ga`. The `Stop` hook now saves the prompt even when the answer is short, and uses the same content hash as the import (`sha8`), so a hook-saved answer and the imported one are one atom.
+- **Re-run:** the engine (`spor`) keys Spør prompts on their text (`prompt:spor:<sha8>`), so asking the same question again grows `ga` instead of creating a new atom; «Kjør igjen» in the app sends an existing prompt to any model and links the answer to it (a new version only when the text changed).
+- **Dataset (V21 level 2):** `GET /api/datasett.jsonl` on the bridge — one line per conclusion: prompt, source ids with level, answer ids with recipient, differences id, the conclusion text, locked or not. Never answer texts, never the placeholder → original mapping. Local file, not a delivery.
+- **Onboarding in the app** (`/start`, shown automatically on first run): three steps without a key — local model found/not found, archive location (nothing is moved), bring in the history with progress (`POST /api/import` as SSE around `importAlt`). State in `~/.tua/config.json`.
+- Bridge: `GET /api/search?kind=…`, `POST /api/spor {prompt}`, `GET/POST /api/onboarding`. Tests: `server/test-prompter.mjs` (59 checks).
+
 ## 0.5.7 — 2026-10-21 (the health check writes its own summary and shows up as a card)
 
 - The report atom now carries an M (150–400 words) written by the routine itself: status, red/yellow checks with evidence, the errors, the archive numbers, cleanup proposals, what changed since yesterday, proposals waiting for Erik.

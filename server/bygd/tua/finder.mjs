@@ -1,8 +1,8 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
-import fs from 'node:fs';
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+import fs__default from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
-import crypto from 'node:crypto';
+import path__default from 'node:path';
+import crypto__default from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { load, upsert, S_MAX, save, noteImport, finishOnboarding, SHORT_L, filesMode, FILES_ROOT, DATA_DIR, ensureArchive } from './store.mjs';
 import { titleOf, firstPara, listCodeSessions, parseCodeSession, projectOfCwd, COWORK_ROOT } from './import.mjs';
@@ -27,18 +27,18 @@ const AI_DOMAINS = {
   'gemini.google.com': 'Gemini', 'perplexity.ai': 'Perplexity', 'copilot.microsoft.com': 'Copilot', 'chat.mistral.ai': 'Mistral', 'grok.com': 'Grok',
 };
 const DEFAULT_FOLDERS = () => {
-  try { const c = JSON.parse(fs.readFileSync(path.join(HOME, '.tua', 'config.json'), 'utf8')); if (Array.isArray(c.finder?.folders) && c.finder.folders.length) return c.finder.folders } catch {}
-  return ['Downloads', 'Documents', 'Desktop'].map((d) => path.join(os.homedir(), d))
+  try { const c = JSON.parse(fs__default.readFileSync(path__default.join(HOME, '.tua', 'config.json'), 'utf8')); if (Array.isArray(c.finder?.folders) && c.finder.folders.length) return c.finder.folders } catch {}
+  return ['Downloads', 'Documents', 'Desktop'].map((d) => path__default.join(os.homedir(), d))
 };
 const DOC_EXT = /\.(pdf|docx?|pptx?|xlsx?|md|markdown|txt|rtf|html?|csv|json|png|jpe?g|svg)$/i;
 const TEXT_EXT = /\.(md|markdown|txt|csv|json|html?)$/i;
 const SKIP_DIR = /^(node_modules|\.git|Library|\.Trash)$|\.(app|photoslibrary|bundle|framework|xcodeproj)$/i;
 const MAX_SIZE = 50e6, MAX_TEXT = 300_000, MAX_DEPTH = 3;
-const STATE = () => path.join(DATA_DIR, 'finder-state.json');
-const readState = () => { try { return JSON.parse(fs.readFileSync(STATE(), 'utf8')) } catch { return { files: {} } } };
-const writeState = (s) => { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(STATE(), JSON.stringify(s) + '\n'); } catch {} };
-const sha256File = (p) => { try { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex') } catch { return null } };
-const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const STATE = () => path__default.join(DATA_DIR, 'finder-state.json');
+const readState = () => { try { return JSON.parse(fs__default.readFileSync(STATE(), 'utf8')) } catch { return { files: {} } } };
+const writeState = (s) => { try { fs__default.mkdirSync(DATA_DIR, { recursive: true }); fs__default.writeFileSync(STATE(), JSON.stringify(s) + '\n'); } catch {} };
+const sha256File = (p) => { try { return crypto__default.createHash('sha256').update(fs__default.readFileSync(p)).digest('hex') } catch { return null } };
+const sha256 = (s) => crypto__default.createHash('sha256').update(s).digest('hex');
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 const iso = (t) => (t ? new Date(t).toISOString().slice(0, 10) : '');
 const fmtSize = (n) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n > 1e3 ? `${Math.round(n / 1e3)} kB` : `${n} B`);
@@ -80,23 +80,23 @@ function knownContent({ desktop = null, log = () => {} } = {}) {
   // Desktop-cachen: create_file-innhold + artifacts, per samtale
   for (const c of desktop?.convs || []) for (const a of c.artifacts || []) if (a.content) { addText(a.content, { label: a.title, origin: 'Claude Desktop', project: c.project, convo: c.title, href: c.href }); n++; }
   // Code-økter: Write-innhold
-  for (const s of listCodeSessions()) { try { const p = parseCodeSession(s.file); for (const [fp, content] of p.files) { addText(content, { label: path.basename(fp), origin: 'Claude Code', project: projectOfCwd(p.cwd), convo: p.convo }); n++; } } catch {} }
+  for (const s of listCodeSessions()) { try { const p = parseCodeSession(s.file); for (const [fp, content] of p.files) { addText(content, { label: path__default.basename(fp), origin: 'Claude Code', project: projectOfCwd(p.cwd), convo: p.convo }); n++; } } catch {} }
   // Cowork: filene i outputs/ (det Cowork skrev) — hashes lat
-  const dirs = (d) => { try { return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path.join(d, e.name)) } catch { return [] } };
+  const dirs = (d) => { try { return fs__default.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path__default.join(d, e.name)) } catch { return [] } };
   const walkOut = (dir, depth, item) => {
     if (depth > 4) return
-    let entries = []; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return }
+    let entries = []; try { entries = fs__default.readdirSync(dir, { withFileTypes: true }); } catch { return }
     for (const e of entries) {
       if (e.name.startsWith('.') || SKIP_DIR.test(e.name)) continue
-      const p = path.join(dir, e.name);
+      const p = path__default.join(dir, e.name);
       if (e.isDirectory()) walkOut(p, depth + 1, item);
-      else if (e.isFile() && DOC_EXT.test(e.name)) { try { const st = fs.statSync(p); if (st.size > 0 && st.size <= MAX_SIZE) { add(st.size, { ...item, file: p, label: e.name }); n++; } } catch {} }
+      else if (e.isFile() && DOC_EXT.test(e.name)) { try { const st = fs__default.statSync(p); if (st.size > 0 && st.size <= MAX_SIZE) { add(st.size, { ...item, file: p, label: e.name }); n++; } } catch {} }
     }
   };
-  for (const acct of dirs(COWORK_ROOT)) for (const room of dirs(acct)) for (const sess of dirs(room).filter((p) => path.basename(p).startsWith('local_'))) {
-    let meta = {}; try { meta = JSON.parse(fs.readFileSync(sess + '.json', 'utf8')); } catch {}
+  for (const acct of dirs(COWORK_ROOT)) for (const room of dirs(acct)) for (const sess of dirs(room).filter((p) => path__default.basename(p).startsWith('local_'))) {
+    let meta = {}; try { meta = JSON.parse(fs__default.readFileSync(sess + '.json', 'utf8')); } catch {}
     const folder = Array.isArray(meta.userSelectedFolders) && meta.userSelectedFolders[0] ? String(meta.userSelectedFolders[0]) : '';
-    walkOut(path.join(sess, 'outputs'), 0, { origin: 'Claude Cowork', project: folder ? projectOfCwd(folder) : 'Cowork', convo: meta.title ? String(meta.title) : '' });
+    walkOut(path__default.join(sess, 'outputs'), 0, { origin: 'Claude Cowork', project: folder ? projectOfCwd(folder) : 'Cowork', convo: meta.title ? String(meta.title) : '' });
   }
   log(`Finder: ${n} kjente innhold (create_file i Desktop-cachen, Write i Code-økter, Cowork outputs/) fordelt på ${bySize.size} størrelser`);
   return bySize
@@ -108,12 +108,12 @@ function walkFolders(folders) {
   const out = [];
   const walk = (dir, folder, depth) => {
     if (depth > MAX_DEPTH) return
-    let entries = []; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return }
+    let entries = []; try { entries = fs__default.readdirSync(dir, { withFileTypes: true }); } catch { return }
     for (const e of entries) {
       if (e.name.startsWith('.') || SKIP_DIR.test(e.name)) continue
-      const p = path.join(dir, e.name);
+      const p = path__default.join(dir, e.name);
       if (e.isDirectory()) walk(p, folder, depth + 1);
-      else if (e.isFile() && DOC_EXT.test(e.name)) { try { const st = fs.statSync(p); if (st.size > 0 && st.size <= MAX_SIZE) out.push({ path: p, folder, size: st.size, mtime: st.mtimeMs }); } catch {} }
+      else if (e.isFile() && DOC_EXT.test(e.name)) { try { const st = fs__default.statSync(p); if (st.size > 0 && st.size <= MAX_SIZE) out.push({ path: p, folder, size: st.size, mtime: st.mtimeMs }); } catch {} }
     }
   };
   for (const f of folders) walk(f, f, 0);
@@ -129,7 +129,7 @@ function contentCandidates(folders, known, { state = readState() } = {}) {
     const sha = prev && prev.size === f.size && prev.mtime === f.mtime ? prev.sha : sha256File(f.path);
     if (!sha) continue
     files[f.path] = { size: f.size, mtime: f.mtime, sha };
-    const hit = items.find((it) => !(it.file && path.resolve(it.file) === path.resolve(f.path)) && hashOf(it) === sha);
+    const hit = items.find((it) => !(it.file && path__default.resolve(it.file) === path__default.resolve(f.path)) && hashOf(it) === sha);
     if (hit) out.push({ path: f.path, folder: f.folder, criterion: 'innhold', origin: hit.origin, known: hit, convo: hit.href || null });
   }
   return out
@@ -137,7 +137,7 @@ function contentCandidates(folders, known, { state = readState() } = {}) {
 
 // ── alt sammen → atomer ─────────────────────────────────────────────────────
 function findCandidates({ folders = DEFAULT_FOLDERS(), desktop = null, log = () => {} } = {}) {
-  const real = folders.filter((f) => { try { return fs.statSync(f).isDirectory() } catch { return false } });
+  const real = folders.filter((f) => { try { return fs__default.statSync(f).isDirectory() } catch { return false } });
   const byPath = new Map();
   for (const f of real) for (const c of originCandidates(f)) byPath.set(c.path, { ...c, folder: f });
   const state = readState();
@@ -149,13 +149,13 @@ function findCandidates({ folders = DEFAULT_FOLDERS(), desktop = null, log = () 
   writeState(state);
   return { candidates: [...byPath.values()].filter((c) => !insideArchive(c.path)), folders: real }
 }
-const insideArchive = (p) => { if (!filesMode()) return false; const r = path.relative(FILES_ROOT, p); return !!r && !r.startsWith('..') && !path.isAbsolute(r) };
+const insideArchive = (p) => { if (!filesMode()) return false; const r = path__default.relative(FILES_ROOT, p); return !!r && !r.startsWith('..') && !path__default.isAbsolute(r) };
 // Filer inne i et git-repo er Claude Codes domene (hooks + Code-importen, nøkkel fil:<sti>) — ikke Finder-connectorens
-const insideRepo = (p) => { let d = path.dirname(p); for (let i = 0; i < 8 && d && d !== path.dirname(d); i++, d = path.dirname(d)) if (fs.existsSync(path.join(d, '.git'))) return true; return false };
+const insideRepo = (p) => { let d = path__default.dirname(p); for (let i = 0; i < 8 && d && d !== path__default.dirname(d); i++, d = path__default.dirname(d)) if (fs__default.existsSync(path__default.join(d, '.git'))) return true; return false };
 function countFinderCandidates({ desktop = null, quick = false } = {}) {
   try {
     const atoms = load();
-    const list = quick ? DEFAULT_FOLDERS().filter((f) => fs.existsSync(f)).flatMap((f) => originCandidates(f)) : findCandidates({ desktop }).candidates;
+    const list = quick ? DEFAULT_FOLDERS().filter((f) => fs__default.existsSync(f)).flatMap((f) => originCandidates(f)) : findCandidates({ desktop }).candidates;
     return list.filter((c) => !insideRepo(c.path) && !insideArchive(c.path) && !atoms.some((a) => a.key === `fil:${c.path}`)).length
   } catch { return 0 }
 }
@@ -176,19 +176,19 @@ function scanFinder({ dryRun = false, log = () => {}, folders = null, desktop = 
       if (insideRepo(c.path)) { stats.repo++; continue }                                                   // Claude Codes domene
       const old = atoms.find((a) => a.key === `fil:${c.path}`);
       if (old && !(old.tags || []).includes('finder')) { stats.alleredeITua++; continue }                 // lagret av hook/Code-import — rør ikke
-      const fk = `${path.basename(c.folder)} · ${c.criterion}`;
+      const fk = `${path__default.basename(c.folder)} · ${c.criterion}`;
       perFolder[fk] = (perFolder[fk] || 0) + 1;
-      const st = fs.statSync(c.path);
-      const name = path.basename(c.path, path.extname(c.path));
+      const st = fs__default.statSync(c.path);
+      const name = path__default.basename(c.path, path__default.extname(c.path));
       const conv = convAtom(c.convo);
       if (conv) stats.koblet++;
       const readable = TEXT_EXT.test(c.path) && st.size <= 5e6;
       let text = '';
-      if (readable) { try { text = fs.readFileSync(c.path, 'utf8'); if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT) + `\n\n_(forkortet: ${text.length - MAX_TEXT} tegn til i fila)_`; } catch { text = ''; } }
+      if (readable) { try { text = fs__default.readFileSync(c.path, 'utf8'); if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT) + `\n\n_(forkortet: ${text.length - MAX_TEXT} tegn til i fila)_`; } catch { text = ''; } }
       if (text.trim()) stats.lesbare++;
       const origin = c.origin || 'AI';
       const whereLine = (c.urls || []).filter((u) => !/oaiusercontent|storage\.googleapis/.test(u)).slice(0, 3).join(' · ');
-      const desc = `_Dokument · ${path.extname(c.path).slice(1).toLowerCase()} · ${fmtSize(st.size)} · ${iso(st.mtimeMs)} · fra ${origin}${c.known?.convo ? ` («${c.known.convo}»)` : ''} · kriterium: ${c.criterion}_`;
+      const desc = `_Dokument · ${path__default.extname(c.path).slice(1).toLowerCase()} · ${fmtSize(st.size)} · ${iso(st.mtimeMs)} · fra ${origin}${c.known?.convo ? ` («${c.known.convo}»)` : ''} · kriterium: ${c.criterion}_`;
       const content = text.trim()
         ? `# ${titleOf(text, name)}\n\n${desc}\n\nFil: ${c.path}\n\n${text}`
         : `# ${name}\n\n${desc}\n\nFila ligger i ${c.path} og er ikke kopiert — dette atomet er pekeren.${whereLine ? `\n\nOpphav: ${whereLine}` : ''}${c.known ? `\n\nInnholdet er identisk med ${c.known.file ? `fila ${c.known.label} i en Cowork-økt` : `«${c.known.label}» som Claude skrev i ${c.known.origin}`}${c.known.convo ? ` (samtalen «${c.known.convo}»)` : ''}.` : ''}`;
@@ -197,7 +197,7 @@ function scanFinder({ dryRun = false, log = () => {}, folders = null, desktop = 
       const { atom, status } = upsert(atoms, {
         key: `fil:${c.path}`, kind: 'capture', name: text.trim() ? titleOf(text, name) : name, content, project: old ? old.project : project, convo: conv?.convo || c.known?.convo || old?.convo || '',
         source: origin, by: 'regel', tags: ['dokument', 'finder'], links, ...(conv ? { derivedFrom: [{ id: conv.id, version: conv.version || 1, level: 'L' }] } : {}),
-        short: clip(text.trim() ? firstPara(text) : `${name} (${path.extname(c.path).slice(1)}, ${fmtSize(st.size)}) fra ${origin}, ${iso(st.mtimeMs)}. Ligger i ${path.basename(c.folder)}.`, S_MAX),
+        short: clip(text.trim() ? firstPara(text) : `${name} (${path__default.extname(c.path).slice(1)}, ${fmtSize(st.size)}) fra ${origin}, ${iso(st.mtimeMs)}. Ligger i ${path__default.basename(c.folder)}.`, S_MAX),
         summary: `Funnet av Finder-connectoren (${c.criterion}); fila er referert, ikke kopiert.`,
       });
       if (status === 'ny') { atom.capturedAt = st.mtimeMs; atom.createdAt = st.mtimeMs; stats.nye++; } else if (status === 'oppdatert') stats.oppdatert++; else stats.uendret++;
@@ -205,10 +205,10 @@ function scanFinder({ dryRun = false, log = () => {}, folders = null, desktop = 
   }
   const folderLine = Object.entries(perFolder).sort().map(([k, n]) => `${k}: ${n}`).join(' · ') || '—';
   const taken = candidates.filter((c) => !insideRepo(c.path));
-  const listed = taken.slice(0, dryRun ? 120 : 40).map((c) => `- ${path.basename(c.folder)}/${path.relative(c.folder, c.path)} · ${c.criterion} · ${c.origin}${c.known?.convo ? ` · «${c.known.convo}»` : ''}`);
+  const listed = taken.slice(0, dryRun ? 120 : 40).map((c) => `- ${path__default.basename(c.folder)}/${path__default.relative(c.folder, c.path)} · ${c.criterion} · ${c.origin}${c.known?.convo ? ` · «${c.known.convo}»` : ''}`);
   const report = [
     '# Import: Finder (dokumenter ved referanse)', '',
-    `${real.map((f) => path.basename(f)).join(', ')} · ${candidates.length} kandidater · ${new Date().toLocaleString('no-NO')}${dryRun ? ' · **dry-run, ingenting skrevet**' : ''}`, '',
+    `${real.map((f) => path__default.basename(f)).join(', ')} · ${candidates.length} kandidater · ${new Date().toLocaleString('no-NO')}${dryRun ? ' · **dry-run, ingenting skrevet**' : ''}`, '',
     `- **Dokumenter:** ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret`,
     `- **Per mappe og kriterium:** ${folderLine}`,
     `- **Lesbare (teksten som L):** ${stats.lesbare} · **koblet til samtale-atom:** ${stats.koblet}`,
@@ -234,7 +234,7 @@ function watchFinder({ log = () => {}, folders = null, debounceMs = 10000 } = {}
   let timer = null;
   const kick = () => { clearTimeout(timer); timer = setTimeout(() => { try { const r = scanFinder({ log: () => {}, folders }); if (r.stats.nye || r.stats.oppdatert) log(`Finder: ${r.stats.nye} nye · ${r.stats.oppdatert} oppdaterte dokument-atomer`); } catch (e) { log(`Finder: ${e.message}`); } }, debounceMs); };
   const watchers = [];
-  for (const f of folders || DEFAULT_FOLDERS()) { try { watchers.push(fs.watch(f, { persistent: false }, kick)); } catch {} }
+  for (const f of folders || DEFAULT_FOLDERS()) { try { watchers.push(fs__default.watch(f, { persistent: false }, kick)); } catch {} }
   return () => { clearTimeout(timer); for (const w of watchers) w.close(); }
 }
 

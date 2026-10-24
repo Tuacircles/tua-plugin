@@ -1,7 +1,7 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-23. IKKE REDIGER: kilden er server/*.js og node_modules.
-import fs from 'node:fs';
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+import fs__default from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
+import path__default from 'node:path';
 import { spawn } from 'node:child_process';
 
 // platform.js — alt som er OS-spesifikt i Tua, samlet på ett sted (M18).
@@ -21,46 +21,46 @@ const IS_MAC = PLATFORM === 'darwin';
 const IS_WIN = PLATFORM === 'win32';
 const HOME = process.env.TUA_HOME || os.homedir();
 const env = (k) => process.env[k] || '';
-const exists = (p) => { try { return !!p && fs.existsSync(p) } catch { return false } };
+const exists = (p) => { try { return !!p && fs__default.existsSync(p) } catch { return false } };
 const first = (...c) => c.find(exists) || c.find(Boolean) || null;
-const firstDir = (dir, prefix) => { try { return fs.readdirSync(dir).filter((n) => n.startsWith(prefix)).map((n) => path.join(dir, n)).find((p) => fs.statSync(p).isDirectory()) || null } catch { return null } };
+const firstDir = (dir, prefix) => { try { return fs__default.readdirSync(dir).filter((n) => n.startsWith(prefix)).map((n) => path__default.join(dir, n)).find((p) => fs__default.statSync(p).isDirectory()) || null } catch { return null } };
 
 // Stier i «posix-form» for regex-tester (/\/(node_modules|\.git)\//): omvendt skråstrek → skråstrek. Endrer aldri stien som brukes mot disken.
 const posix = (p) => String(p || '').replace(/\\/g, '/');
 
 // 1. Claude Desktops datamappe (Electrons userData): cache i Cache/Cache_Data, Cowork-økter i local-agent-mode-sessions
 const CLAUDE_APP_DIR = IS_MAC
-  ? path.join(HOME, 'Library', 'Application Support', 'Claude')
+  ? path__default.join(HOME, 'Library', 'Application Support', 'Claude')
   : IS_WIN
-    ? path.join(env('APPDATA') || path.join(HOME, 'AppData', 'Roaming'), 'Claude')
-    : path.join(env('XDG_CONFIG_HOME') || path.join(HOME, '.config'), 'Claude');
+    ? path__default.join(env('APPDATA') || path__default.join(HOME, 'AppData', 'Roaming'), 'Claude')
+    : path__default.join(env('XDG_CONFIG_HOME') || path__default.join(HOME, '.config'), 'Claude');
 
 // 2. Skytjenestene slik de ligger på hvert OS. `null` = tjenesten finnes ikke på dette OS-et (iCloud på Linux).
 //    Mappa som returneres er den tjenesten synker; arkivet blir <mappe>/Tua. Lokalt (~/Tua) finnes alltid.
 function cloudBases() {
   if (IS_MAC) {
-    const CLOUD = path.join(HOME, 'Library', 'CloudStorage');
+    const CLOUD = path__default.join(HOME, 'Library', 'CloudStorage');
     const gd = firstDir(CLOUD, 'GoogleDrive-');
     return {
-      icloud: path.join(HOME, 'Library', 'Mobile Documents', 'com~apple~CloudDocs'),
-      dropbox: first(path.join(HOME, 'Dropbox'), path.join(CLOUD, 'Dropbox')),
-      onedrive: firstDir(CLOUD, 'OneDrive') || path.join(HOME, 'OneDrive'),
-      googledrive: gd ? path.join(gd, 'My Drive') : path.join(HOME, 'Google Drive', 'My Drive'),
+      icloud: path__default.join(HOME, 'Library', 'Mobile Documents', 'com~apple~CloudDocs'),
+      dropbox: first(path__default.join(HOME, 'Dropbox'), path__default.join(CLOUD, 'Dropbox')),
+      onedrive: firstDir(CLOUD, 'OneDrive') || path__default.join(HOME, 'OneDrive'),
+      googledrive: gd ? path__default.join(gd, 'My Drive') : path__default.join(HOME, 'Google Drive', 'My Drive'),
     }
   }
   if (IS_WIN) {
     return {
-      icloud: first(path.join(HOME, 'iCloudDrive'), env('iCloudDrive')),
-      dropbox: path.join(HOME, 'Dropbox'),
-      onedrive: first(env('OneDrive'), env('OneDriveConsumer'), env('OneDriveCommercial'), path.join(HOME, 'OneDrive')),
-      googledrive: first(path.join(HOME, 'Google Drive', 'My Drive'), 'G:\\My Drive', path.join(HOME, 'My Drive')),
+      icloud: first(path__default.join(HOME, 'iCloudDrive'), env('iCloudDrive')),
+      dropbox: path__default.join(HOME, 'Dropbox'),
+      onedrive: first(env('OneDrive'), env('OneDriveConsumer'), env('OneDriveCommercial'), path__default.join(HOME, 'OneDrive')),
+      googledrive: first(path__default.join(HOME, 'Google Drive', 'My Drive'), 'G:\\My Drive', path__default.join(HOME, 'My Drive')),
     }
   }
   return {
     icloud: null,
-    dropbox: path.join(HOME, 'Dropbox'),
-    onedrive: path.join(HOME, 'OneDrive'),
-    googledrive: first(path.join(HOME, 'Google Drive', 'My Drive'), path.join(HOME, 'GoogleDrive', 'My Drive'), path.join(HOME, 'Google Drive')),
+    dropbox: path__default.join(HOME, 'Dropbox'),
+    onedrive: path__default.join(HOME, 'OneDrive'),
+    googledrive: first(path__default.join(HOME, 'Google Drive', 'My Drive'), path__default.join(HOME, 'GoogleDrive', 'My Drive'), path__default.join(HOME, 'Google Drive')),
   }
 }
 
@@ -71,7 +71,7 @@ function openCommand(kind, target) {
   if (kind !== 'reveal' && kind !== 'url') throw new Error(`openCommand: ukjent type «${kind}»`)
   if (IS_MAC) return kind === 'reveal' ? ['open', ['-R', target]] : ['open', [target]]
   if (IS_WIN) return kind === 'reveal' ? ['explorer.exe', [`/select,${target}`]] : ['rundll32.exe', ['url.dll,FileProtocolHandler', target]]
-  return ['xdg-open', [kind === 'reveal' ? path.dirname(target) : target]]
+  return ['xdg-open', [kind === 'reveal' ? path__default.dirname(target) : target]]
 }
 const openSpawn = (kind, target, { dryrun = false } = {}) => new Promise((resolve, reject) => {
   const [cmd, args] = openCommand(kind, target);
@@ -89,7 +89,7 @@ const openSpawn = (kind, target, { dryrun = false } = {}) => new Promise((resolv
 function zoneIdentifierUrls(file) {
   if (!IS_WIN) return []
   try {
-    const t = fs.readFileSync(`${file}:Zone.Identifier`, 'utf8');
+    const t = fs__default.readFileSync(`${file}:Zone.Identifier`, 'utf8');
     return [...new Set([...t.matchAll(/^(?:HostUrl|ReferrerUrl)=(https?:\/\/\S+)/gim)].map((m) => m[1]))]
   } catch { return [] }
 }

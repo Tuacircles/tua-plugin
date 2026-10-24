@@ -17,7 +17,7 @@ Tua is a Norwegian-language product (tool descriptions, skills and answers are i
 | **Skill** `tua_auto` | Mirror a git project (commit log, manifest, decision log, PDF-backed documents) into Tua after every commit. |
 | **Skill** `tua_start` | Onboarding in one go: bring in all history (dry run first), confirm auto-capture, set up `tua_auto` for the repository you are in. |
 | **Skill** `tua_status` | Read-only overview: atoms per project, what is still outside Tua, whether the hooks are saving, whether this repository is mirrored. |
-| **Hooks** (Claude Code only) | `SessionStart` reminder when history is waiting to be imported (points to `tua_start` the first time, offers `tua_auto` once per repository) · `Stop` saves long answers · `PostToolUse Write/Edit` saves text documents you write · `PreCompact`/`SessionEnd` saves a session summary. All can be turned off with the plugin setting **Automatisk fangst**. |
+| **Hooks** (Claude Code only) | `SessionStart` reminder when history is waiting to be imported (points to `tua_start` the first time, offers `tua_auto` once per repository) · `UserPromptSubmit` saves each substantial prompt as its own atom (0.5.8, V16 — silent, never writes to the prompt) · `Stop` saves long answers and links them to the prompt · `PostToolUse Write/Edit` saves text documents you write · `PreCompact`/`SessionEnd` saves a session summary. All can be turned off with the plugin setting **Automatisk fangst**. |
 | **The Tua card** | An MCP App (`ui://tua/kort`) that renders a hit list or one atom inside Claude Desktop, claude.ai, Cursor and VS Code, with S → M → L on demand and "Open in …" buttons. |
 
 ### How an atom works
@@ -84,7 +84,7 @@ This section exists so that nothing Tua does is a surprise. It is the complete l
 
 **Data collection.** The Tua plugin collects no data for us. It runs entirely on your computer. We receive nothing when you install, run or remove it — no usage statistics, no crash reports, no identifiers.
 
-**What the plugin processes locally.** On your request it reads your own content — conversations and documents from Claude Code, Cowork and Claude Desktop stored on your machine, text you ask it to save, exports you place in `Innboks` — and writes it as markdown files to the archive folder you chose. Conversation content captured by the hooks (long answers, documents, session summaries) is personal data about you and whoever appears in it; it stays in your folder.
+**What the plugin processes locally.** On your request it reads your own content — conversations and documents from Claude Code, Cowork and Claude Desktop stored on your machine, text you ask it to save, exports you place in `Innboks` — and writes it as markdown files to the archive folder you chose. Conversation content captured by the hooks (your prompts of 80 characters or more, long answers, documents, session summaries) is personal data about you and whoever appears in it; it stays in your folder. Prompts are never shared with other projects by default.
 
 **Usage and storage.** Everything is stored in the folder you chose (`~/Tua`, or a folder synced by iCloud Drive, Dropbox, OneDrive or Google Drive — then that provider's terms apply to the sync, exactly as for any other file in that folder), in `~/.tua/config.json`, and in a machine-local cache. We have no access to any of it.
 

@@ -75,6 +75,16 @@
 //   POST /api/innboks/kjør   {prosjekt?, dryRun?} → { filer, tall: {filer, lest, feilet}, report }   leser dokumentene inn som saker (standard prosjekt «Innboks»), flytter til Innboks/Ferdig
 //   GET  /api/prosjekter     { prosjekter: [navn] }   prosjektene i arkivet (til prosjektvelgeren i Spør)
 //   POST /api/flytt          {id, prosjekt} → { atom }   flytter saken til et annet prosjekt (fila flyttes av lageret — det samme som å dra den i Finder, V9)
+//   M19 + M14 (skive 8): prompter som førsteklasses saker, datasettet og onboardingen i appen.
+//   GET  /api/search?kind=prompt   bare saker av én type; prompt-treff har også `tekst` (hele prompten), `ga` og `modeller` — til forslagene i Spør og Prompter-visningen
+//   POST /api/spor  {…, prompt: <id>}   «Kjør igjen»: svaret kobles til DENNE prompt-saken (ga vokser; ny versjon bare når teksten er endret). Uten prompt: nøkkel på teksten.
+//   GET  /api/datasett.jsonl[?laast=1]  én linje per konklusjon (V21 nivå 2): {prompt_id, prompt, kilder:[{id, nivå}], svar:[{mottaker, tekst_id}], forskjeller_id, konklusjon_id,
+//        konklusjon, laast, versjon, dato} — id-er, prompt- og konklusjonsteksten; aldri svartekster, aldri koblingen plassholder → original. Lokal fil, logges ikke som Utlevert.
+//   GET  /api/onboarding[?tall=1]  tilstand (vis/trenger/steg/ferdig), arkiv + kandidater (archiveOptions), Ollama-status, mottakere; med tall=1 også tallene til steg 3
+//        (historyCounts + prompter). Tilstanden bor i ~/.tua/config.json under `onboarding` — den må finnes før arkivet er valgt.
+//   POST /api/onboarding {steg: modell|arkiv|historikk, sted?|sti?, verdi?} → steget fullført (arkiv: chooseArchive, ingenting flyttes, V9); alle tre → ferdig
+//   POST /api/import {kilde: alt|code|cowork|desktop|finder|innboks, dryRun?} → SSE: start {kilde,label} · del {kilde,label,stats,report|feil} · ferdig {report, tall} · feil {feil}
+//        — importAlt i import.js (samme funksjoner som tua_import), stegvis så fremdriften vises mens neste kilde leses
 //
 // Lytter kun på 127.0.0.1, og slipper bare kartets origin inn (CORS).
 // Kjør: npm run bridge   (i tua-plugin/). Ingen avhengigheter.
@@ -88,8 +98,8 @@ import { openSpawn, FILE_MANAGER } from './platform.js'   // M18: «Åpne i …�
 import os from 'node:os'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { load, save, setShare, upsert, search, levelOf, LEVELS, isVault, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive, archiveOptions, archiveInfo, chooseArchive, finderFolders, FINDER_DEFAULTS, setFinderFolders, CONFIG_FILE, deliveries, versions, statusOf, setStatus, STATUSER } from './store.js'
-import { watchInbox, watchDesktop } from './import.js'      // M14: Innboks — eksporter som legges i mappa blir atomer · M17: Desktop-cachen
+import { load, save, setShare, upsert, search, levelOf, LEVELS, isVault, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive, archiveOptions, archiveInfo, chooseArchive, finderFolders, FINDER_DEFAULTS, setFinderFolders, CONFIG_FILE, deliveries, versions, statusOf, setStatus, STATUSER, readConfig, writeConfig, onboardingActive, finishOnboarding } from './store.js'
+import { watchInbox, watchDesktop, importAlt, IMPORT_STEG, historyCounts, countPrompts } from './import.js'      // M14: Innboks — eksporter som legges i mappa blir atomer · M17: Desktop-cachen · skive 8: import med fremdrift
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
 import { spor, mottakere, trustScores, Blokkert, ord, forskjeller, konklusjon, rettKonklusjon, svarFor } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
@@ -267,6 +277,44 @@ const readBytes = (req, maks) =>
     req.on('end', () => resolve(Buffer.concat(deler)))
     req.on('error', reject)
   })
+// ── Skive 8 (M19): prompt-samlingen og datasettet ───────────────────────────
+const MOTTAKER_IDER = ['claude', 'ollama', 'mistral', 'openai', 'gemini', 'test', 'test2']
+const mottakerAv = (s) => (s?.tags || []).find((t) => MOTTAKER_IDER.includes(t)) || s?.source || null
+// Modellene en prompt gikk til: kilden (og mottaker-taggen) på svar-sakene i `ga`
+const modellerFor = (byId, p) => [...new Set((p.ga || []).map((g) => byId.get(g.id)).filter(Boolean).map((s) => s.source || mottakerAv(s)).filter(Boolean))]
+// Datasettet (V21 nivå 2): én rad per konklusjon-sak. Bare id-er og tekstene brukeren selv står for (prompten, konklusjonen) — aldri svartekstene,
+// aldri koblingen plassholder → original (den finnes ikke på disk). Lokal fil; ingenting går ut, derfor ingen Utlevert-linje.
+export function datasett(atoms, { bareLaast = false } = {}) {
+  const byId = new Map(atoms.map((a) => [a.id, a]))
+  return atoms.filter((a) => a.kind === 'konklusjon').filter((k) => !bareLaast || statusOf(k) === 'endelig').sort((x, y) => x.capturedAt - y.capturedAt).map((k) => {
+    const kilderAv = (k.derivedFrom || []).map((d) => ({ d, a: byId.get(d.id) }))
+    const p = kilderAv.find((x) => x.a?.kind === 'prompt')?.a || null
+    const svar = kilderAv.filter((x) => x.a?.kind === 'svar' && !(x.a.tags || []).includes('forskjeller')).map((x) => x.a)
+    const fsk = kilderAv.find((x) => x.a?.kind === 'svar' && (x.a.tags || []).includes('forskjeller'))?.a || null
+    const kilder = []
+    for (const s of svar) for (const d of s.derivedFrom || []) { if (d.id === p?.id || kilder.some((x) => x.id === d.id)) continue; kilder.push({ id: d.id, nivå: d.level || 'L' }) }
+    return { konklusjon_id: k.id, versjon: k.version || 1, dato: new Date(k.capturedAt || Date.now()).toISOString(), prompt_id: p?.id || null, prompt: p?.content || '', kilder,
+      svar: svar.map((s) => ({ mottaker: mottakerAv(s), tekst_id: s.id })), forskjeller_id: fsk?.id || null, konklusjon: k.content || '', laast: statusOf(k) === 'endelig' }
+  })
+}
+// ── Skive 8 (M14): onboardingen i appen — tilstanden i ~/.tua/config.json (finnes før arkivet) ──
+const onboardingLes = () => { const o = readConfig().onboarding; return o && typeof o === 'object' ? { steg: o.steg || {}, ferdig: o.ferdig || null } : { steg: {}, ferdig: null } }
+const ONBOARDING_STEG = ['modell', 'arkiv', 'historikk']
+async function onboardingView({ medTall = false } = {}) {
+  const ob = onboardingLes()
+  const needsChoice = !FILES_ROOT
+  const info = archiveInfo()
+  const kandidater = archiveOptions().map((o) => ({ id: o.id, label: o.label, path: o.path, available: o.available, exists: o.exists, current: !!info.root && info.root === o.path, atomer: o.exists ? countMd(o.path) : 0 }))
+  const trenger = needsChoice || (onboardingActive() && !ob.ferdig)
+  const ut = { trenger, steg: ob.steg, ferdig: ob.ferdig, arkiv: { ...info, needsChoice, config: CONFIG_FILE }, kandidater, ollama: await ollamaStatus(), mottakere: (await mottakere()).map(({ id, label, aktiv, standard, local, test, modell, hvorfor }) => ({ id, label, aktiv, standard, local: !!local, test: !!test, modell, hvorfor })), home: os.homedir(), platform: process.platform }
+  if (medTall) {
+    let tall = null
+    try { tall = historyCounts({ quick: true }) } catch (e) { tall = { feil: e.message } }
+    try { const p = countPrompts(); tall = { ...tall, prompter: p.prompter, prompterØkter: p.økter } } catch {}
+    ut.tall = tall
+  }
+  return ut
+}
 const prosjektNavn = (p) => { const n = String(p || '').trim().replace(/[\/\\:*?"<>|\u0000-\u001f]/g, '·').replace(/\s+/g, ' ').slice(0, 90); if (!n || n.startsWith('.') || n === 'Ferdig') throw new Error(`«${p}» er ikke et gyldig prosjektnavn`); return n }
 const alleProsjekter = () => [...new Set([...load().map((a) => a.project), ...Object.keys(prosjektRegister()), STANDARD_PROSJEKT])].filter(Boolean).sort((a, b) => a.localeCompare(b, 'no'))
 
@@ -297,7 +345,7 @@ function openTarget(a, target, href) {
 
 // Statisk: appen og sandkassen fra dist/. Ingen stier utenfor dist (realpath-sjekk).
 // Skive 3: appen er én fil (index.html) med klient-ruting — alle app-rutene får samme fil, og appen leser stien selv (router.jsx).
-export const APP_RUTER = ['/', '/forside', '/spor', '/kart', '/oppslag', '/innstillinger']
+export const APP_RUTER = ['/', '/forside', '/spor', '/kart', '/oppslag', '/innstillinger', '/start']   // /start: onboardingen (skive 8), kan åpnes igjen fra Innstillinger
 const APP_FIL = 'index.html'
 function serveStatic(res, pathname) {
   const rel = APP_RUTER.includes(pathname) ? '/' + APP_FIL : pathname === '/sandkasse' ? '/sandkasse.html' : pathname
@@ -351,14 +399,18 @@ http
       }
       if (req.method === 'GET' && url.pathname === '/api/search') {
         const q = url.searchParams.get('q') || ''
-        const hits = search(load(), q, {
-          context: url.searchParams.get('context') || undefined, project: url.searchParams.get('project') || undefined,
+        const kind = url.searchParams.get('kind') || undefined
+        const alleAtomer = load(), byId = new Map(alleAtomer.map((a) => [a.id, a]))
+        const hits = search(alleAtomer, q, {
+          context: url.searchParams.get('context') || undefined, project: url.searchParams.get('project') || undefined, kind,
           limit: num(url.searchParams.get('limit'), 50), offset: num(url.searchParams.get('offset'), 0),
         })
         return json(res, 200, {
-          q, total: hits.total, offset: num(url.searchParams.get('offset'), 0),
-          // ord per nivå kommer fra lageret (levelOf) — Spør-skjermen (skive 2) regner ikke selv, så ordantallet er det samme som motoren sender
-          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), status: statusOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet })),
+          q, total: hits.total, offset: num(url.searchParams.get('offset'), 0), ...(kind ? { kind } : {}),
+          // ord per nivå kommer fra lageret (levelOf) — Spør-skjermen (skive 2) regner ikke selv, så ordantallet er det samme som motoren sender.
+          // Skive 8: prompt-treff bærer hele teksten (tekst), svarene (ga) og modellene de gikk til — forslagene i Spør fyller feltet med ett klikk.
+          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), status: statusOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet,
+            ...(a.kind === 'prompt' ? { tekst: a.content, ga: a.ga || [], modeller: modellerFor(byId, a) } : {}) })),
         })
       }
       if (req.method === 'POST' && url.pathname === '/api/save') {
@@ -509,7 +561,7 @@ http
         const ctl = new AbortController()
         req.on('close', () => ctl.abort())
         try {
-          const r = await spor({ melding: String(b.melding), saker, mottakere: mottakerIds, prosjekt: b.prosjekt || undefined, samtale: b.samtale || undefined, klient: 'app', signal: ctl.signal, på: hendelse })
+          const r = await spor({ melding: String(b.melding), saker, mottakere: mottakerIds, prosjekt: b.prosjekt || undefined, samtale: b.samtale || undefined, prompt: b.prompt || undefined, klient: 'app', signal: ctl.signal, på: hendelse })
           if (Array.isArray(r.svar)) console.error(`[tua-bro] spor → ${mottakerIds.join('+')} · ${saker.length} saker · ${r.svar.length} svar${r.feilet?.length ? ` · ${r.feilet.length} feilet` : ''} · forskjeller ${r.forskjeller ? (r.forskjeller.tilgjengelig ? `${r.forskjeller.enig.length}/${r.forskjeller.uenig.length}/${r.forskjeller.unikt.length} (${r.forskjeller.vurdert_av})` : 'ikke tilgjengelig') : '—'} · konklusjon ${r.konklusjon?.id || '—'}`)
           else console.error(`[tua-bro] spor → ${mottakerIds[0]} · ${saker.length} saker · svar ${r.svar} · tokens ca. ${r.tokens.ca}${r.tokens.inn != null ? ` (eksakt ${r.tokens.inn}+${r.tokens.ut})` : ''}`)
         } catch (e) {
@@ -539,6 +591,55 @@ http
           console.error(`[tua-bro] konklusjon kjørt igjen for ${p.id} · ${svar.length} svar · ${k.tilgjengelig ? `utkast ${k.id} v${k.version} (${k.mottaker})` : `ikke tilgjengelig: ${k.grunn}`}`)
           return json(res, 200, { forskjeller: f, konklusjon: k })
         } catch (e) { console.error(`[tua-bro] konklusjon FEIL: ${e.message}`); return json(res, e instanceof Blokkert ? 403 : 500, { error: e.message }) }
+      }
+      // ── Skive 8 (M19): datasettet — én JSONL-linje per konklusjon. Lokal fil, ingen Utlevert-linje (ingenting går ut). ──
+      if (req.method === 'GET' && url.pathname === '/api/datasett.jsonl') {
+        const rader = datasett(load(), { bareLaast: ['1', 'true'].includes(url.searchParams.get('laast') || '') })
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Content-Disposition': `attachment; filename="tua-datasett-${new Date().toISOString().slice(0, 10)}.jsonl"`, 'X-Tua-Rader': String(rader.length), ...cors })
+        console.error(`[tua-bro] datasett: ${rader.length} konklusjoner → jsonl (lokal fil, ikke utlevering)`)
+        return res.end(rader.map((r) => JSON.stringify(r)).join('\n') + (rader.length ? '\n' : ''))
+      }
+      // ── Skive 8 (M14): onboardingen i appen — tre steg, tilstanden i ~/.tua/config.json ──
+      if (req.method === 'GET' && url.pathname === '/api/onboarding') return json(res, 200, await onboardingView({ medTall: ['1', 'true'].includes(url.searchParams.get('tall') || '') }))
+      if (req.method === 'POST' && url.pathname === '/api/onboarding') {
+        const b = await readBody(req)
+        if (!ONBOARDING_STEG.includes(b.steg)) return json(res, 400, { error: `steg må være ${ONBOARDING_STEG.join(', ')}` })
+        const ob = onboardingLes()
+        let arkivSvar = null
+        if (b.steg === 'arkiv') {
+          if (b.sted || b.sti) {
+            // samme som Innstillinger › Arkivsted: valget lagres, mappa lages om den mangler (velkomstsak + Innboks), INGENTING flyttes (V9)
+            const before = archiveInfo().root
+            let r
+            try { r = chooseArchive(b.sti || b.sted) } catch (e) { return json(res, 400, { error: e.message }) }
+            arkivSvar = { ok: true, arkiv: archiveInfo(), created: r.created, before, restart: !!before && before !== r.root }
+            console.error(`[tua-bro] onboarding: arkivsted ${r.created ? 'opprettet' : 'valgt'}: ${r.root} (${r.label})${before && before !== r.root ? ` — før: ${before}; ingenting flyttet` : ''}`)
+          } else if (!FILES_ROOT) return json(res, 400, { error: 'velg et sted (sted eller sti) — arkivet er ikke valgt ennå' })
+        }
+        ob.steg = { ...ob.steg, [b.steg]: { at: new Date().toISOString(), ...(b.verdi ? { verdi: String(b.verdi) } : {}) } }
+        if (ONBOARDING_STEG.every((s) => ob.steg[s]) && !ob.ferdig) { ob.ferdig = new Date().toISOString(); finishOnboarding('app') }
+        writeConfig({ onboarding: ob })
+        console.error(`[tua-bro] onboarding: steg ${b.steg} fullført${b.verdi ? ` (${b.verdi})` : ''}${ob.ferdig ? ' · alle tre steg ferdig' : ''}`)
+        return json(res, 200, { ...(await onboardingView()), ...(arkivSvar ? { arkivSvar } : {}) })
+      }
+      // ── Skive 8 (M14): import med fremdrift — SSE rundt importAlt (import.js). Samme funksjoner som tua_import; ingen logikk her. ──
+      if (req.method === 'POST' && url.pathname === '/api/import') {
+        const b = await readBody(req)
+        const kilde = String(b.kilde || 'alt')
+        if (kilde !== 'alt' && !IMPORT_STEG.some(([k]) => k === kilde)) return json(res, 400, { error: `kilde må være alt eller en av ${IMPORT_STEG.map(([k]) => k).join(', ')}` })
+        if (!filesMode()) return json(res, 400, { error: 'arkivet er ikke valgt ennå — velg arkivsted først (steg 2)' })
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        const dryRun = !!b.dryRun
+        const tall = { nye: 0, oppdatert: 0, svar: 0, prompter: 0, dokumenter: 0, samtaler: 0, feil: 0 }
+        try {
+          const r = await importAlt({ dryRun, kilder: kilde === 'alt' ? null : [kilde], log: (m) => { console.error(`[tua-bro] import: ${m}`); hendelse('logg', { tekst: String(m) }) },
+            på: (ev, d) => { if (ev === 'del' && d.stats) { for (const k of Object.keys(tall)) if (typeof d.stats[k] === 'number') tall[k] += d.stats[k]; if (typeof d.stats.økter === 'number') tall.samtaler += d.stats.økter; if (typeof d.stats.samtaler === 'number') tall.samtaler += d.stats.samtaler } hendelse(ev, d) } })
+          console.error(`[tua-bro] import ${kilde}${dryRun ? ' (dry-run)' : ''}: ${tall.nye} nye · ${tall.oppdatert} oppdatert · ${tall.prompter} prompter · ${tall.svar} svar`)
+          hendelse('ferdig', { kilde, dryRun, tall, report: r.report })
+        } catch (e) { console.error(`[tua-bro] import FEIL: ${e.message}`); hendelse('feil', { feil: e.message }) }
+        return res.end()
       }
       // ── M15: innstillinger ──
       if (req.method === 'GET' && url.pathname === '/api/settings') return json(res, 200, await settingsView())

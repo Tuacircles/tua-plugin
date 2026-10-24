@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-21. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
 const COMPLETABLE_SYMBOL = Symbol.for('mcp.completable');
 /**
  * Checks if a schema is completable (has completion metadata).

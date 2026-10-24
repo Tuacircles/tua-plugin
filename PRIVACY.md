@@ -17,7 +17,7 @@ We collect nothing. Installing, running or removing the plugin sends no usage st
 When you ask it to (a tool call, a hook you left enabled, or a file you place in `Innboks`), the plugin reads your own content and writes it as markdown files ("atoms") into your archive folder:
 
 - text you ask Claude to save, and deliverables Claude composes from your atoms;
-- in Claude Code, when auto-capture is on: long answers from Claude, text documents Claude writes for you, and a session summary (prompts, files written, last answer);
+- in Claude Code, when auto-capture is on: your own prompts of 80 characters or more (each as its own atom, linked to the answer it got, never shared with other projects by default), long answers from Claude, text documents Claude writes for you, and a session summary (prompts, files written, last answer);
 - on request ("ta med historikken"): your Claude Code sessions (`~/.claude/projects`), your Cowork sessions and Claude Desktop conversations as they are stored by the Claude apps on this machine (Claude Desktop's cache is copied to a temporary file before decoding and never modified), documents in Downloads/Documents/Desktop that originate from an AI service (identified from download metadata or by matching their hash to something Claude wrote), and conversation exports you place in `Innboks`;
 - a public `https://claude.ai/share/<id>` page, only when you paste such a link; fetched with one plain request, no cookies, no login.
 

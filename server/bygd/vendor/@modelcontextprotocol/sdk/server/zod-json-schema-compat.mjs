@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.7 — bygd av bygg.mjs 2026-10-21. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { isZ4Schema, getObjectShape, getLiteralValue, safeParse } from './zod-compat.mjs';
 import '../../../zod-to-json-schema/parsers/string.mjs';
 import { zodToJsonSchema } from '../../../zod-to-json-schema/zodToJsonSchema.mjs';
