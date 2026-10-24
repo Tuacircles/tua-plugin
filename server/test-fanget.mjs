@@ -12,7 +12,7 @@
 // erFangetEtterRegel (review.js --fanget): nøkkel-regelen og de fire unntakene · behold (flagg bort, flytt via lageret) · slåSammen (ny versjon av inn_i med
 // kildepeker, den fangede i papirkurv) · kast/angre (fila i .tua/papirkurv/<prosjekt>/, indeks, tilbake på plass; load() ser den aldri) · broen: /api/atoms
 // bærer feltet, /api/search uten/med/bare + fangetUtenfor, /api/fanget med tall per kilde/prosjekt/slag, behold/slaa-sammen/kast/angre/papirkurv, 400/404 ·
-// review.js --fanget --dry-run skriver ingenting, --fanget setter flagget på eksisterende saker etter regelen.
+// review.js --fanget --dry-run skriver ingenting, --fanget setter flagget på eksisterende saker etter regelen · runde 2c (app): POST /api/fanget/merk som SSE (dry-run, ekte, idempotent).
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
 process.env.TUA_TESTMOTTAKERE = '2'
@@ -288,6 +288,17 @@ try {
   const an = await post('/api/fanget/angre', { id: samtaleRad.id })
   ok('POST /api/fanget/angre: 200, saken tilbake i /api/atoms som fanget, papirkurven to poster', an.status === 200 && an.json.atom.id === samtaleRad.id && an.json.atom.fanget === true && (await hent('/api/atoms')).json.atoms.some((a) => a.id === samtaleRad.id && a.fanget === true) && (await hent('/api/papirkurv')).json.antall === 2)
   ok('kast ukjent → 404; angre på noe som ikke ligger der → 404; uten id → 400', (await post('/api/fanget/kast', { id: 'a_x' })).status === 404 && (await post('/api/fanget/angre', { id: samtaleRad.id })).status === 404 && (await post('/api/fanget/kast', {})).status === 400)
+  // runde 2c (app): «Merk det som alt er fanget» i Innstillinger › Arkiv — POST /api/fanget/merk som SSE, dry-run først (samme regel som review --fanget)
+  const sseAv = (rå) => rå.split('\n\n').filter(Boolean).map((b) => [b.match(/^event: (.+)$/m)?.[1], JSON.parse(b.match(/^data: (.+)$/m)?.[1] || '{}')])
+  { const at2 = load(); upsert(at2, { key: 'svar:gammel99:cafe0001', content: 'Et svar hooken fanget før flagget fantes. '.repeat(60), name: 'Svar før flagget', project: 'Prosjekt', tags: ['svar', 'auto'], by: 'regel', short: 'Før flagget.' }); save(at2) }
+  const m1 = await fetch(`http://127.0.0.1:${PORT}/api/fanget/merk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dryRun: true }) })
+  const hm1 = sseAv(await m1.text()), tall1 = hm1.find((h) => h[0] === 'tall')?.[1], slutt1 = hm1.at(-1)
+  ok('POST /api/fanget/merk {dryRun}: SSE start → tall (tall, perSlag, perKilde, perProsjekt, eksempler) → slutt {nye: 1, dryRun}; ingenting skrevet', m1.status === 200 && hm1[0][0] === 'start' && tall1?.tall?.nye === 1 && tall1.perSlag.svar === 1 && tall1.eksempler?.[0]?.name === 'Svar før flagget' && slutt1[0] === 'slutt' && slutt1[1].dryRun === true && slutt1[1].nye === 1 && load().find((a) => a.key === 'svar:gammel99:cafe0001').fanget === undefined, hm1.map((h) => h[0]).join(' '))
+  const m2 = await fetch(`http://127.0.0.1:${PORT}/api/fanget/merk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+  const hm2 = sseAv(await m2.text())
+  ok('POST /api/fanget/merk (ekte): skriver {antall: 1} før slutt {nye: 1, filer: 1}; saken har fanget: true på disk og er i /api/fanget', hm2.some((h) => h[0] === 'skriver' && h[1].antall === 1) && hm2.at(-1)[1].nye === 1 && hm2.at(-1)[1].filer === 1 && load().find((a) => a.key === 'svar:gammel99:cafe0001').fanget === true && (await hent('/api/fanget')).json.saker.some((x) => x.name === 'Svar før flagget'), hm2.map((h) => h[0]).join(' '))
+  const m3 = sseAv(await (await fetch(`http://127.0.0.1:${PORT}/api/fanget/merk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).text())
+  ok('merk igjen: 0 nye, ingen skriver-hendelse (idempotent)', m3.at(-1)[1].nye === 0 && !m3.some((h) => h[0] === 'skriver'))
   // tua_get-adferd gjennom /api/sak: en fanget sak kan hentes som før
   const sak = (await hent(`/api/sak?id=${samtaleRad.id}`)).json
   ok('/api/sak på en fanget sak virker som før (nivåene er der)', sak && sak.id === samtaleRad.id && sak.nivåer?.L?.tekst?.length > 100)

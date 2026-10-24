@@ -180,7 +180,7 @@ async function pdfjs() {
 }
 // Tekstlaget side for side: pdfjs gir biter (items) med hasEOL der linja slutter. Biter på samme linje settes rett sammen (pdfjs tar med mellomrommene
 // som egne biter); et hopp i x som er større enn et tegn, uten mellomrom i teksten, får ett mellomrom så ord ikke klistres («lager»+«til» → «lager til»).
-export async function pdfTilTekst(buf, { navn = 'fila' } = {}) {
+export async function pdfTilTekst(buf, { navn = 'fila', på = () => {} } = {}) {
   const lib = await pdfjs()
   const oppgave = lib.getDocument({ data: new Uint8Array(buf), useSystemFonts: false, isEvalSupported: false, disableFontFace: true, verbosity: 0, stopAtErrors: false })
   let doc
@@ -192,6 +192,7 @@ export async function pdfTilTekst(buf, { navn = 'fila' } = {}) {
   try {
     const sider = []
     for (let i = 1; i <= doc.numPages; i++) {
+      på('side', { side: i, av: doc.numPages })          // runde 2c (§5.5): «leser … side 2 av 5» i appen
       const side = await doc.getPage(i)
       const tc = await side.getTextContent()
       let s = '', sistX = null, sistBredde = 0, sistY = null
@@ -214,12 +215,12 @@ export async function pdfTilTekst(buf, { navn = 'fila' } = {}) {
     return { tekst, sider: doc.numPages, verktøy: `pdfjs-dist ${lib.version}`, ...(tittel ? { tittel } : {}) }
   } finally { try { await oppgave.destroy() } catch {} }
 }
-async function lesPdf(buf, navn) { const { tekst, sider, verktøy, tittel } = await pdfTilTekst(buf, { navn }); return { tekst, meta: { verktøy, sider, ...(tittel ? { tittel } : {}) } } }
+async function lesPdf(buf, navn, på) { const { tekst, sider, verktøy, tittel } = await pdfTilTekst(buf, { navn, på }); return { tekst, meta: { verktøy, sider, ...(tittel ? { tittel } : {}) } } }
 
 // ── grensesnittet ───────────────────────────────────────────────────────────
 // fil: sti på disk (data leses derfra) — eller gi `data` (Buffer) og `navn` når fila kom som opplasting. Returnerer alltid tekst + meta;
 // kaster LeseFeil med kode: ukjent-format · for-stor · tom · ingen-tekst · passord · format · leser-mangler · feil.
-export async function les(fil, { navn = null, data = null } = {}) {
+export async function les(fil, { navn = null, data = null, på = () => {} } = {}) {   // på: fremdrift side for side (pdf) — runde 2c
   const n = navn || path.basename(String(fil || ''))
   const format = formatAv(n)
   if (!format) throw new LeseFeil(`«${n}» har et format Tua ikke leser ennå. Det som leses: ${Object.values(FORMATER).map((f) => f.label).join(', ')} (${ENDELSER.join(' ')}).`, 'ukjent-format')
@@ -234,7 +235,7 @@ export async function les(fil, { navn = null, data = null } = {}) {
   if (!buf.length) throw new LeseFeil(`«${n}» er tom.`, 'tom')
   let r
   switch (format) {
-    case 'pdf': r = await lesPdf(buf, n); break
+    case 'pdf': r = await lesPdf(buf, n, på); break
     case 'markdown': r = lesMarkdown(buf); break
     case 'html': r = lesHtml(buf); break
     case 'csv': r = lesCsv(buf, ','); break

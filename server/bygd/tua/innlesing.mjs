@@ -38,7 +38,7 @@ async function lesInn(fil, { navn = null, data = null, prosjekt = STANDARD_PROSJ
   const proj = String(prosjekt || '').trim() || STANDARD_PROSJEKT;
   på('leser', { navn: n, format: formatAv(n), label: FORMATER[formatAv(n)]?.label || null });
   const buf = data || fs__default.readFileSync(fil);
-  const { tekst, meta } = await les(fil, { navn: n, data: buf });
+  const { tekst, meta } = await les(fil, { navn: n, data: buf, på: (ev, d) => på(ev, { ...d, navn: n }) });   // side {side, av} underveis (pdf)
   const nøkkel = `fil:${crypto__default.createHash('sha256').update(buf).digest('hex').slice(0, 16)}`;
   const tittel = tittelFor(meta);
   const kilde = `${n} (${meta.label}${meta.sider ? `, ${meta.sider} ${meta.sider === 1 ? 'side' : 'sider'}` : ''})`;

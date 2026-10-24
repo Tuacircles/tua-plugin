@@ -111,6 +111,8 @@
 //   POST /api/fanget/kast {id} → { kastet }                                 fila til <arkiv>/.tua/papirkurv/<prosjekt>/ med indeks — aldri slett
 //   POST /api/fanget/angre {id} → { atom }                                  fila tilbake fra papirkurven dit den lå
 //   GET  /api/papirkurv → { saker: [{id, name, project, kind, source, at, grunn, innI?}], antall }
+//   POST /api/fanget/merk {dryRun} → SSE start · tall · skriver · slutt     engangs-merkingen fra Innstillinger › Arkiv (runde 2c app) — samme regel som review.js --fanget
+//   POST /api/konklusjon {…, strøm: true} → SSE (vurderer, vurderer-del, forskjeller, konklusjon-del, konklusjon, slutt) — fremdrift for «Også til …» (runde 2c app)
 //   Engangs-merking av det som alt ligger i arkivet: node server/review.js --fanget --dry-run (viser), --fanget (setter). Alt via lageret (store.js), ingen rå filflytting.
 //
 // Lytter kun på 127.0.0.1, og slipper bare kartets origin inn (CORS).
@@ -134,7 +136,7 @@ import { spor, mottakere, trustScores, Blokkert, ord, forskjeller, konklusjon, r
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks
 import { inboxPending, inboxShareFiles } from './import.js'
 import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
-import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv } from './store.js'   // runde 2c: Fanget-bøtta
+import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv, fangetKandidater, slagAvNøkkel } from './store.js'   // runde 2c: Fanget-bøtta (+ app: engangs-merkingen)
 import { klasseAv, tellKlasser, vekt, sistRørt, trådSamlet, brukInfo, deliveryInfo, logBruk, BRUK_HENDELSER, claudeØkter } from './store.js'   // runde 2d (03-avisen §2–§5): klasser, vekt, tråden samlet, bruk-loggen, Claude-øktene
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
@@ -690,12 +692,27 @@ http
         const svar = svarFor(atoms, p.id, Array.isArray(b.svar) ? b.svar : null)
         if (!svar.length) return json(res, 400, { error: 'prompten har ingen svar-saker å konkludere ut fra' })
         const ctl = new AbortController(); req.on('close', () => ctl.abort())
+        // Runde 2c (§5.5): med {strøm: true} svarer ruta som SSE — vurderer {steg, svar} · vurderer-del {tegn} · forskjeller · konklusjon-del {tekst} · konklusjon · slutt —
+        // så «Også til …» og «Kjør igjen» på konklusjonen viser fremdriften i saken, ikke bare en spinner. Uten strøm: JSON som før.
+        const strøm = !!b.strøm
+        let hendelse = () => {}
+        if (strøm) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+          res.flushHeaders?.()
+          hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        }
         try {
-          const f = svar.length > 1 ? await forskjeller(svar, { melding: p.content, prosjekt: b.prosjekt || p.project, klient: 'app', signal: ctl.signal }) : { tilgjengelig: false, grunn: 'Forskjeller vises bare når mer enn én har svart.', enig: [], uenig: [], unikt: [] }
-          const k = await konklusjon({ prompt: p.id, svar, forskjeller: f.tilgjengelig ? f : null, melding: p.content, prosjekt: b.prosjekt || p.project, samtale: p.convo || undefined, klient: 'app', signal: ctl.signal })
+          const f = svar.length > 1 ? await forskjeller(svar, { melding: p.content, prosjekt: b.prosjekt || p.project, klient: 'app', signal: ctl.signal, på: hendelse }) : { tilgjengelig: false, grunn: 'Forskjeller vises bare når mer enn én har svart.', enig: [], uenig: [], unikt: [] }
+          if (strøm) hendelse('forskjeller', f)
+          const k = await konklusjon({ prompt: p.id, svar, forskjeller: f.tilgjengelig ? f : null, melding: p.content, prosjekt: b.prosjekt || p.project, samtale: p.convo || undefined, klient: 'app', signal: ctl.signal, på: hendelse })
           console.error(`[tua-bro] konklusjon kjørt igjen for ${p.id} · ${svar.length} svar · ${k.tilgjengelig ? `utkast ${k.id} v${k.version} (${k.mottaker})` : `ikke tilgjengelig: ${k.grunn}`}`)
+          if (strøm) { hendelse('konklusjon', k); hendelse('slutt', { forskjeller: f, konklusjon: k }); return res.end() }
           return json(res, 200, { forskjeller: f, konklusjon: k })
-        } catch (e) { console.error(`[tua-bro] konklusjon FEIL: ${e.message}`); return json(res, e instanceof Blokkert ? 403 : 500, { error: e.message }) }
+        } catch (e) {
+          console.error(`[tua-bro] konklusjon FEIL: ${e.message}`)
+          if (strøm) { hendelse('feil', { feil: e.message, blokkert: e instanceof Blokkert }); return res.end() }
+          return json(res, e instanceof Blokkert ? 403 : 500, { error: e.message })
+        }
       }
       // ── Skive 8 (M19): datasettet — én JSONL-linje per konklusjon. Lokal fil, ingen Utlevert-linje (ingenting går ut). ──
       if (req.method === 'GET' && url.pathname === '/api/datasett.jsonl') {
@@ -857,7 +874,7 @@ http
       // slag = hva nøkkelen sier saken er (okt: → økt, samtale:, prompt:, svar:) — appens bøtte sorterer på det; ellers kind.
       if (req.method === 'GET' && url.pathname === '/api/fanget') {
         const alle = load(), trådAv = tråder(alle).av
-        const slagAv = (a) => { const k = String(a.key || ''); return k.startsWith('okt:') ? 'økt' : k.startsWith('samtale:') ? 'samtale' : k.startsWith('prompt:') ? 'prompt' : k.startsWith('svar:') ? 'svar' : a.kind || 'capture' }
+        const slagAv = slagAvNøkkel
         const fangede = alle.filter((a) => a.fanget).sort((x, y) => y.capturedAt - x.capturedAt)
         const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
         const perKilde = {}, perProsjekt = {}, perSlag = {}
@@ -907,6 +924,25 @@ http
         try { r = fangetAngre(b.id) } catch (e) { return json(res, /ligger ikke/.test(e.message) ? 404 : 400, { error: e.message }) }
         console.error(`[tua-bro] papirkurv angre «${r.atom.name}» → ${r.rel}`)
         return json(res, 200, { atom: { ...r.atom, links: linksFor(r.atom), file: fileOf(r.atom), status: statusOf(r.atom), fanget: !!r.atom.fanget } })
+      }
+      // POST /api/fanget/merk {dryRun} — engangs-merkingen fra Innstillinger › Arkiv («Merk det som alt er fanget»), samme regel som `node review.js --fanget`.
+      // SSE: start {saker} · tall {tall, perSlag, perKilde, perProsjekt, eksempler} · (ikke dryRun:) skriver {antall} · slutt {nye, filer, dryRun}. Det er Erik som trykker; dry-run først.
+      if (req.method === 'POST' && url.pathname === '/api/fanget/merk') {
+        const b = await readBody(req)
+        const dryRun = !!b.dryRun
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        try {
+          const atoms = load()
+          hendelse('start', { saker: atoms.length, dryRun })
+          const { tall, perSlag, perKilde, perProsjekt, nye } = fangetKandidater(atoms)
+          hendelse('tall', { tall, perSlag, perKilde, perProsjekt, eksempler: nye.slice(0, 5).map((a) => ({ id: a.id, name: a.name, project: a.project, slag: slagAvNøkkel(a), source: a.source || null })) })
+          let filer = 0
+          if (!dryRun && nye.length) { hendelse('skriver', { antall: nye.length }); for (const a of nye) a.fanget = true; filer = save(atoms); console.error(`[tua-bro] fanget merk: ${nye.length} saker merket · ${filer} filer skrevet`) }
+          hendelse('slutt', { nye: nye.length, filer, dryRun })
+        } catch (e) { hendelse('feil', { feil: e.message }) }
+        return res.end()
       }
       if (req.method === 'GET' && url.pathname === '/api/papirkurv') {
         const saker = fangetPapirkurv().map(({ kurv, ...e }) => e)   // aldri stien inne i .tua til klienten (runde 1: ingen stier i klartekst)

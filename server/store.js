@@ -852,6 +852,30 @@ export function erFangetEtterRegel(a, { utlevert = 0 } = {}) {
   if (utlevert > 0) return false                                                          // har vært med i en sending — brukeren har brukt den
   return true
 }
+// Runde 2c (app): engangs-merkingen som én funksjon — review.js --fanget og POST /api/fanget/merk (Innstillinger › Arkiv) bruker den samme.
+// Teller, fordeler per slag/kilde/prosjekt og peker på sakene som ville fått flagget; skriver ingenting selv (kalleren setter a.fanget = true og save()).
+export const slagAvNøkkel = (a) => { const k = String(a?.key || ''); return k.startsWith('okt:') ? 'økt' : k.startsWith('samtale:') ? 'samtale' : k.startsWith('prompt:') ? 'prompt' : k.startsWith('svar:') ? 'svar' : a?.kind || 'capture' }
+export function fangetKandidater(atoms, { sendinger = deliveryCounts() } = {}) {
+  const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
+  const tall = { saker: atoms.length, altFanget: 0, kandidater: 0, nye: 0, holdt: { menneske: 0, synlig: 0, status: 0, utlevert: 0 } }
+  const perSlag = {}, perKilde = {}, perProsjekt = {}, nye = []
+  for (const a of atoms) {
+    if (a.fanget) { tall.altFanget++; continue }
+    if (a.drift === true) continue                                                        // runde 2d: drift er alt utenfor avisen — byggeøkter hører ikke i Fanget-bøtta (kjør review --drift først)
+    if (!a.key || !FANGET_NØKLER.test(a.key)) continue
+    tall.kandidater++
+    const utlevert = sendinger.get(a.id) || 0
+    if (!erFangetEtterRegel(a, { utlevert })) {
+      if (erMenneskeskrevet(a)) tall.holdt.menneske++
+      else if ((a.refs || []).length) tall.holdt.synlig++
+      else if (a.status) tall.holdt.status++
+      else if (utlevert) tall.holdt.utlevert++
+      continue
+    }
+    tall.nye++; tell(perSlag, slagAvNøkkel(a)); tell(perKilde, a.source || '—'); tell(perProsjekt, a.project); nye.push(a)
+  }
+  return { tall, perSlag, perKilde, perProsjekt, nye }
+}
 const PAPIRKURV = () => tuaFile('papirkurv')
 const PAPIRKURV_INDEX = () => path.join(PAPIRKURV(), 'index.json')
 const readKurv = () => { try { return JSON.parse(fs.readFileSync(PAPIRKURV_INDEX(), 'utf8')) } catch { return [] } }

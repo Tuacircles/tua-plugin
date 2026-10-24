@@ -55,6 +55,10 @@
   .addr { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; color: var(--fg3); word-break: break-all; }
   .skel { height: 14px; border-radius: 4px; background: var(--bg2); margin: 8px 0; }
   .err { color: var(--color-text-danger, #7F2C28); font-size: 13px; }
+  .siden { margin: 0 0 10px; padding: 8px 10px; background: var(--bg2); border-radius: var(--r); }
+  .siden .lbl { margin: 0 0 4px; color: var(--coral); }
+  .siden .sl { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 13px; } .siden .sl a { cursor: pointer; color: var(--fg); }
+  .clip { margin: 4px 0 0; font-size: 12px; color: var(--warn-fg); background: var(--warn-bg); padding: 4px 8px; border-radius: var(--r); }
 </style>
 </head>
 <body>
@@ -148,6 +152,19 @@ const open = async (target, atom) => {
   } catch (e) { root.append(el('p', { class: 'err' }, 'Kunne ikke åpne: ' + (e?.message || e))) }
 }
 const tellModel = (text) => { try { app.updateModelContext({ content: [{ type: 'text', text }] }) } catch {} }
+// Runde 3a: «Kopier instruksen» — prosjekt-instruksen for Desktop («spør Tua først») når prosjektet har Desktop-uuid; Erik limer den inn én gang.
+const kopier = async (tekst, knapp) => {
+  try { await navigator.clipboard.writeText(tekst); knapp.textContent = 'Kopiert ✓' } catch { knapp.textContent = 'Kunne ikke kopiere — be Claude gjengi den' }
+  setTimeout(() => { knapp.textContent = 'Kopier instruksen' }, 2500)
+}
+const instruksKnapp = (tekst) => { if (!tekst) return null; const b = el('button', { class: 'btn', type: 'button', title: 'Lim inn i Desktop-prosjektets «Project instructions»' }, 'Kopier instruksen'); b.addEventListener('click', () => kopier(tekst, b)); return b }
+// Runde 3a: «Siden sist i Tua» — det som er gjort i appen for prosjektet (Spør-tråder, delinger, filer lest inn), ved første kall i samtalen
+const SLAG = { tråd: 'Spør', deling: 'Delt', innlest: 'Lest inn' }
+const sidenSistBlokk = (s) => s ? el('div', { class: 'siden' },
+  el('div', { class: 'lbl' }, `Siden sist i Tua · ${s.dager} dager${s.prosjekt ? ' · ' + s.prosjekt : ''}`),
+  ...(s.linjer.length ? s.linjer.map((l) => el('div', { class: 'sl' }, el('span', { class: 'chip' }, SLAG[l.slag] || l.slag), el('a', { onclick: () => call({ id: l.id, level: 'S' }) }, l.tekst))) : [el('p', { class: 'why' }, 'Ingenting nytt i appen.')]),
+  s.lagret ? el('p', { class: 'why' }, `${s.lagret} ${s.lagret === 1 ? 'sak' : 'saker'} lagret med vilje.`) : null,
+) : null
 
 // ── ett atom (V12: S først, M/L på forespørsel, «Åpne i …»)
 function renderAtom(a) {
@@ -164,6 +181,7 @@ function renderAtom(a) {
     el('h1', {}, a.name),
     a.level !== 'S' && a.S ? el('p', { class: 's' }, a.S) : null,
     a.why ? el('p', { class: 'why' }, 'Hvorfor: ' + a.why) : null,
+    a.clipped ? el('p', { class: 'clip' }, a.clipped) : null,
     el('div', { class: 'row' }, seg,
       el('span', { class: 'meta', style: 'font-size:12px;color:var(--fg3)' },
         a.level === 'S' ? `ingress · M ${a.hasM ? 'finnes' : 'mangler'} · L ${a.lengthL} tegn` : `${LV[a.level]}${a.stale ? ' · ⚠ fra v' + a.stale : ''}`)),
@@ -177,14 +195,16 @@ function renderAtom(a) {
       el('button', { class: 'btn', type: 'button', disabled: a.file ? null : 'true', onclick: () => open('finder', a) }, 'Vis i Finder'),
       el('button', { class: 'btn', type: 'button', disabled: a.repo ? null : 'true', onclick: () => open('code', a) }, 'Code'),
       el('button', { class: 'btn', type: 'button', disabled: a.address ? null : 'true', onclick: () => open('kart', a) }, 'Kartet'),
+      instruksKnapp(a.instruks),
     ),
-    el('div', { class: 'foot' }, el('span', { class: 'addr' }, a.address || a.id), el('span', {}, a.convo ? `Samtale: ${a.convo}` : '')),
+    el('div', { class: 'foot' }, el('span', { class: 'addr' }, a.address || a.id), el('span', {}, [a.convo ? `Samtale: ${a.convo}` : '', a.shielded ? `${a.shielded} skjermet` : ''].filter(Boolean).join(' · '))),
   )
 }
 
 // ── treffliste (forsiden i miniatyr: ingresser, nyeste først)
 function renderList(d) {
   put(
+    sidenSistBlokk(d.sidenSist),
     el('div', { class: 'eyebrow' }, d.query ? `${d.total} treff på «${d.query}»` : `${d.total} atomer`, el('span', { class: 'meta' }, d.project ? `· ${d.project}` : '· alle prosjekter')),
     ...d.items.map((a) => {
       const box = el('div', { class: 'inline', hidden: 'true' })
@@ -199,7 +219,7 @@ function renderList(d) {
         } catch (e) { box.textContent = 'Fikk ikke hentet M: ' + (e?.message || e); box.hidden = false }
       } }, 'Les M')
       return el('div', { class: 'hit' },
-        el('div', { class: 'eyebrow' }, a.project, el('span', { class: 'meta' }, `· ${a.date}${a.kind === 'leveranse' ? ' · leveranse' : ''}`)),
+        el('div', { class: 'eyebrow' }, a.project, el('span', { class: 'meta' }, `· ${a.date}${a.kind === 'leveranse' ? ' · leveranse' : ''}${a.thread ? ` · tråd fra Spør: ${a.thread.svar} svar${a.thread.konklusjon ? ', konklusjon ' + a.thread.konklusjon : ''}` : ''}`)),
         el('h2', {}, el('a', { onclick: () => call({ id: a.id, level: 'S' }) }, a.name)),
         el('p', { class: 's' }, a.S || a.snippet || ''),
         a.snippet && a.S ? el('p', { class: 'why' }, '… ' + a.snippet) : null,
@@ -207,7 +227,8 @@ function renderList(d) {
         box,
       )
     }),
-    el('div', { class: 'foot' }, el('span', {}, d.total > d.items.length ? `Viser ${d.items.length} av ${d.total} — be Claude om flere` : 'Alle treff vist'), el('span', {}, 'Tua · S i søk, M og L på forespørsel')),
+    d.instruks ? el('div', { class: 'row' }, instruksKnapp(d.instruks), el('span', { class: 'meta', style: 'font-size:12px;color:var(--fg3)' }, `Desktop-prosjektet «${d.instruksProsjekt}»: lim inn i Project instructions`)) : null,
+    el('div', { class: 'foot' }, el('span', {}, d.total > d.items.length ? `Viser ${d.items.length} av ${d.total} — be Claude om flere` : 'Alle treff vist'), el('span', {}, 'Tua · S i søk, M og L på forespørsel · skjermet og logget')),
   )
 }
 

@@ -10,6 +10,9 @@
 //
 // Claude Code rendrer ikke MCP Apps: der ser modellen structuredContent som JSON. Derfor er den
 // kompakt og selvforklarende. Lokal stdio-server: ingen ui.domain (Claude-dokumentasjonen).
+// Runde 3a (arb. 32 §5.7): kortet går gjennom motoren som tua_get (lever(): klippe etter Vault/Trust → S med linje, skjerme, logge) — kortet viser
+// plassholdere der appen viser originalene, for innholdet går også til modellen. Tua → Claude: «Siden sist i Tua» ved første kall (sidenSist i
+// structuredContent + teksten) og «Kopier instruksen» når prosjektet har Desktop-uuid (instruks).
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,9 +20,11 @@ import { z } from 'zod'
 import { openSpawn, FILE_MANAGER } from './platform.js'   // M18: «Åpne i …» på macOS, Windows og Linux
 import { registerAppTool, registerAppResource, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server'
 import {
-  load, save, search, visibleIn, fmtTime, related, levelOf, maxLevel, clampLevel, isStale,
-  linksFor, fileOf, sources, renderStatus, isVault, vaultClamp, logDelivery, hasExternalEdits,
+  load, save, search, visibleIn, fmtTime, related, levelOf, maxLevel, isStale,
+  linksFor, fileOf, sources, renderStatus, isVault, vaultClamp, hasExternalEdits,
 } from './store.js'
+import { lever, skjermerFor } from './motor.js'                                   // runde 3a: kortet gjennom motoren
+import { sidenSist, skalVise, trådFørst, instruksFor } from './dora.js'          // runde 3a: Tua → Claude
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const KORT_URI = 'ui://tua/kort'
@@ -46,11 +51,12 @@ export function kortHtml() {
 // ── kortets datamodell (kompakt; sendes også til modellen i Code)
 const date = (ts) => fmtTime(ts).replace(/,.*$/, '')
 const first = (ls, k) => ls.find((l) => l.kind === k)
-function atomCard(atoms, cur, level, context) {
+function atomCard(atoms, cur, level, context, { client = 'Claude' } = {}) {
   const max = vaultClamp(cur, maxLevel(cur, context))
-  const eff = clampLevel(level, max)
-  const got = levelOf(cur, eff)
-  const S = levelOf(cur, 'S')
+  // runde 3a: samme vei som tua_get — klippe (fail closed → S + linje), skjerme, logge (bare når mer enn S gis, som før)
+  const lv = lever(atoms, cur, { nivå: level, tool: 'tua_card', klient: client, context, logg: level !== 'S' })
+  const eff = lv.nivå
+  const got = { text: lv.tekst }
   const rel = related(atoms, cur)
   const ls = linksFor(cur)
   const stale = isStale(cur, eff) ? cur.levels[eff].of : null
@@ -59,12 +65,14 @@ function atomCard(atoms, cur, level, context) {
     ...rel.viaRefs.map((x) => ({ id: x.id, name: x.name, how: 'synlig i samme prosjekt' })),
     ...rel.sameTags.map((x) => ({ id: x.id, name: x.name, how: 'felles tagger' })),
   ].slice(0, 6)
+  const instruks = instruksFor(cur.project)
   return {
-    id: cur.id, name: cur.name, project: cur.project, convo: cur.convo || '', source: cur.source || '',
+    id: cur.id, name: lv.felt.navn, project: cur.project, convo: lv.felt.samtale, source: cur.source || '',
     date: date(cur.capturedAt), version: cur.version || 1, kind: cur.kind || 'capture', tags: cur.tags || [],
-    level: eff, max, vault: isVault(cur), stale,
-    S: S.level === 'S' ? S.text : '', why: cur.summary && cur.summary !== S.text ? cur.summary : '',
+    level: eff, max, vault: isVault(cur), stale, clipped: lv.linje || '', shielded: lv.treff, logged: lv.logget,
+    S: lv.felt.S, why: lv.felt.hvorfor,
     text: got.text, hasM: !!cur.levels?.M?.text, lengthL: (cur.content || '').length,
+    instruks: instruks ? instruks.tekst : '',
     share: (cur.refs || []).map((r) => ({ project: r, level: cur.share?.[r] || 'L' })),
     builtBy: sources(atoms, cur).map((s) => ({ id: s.id, name: s.name, version: s.version, level: s.level, stale: s.stale, now: s.now, missing: s.missing })),
     renders: renderStatus(cur).map((r) => ({ format: r.format, path: r.url || r.path, ok: r.exists && !r.changed })),
@@ -78,7 +86,8 @@ function atomCard(atoms, cur, level, context) {
 const atomText = (a) =>
   `# ${a.name}\n${a.project} · ${a.date} · v${a.version}${a.kind === 'leveranse' ? ' · leveranse' : ''}\n` +
   (a.level !== 'S' && a.S ? `S: ${a.S}\n` : '') +
-  `Nivå: ${a.level}${a.max !== 'L' ? ` (maks ${a.max}${a.vault ? ', Vault' : ''})` : ''}${a.stale ? ` ⚠ fra v${a.stale}` : ''}\n` +
+  `Nivå: ${a.level}${a.max !== 'L' ? ` (maks ${a.max}${a.vault ? ', Vault' : ''})` : ''}${a.stale ? ` ⚠ fra v${a.stale}` : ''}${a.clipped ? ` — ${a.clipped}` : ''}\n` +
+  `Skjermet: ${a.shielded} (plassholdere som [Person A] — bruk dem uendret)${a.logged ? ' · utlevering logget' : ''}\n` +
   (a.builtBy.length ? `Bygget av: ${a.builtBy.map((s) => `[${s.id}] ${s.name} v${s.version}/${s.level}${s.stale ? ' ⚠' : ''}`).join(' · ')}\n` : '') +
   `Adresse: ${a.address}\n\n${a.text}`
 
@@ -148,20 +157,29 @@ export function registerApps(server, { client = 'Claude' } = {}) {
         if (!cur) return { content: [{ type: 'text', text: `Fant ikke atom ${id}.` }], structuredContent: { mode: 'error', error: `Fant ikke atom ${id}.` } }
         if (context && !visibleIn(cur, context)) return { content: [{ type: 'text', text: `Atom ${id} er ikke synlig for ${context}.` }], structuredContent: { mode: 'error', error: `Ikke synlig for ${context}.` } }
         if (hasExternalEdits(atoms)) save(atoms)                      // V15: fest ny versjon ved ekstern redigering
-        const a = atomCard(atoms, cur, level, context)
-        if (a.level !== 'S') logDelivery({ tool: 'tua_card', id, version: a.version, level: a.level, client, ...(context ? { context } : {}) })
+        const a = atomCard(atoms, cur, level, context, { client })
         return { content: [{ type: 'text', text: quiet ? `${a.level} av ${a.id} vist i kortet.` : atomText(a) }], structuredContent: { mode: 'atom', atom: a } }
       }
-      const hits = search(atoms, query || '', { project, context, limit })
-      const items = hits.map(({ atom: a, S, max, snippet }) => ({
-        id: a.id, name: a.name, project: a.project, date: date(a.capturedAt), version: a.version || 1, kind: a.kind || 'capture',
-        S: S.level === 'S' ? S.text : '', snippet: snippet || '', max, tags: (a.tags || []).slice(0, 4),
+      // runde 3a: tråder fra Spør øverst, treffene skjermet (S er fri, ingen Utlevert-linje), «Siden sist i Tua» ved første kall, instruksen når prosjektet har Desktop-uuid
+      const hits = trådFørst(atoms, search(atoms, query || '', { project, context, limit }))
+      const sk = skjermerFor(atoms)
+      const items = hits.map(({ atom: a, S, max, snippet, tråd }) => ({
+        id: a.id, name: sk.skjerm(a.name), project: a.project, date: date(a.capturedAt), version: a.version || 1, kind: a.kind || 'capture',
+        S: S.level === 'S' ? sk.skjerm(S.text) : '', snippet: sk.skjerm(snippet || ''), max, tags: (a.tags || []).slice(0, 4),
+        ...(tråd ? { thread: { svar: tråd.svar.length, konklusjon: tråd.konklusjon ? tråd.konklusjon.status : '' } } : {}),
       }))
-      const sc = { mode: 'list', query: query || '', project: project || '', total: hits.total, items }
-      const txt = items.length
-        ? `${hits.total} treff${query ? ` på «${query}»` : ''}${project ? ` i ${project}` : ''} (viser ${items.length}):\n` +
-          items.map((i) => `- [${i.id}] ${i.name} — ${i.project} · ${i.date}${i.S ? `\n  ${i.S}` : ''}`).join('\n')
-        : `Ingen treff${query ? ` på «${query}»` : ''}.`
+      const prosjekt = project || context || ''
+      const siden = skalVise(prosjekt) ? sidenSist(atoms, { prosjekt }) : null
+      const sidenSc = siden ? { prosjekt: siden.prosjekt, dager: siden.dager, lagret: siden.lagret, linjer: siden.linjer.map((l) => ({ slag: l.slag, id: l.id, tekst: sk.skjerm(l.tekst) })) } : null
+      const instruks = instruksFor(prosjekt)
+      const sc = { mode: 'list', query: query || '', project: project || '', total: hits.total, items, ...(sidenSc ? { sidenSist: sidenSc } : {}), ...(instruks ? { instruks: instruks.tekst, instruksProsjekt: instruks.prosjekt } : {}) }
+      const txt = (items.length
+        ? `${hits.total} treff${query ? ` på «${query}»` : ''}${project ? ` i ${project}` : ''} (viser ${items.length}${hits.tråder ? `, ${hits.tråder} tråder fra Spør øverst` : ''}):\n` +
+          items.map((i) => `- [${i.id}] ${i.name} — ${i.project} · ${i.date}${i.thread ? ` · tråd: ${i.thread.svar} svar${i.thread.konklusjon ? `, konklusjon ${i.thread.konklusjon}` : ''}` : ''}${i.S ? `\n  ${i.S}` : ''}`).join('\n')
+        : `Ingen treff${query ? ` på «${query}»` : ''}.`) +
+        (sk.treff ? `\nSkjermet: ${sk.treff} (plassholdere — bruk dem uendret).` : '') +
+        (siden ? `\n\n${sk.skjerm(siden.tekst)}` : '')
+      sk.lær()
       return { content: [{ type: 'text', text: txt }], structuredContent: sc }
     },
   )
