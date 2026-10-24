@@ -24,6 +24,7 @@ import {
   linksFor, fileOf, sources, renderStatus, isVault, vaultClamp, hasExternalEdits,
 } from './store.js'
 import { lever, skjermerFor } from './motor.js'                                   // runde 3a: kortet gjennom motoren
+import { delingerFor, lenkerFor } from './deling.js'                               // runde 3b: delingen (lenke, mottakere, trukket) på en delingssak
 import { sidenSist, skalVise, trådFørst, instruksFor } from './dora.js'          // runde 3a: Tua → Claude
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -74,6 +75,8 @@ function atomCard(atoms, cur, level, context, { client = 'Claude' } = {}) {
     text: got.text, hasM: !!cur.levels?.M?.text, lengthL: (cur.content || '').length,
     instruks: instruks ? instruks.tekst : '',
     share: (cur.refs || []).map((r) => ({ project: r, level: cur.share?.[r] || 'L' })),
+    // runde 3b: en delingssak (tagg deling) viser delingen — mottakerne som personer, lenka til mottakersiden, nedlastingsfila, trukket/forespørsler. Aldri innhold utover det kortet alt viser.
+    deling: (cur.tags || []).includes('deling') ? (delingerFor(cur.id).filter((d) => d.sak === cur.id).map((d) => ({ token: d.token, til: (d.til || []).map((t) => ({ navn: t.navn, epost: t.epost || null, merke: t.merke || null })), nivå: d.nivå, opprettet: d.opprettet, trukket: d.trukket || null, forespørsler: (d.forespørsler || []).length, ...lenkerFor(d.token, process.env.TUA_APP_URL || 'http://127.0.0.1:5274') }))[0] || null) : null,
     builtBy: sources(atoms, cur).map((s) => ({ id: s.id, name: s.name, version: s.version, level: s.level, stale: s.stale, now: s.now, missing: s.missing })),
     renders: renderStatus(cur).map((r) => ({ format: r.format, path: r.url || r.path, ok: r.exists && !r.changed })),
     related: relItems,
@@ -89,6 +92,7 @@ const atomText = (a) =>
   `Nivå: ${a.level}${a.max !== 'L' ? ` (maks ${a.max}${a.vault ? ', Vault' : ''})` : ''}${a.stale ? ` ⚠ fra v${a.stale}` : ''}${a.clipped ? ` — ${a.clipped}` : ''}\n` +
   `Skjermet: ${a.shielded} (plassholdere som [Person A] — bruk dem uendret)${a.logged ? ' · utlevering logget' : ''}\n` +
   (a.builtBy.length ? `Bygget av: ${a.builtBy.map((s) => `[${s.id}] ${s.name} v${s.version}/${s.level}${s.stale ? ' ⚠' : ''}`).join(' · ')}\n` : '') +
+  (a.deling ? `Delt med: ${a.deling.til.map((t) => t.navn).join(', ')} · nivå ${a.deling.nivå}${a.deling.trukket ? ' · TRUKKET TILBAKE' : ` · mottakersiden: ${a.deling.http} · som fil: ${a.deling.html}`}${a.deling.forespørsler ? ` · ${a.deling.forespørsler} forespørsel/-ler om hele` : ''}\n` : '') +
   `Adresse: ${a.address}\n\n${a.text}`
 
 // ── «Åpne i …» fra kortet: samme faste liste som broen (V13). Aldri shell. macOS: open · Windows: explorer/rundll32 · Linux: xdg-open (platform.js)

@@ -122,16 +122,22 @@ i prosjektet det oppsto i. Si det eksplisitt: «synlig i X nå — som referanse
 - Når mottakeren er en *annen person*, foreslå S som utgangspunkt og la brukeren løfte bevisst.
 - `tua_unlink` fjerner synligheten igjen.
 
-## Når brukeren vil dele med en person («del med Revisor», «del denne på S med anna@firma.no») — runde 3a
+## Når brukeren vil dele med en person («del med Anna», «del denne på S med anna@firma.no») — runde 3a + 3b
 
-Kall `tua_share` med `ids` (sakene), `til` (navn eller e-post som tekst) og `level`: **S er standard** (V11) — M eller L bare når
-brukeren sier det eksplisitt («del hele», «på M»). Vault-merkede saker deles bare som S uansett; si det.
-1. Kall først med `forhåndsvis=true`. Svaret gir setningen: «Revisor får S av 2 saker, 3 opplysninger skjermes».
-2. Still **ett** spørsmål: «Revisor får S av 2 saker, 3 opplysninger skjermes — ok?» Ikke del uten ja.
-3. Sier brukeren ja: kall `tua_share` igjen uten `forhåndsvis`. Det lager en **delingssak** gjennom motoren (lese → skjerme → minimere → logge):
-   en skjermet gjengivelse av det som deles, med Utlevert-linje og lenke `tua://sak/<id>`. Utlevert er logget.
-4. Gi brukeren den **kopierbare teksten** slik den kommer (den er skjermet — plassholdere som [Person A] er med vilje) og lenka.
-   Mottakersiden (en lenke mottakeren kan åpne) kommer i runde 3b; i dag sender brukeren teksten selv.
+Mottakeren er en **person** — en kollega først (Erik 24.10.2026), senere relasjoner. Kall `tua_share` med `ids` (sakene), `til` (navn, e-post,
+«Navn <epost>», et sirkelnavn, eller flere: «Anna og Bjarte») og `level`: **S er standard** (V11) — M eller L bare når brukeren sier det eksplisitt
+(«del hele», «på M»). Vault-merkede saker deles bare som S uansett; si det. Finnes personen fra før, brukes hen; et nytt navn blir en ny person (kollega).
+1. Kall først med `forhåndsvis=true`. Svaret gir setningen: «Anna får S av 2 saker, 3 opplysninger skjermes», og hvem som er ny.
+2. Still **ett** spørsmål: «Anna får S av 2 saker, 3 opplysninger skjermes — ok?» Ikke del uten ja.
+3. Sier brukeren ja: kall `tua_share` igjen uten `forhåndsvis`. Det lager gjennom motoren (lese → skjerme → minimere → logge) en **delingssak** (skjermet
+   gjengivelse, Utlevert-linje per person) og en **delingslenke** til **mottakersiden**: `http://127.0.0.1:5274/del/<token>` (og `tua://del/<token>`) —
+   mottakerens navn, hvem som delte og når, sakene som låste rader på nivået de ble delt, «Be om hele» (e-post tilbake til brukeren, logges som forespørsel)
+   og linja om at ingenting er sendt til noen modell. Lenka virker på denne maskinen og på samme nett når Tua-appen kjører.
+4. Gi brukeren **lenka**, **nedlastingslenka** (`…/del/<token>.html` — én HTML-fil brukeren sender selv på e-post/Teams når mottakeren ikke er på samme nett)
+   og den **kopierbare teksten** slik de kommer (teksten er skjermet — plassholdere som [Person A] er med vilje).
+5. Sier svaret at Tua foreslår en **sirkel** (samme personer har fått noe sammen tre ganger), spør brukeren om et navn — navnet settes i appen under
+   Innstillinger › Mottakere. Sirkler emerger, de konfigureres ikke først.
+Delingen trekkes tilbake i appen («Del …» på saken → Trekk tilbake); da slutter lenka å virke, og det logges.
 «Del med prosjekt X» er noe annet: det er `tua_link` (synlighet mellom brukerens egne prosjekter).
 
 ## Det du får fra Tua er skjermet og logget (runde 3a, V21)

@@ -3289,7 +3289,7 @@ const booleanType = ZodBoolean.create;
 ZodNever.create;
 const arrayType = ZodArray.create;
 const objectType = ZodObject.create;
-ZodUnion.create;
+const unionType = ZodUnion.create;
 ZodIntersection.create;
 ZodTuple.create;
 const enumType = ZodEnum.create;
@@ -3297,4 +3297,4 @@ ZodPromise.create;
 ZodOptional.create;
 ZodNullable.create;
 
-export { ZodFirstPartyTypeKind, ZodOptional, arrayType, booleanType, enumType, numberType, objectType, stringType };
+export { ZodFirstPartyTypeKind, ZodOptional, arrayType, booleanType, enumType, numberType, objectType, stringType, unionType };

@@ -138,14 +138,15 @@ import { watchInbox, watchDesktop, importAlt, IMPORT_STEG, historyCounts, countP
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
 import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, settStandard as ollamaStandard, lokale as ollamaLokale } from './ollama.js'   // friksjon 12: modellene i Ollama
-import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
+import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer, del, trekkDeling, beOmHele, mottakersideFor } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks
 import { inboxPending, inboxShareFiles } from './import.js'
 import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
 import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv, fangetKandidater, slagAvNøkkel, driftKandidater, driftSlag } from './store.js'   // runde 2c: Fanget-bøtta (+ app: engangs-merkingen)
 import { klasseAv, tellKlasser, vekt, sistRørt, trådSamlet, brukInfo, deliveryInfo, logBruk, BRUK_HENDELSER, claudeØkter } from './store.js'   // runde 2d (03-avisen §2–§5): klasser, vekt, tråden samlet, bruk-loggen, Claude-øktene
 import { ulestAv, ulestFra, logSettAlt, settAltSist, fjernetAv } from './store.js'   // friksjon 16: ulest fra bruk-loggen og siste «sett alt»; fjernet (× i Siden sist)
-import { projectAliases } from './store.js'   // runde 2d (app), friksjon 14: filer i prosjektmappa som ikke er saker, og aliasene til prosjekt-treffet i søket
+import { projectAliases } from './store.js'
+import { lesMottakere, oppdaterPerson, nyPerson, navngiSirkel, avvisSirkel, eier, settEier, delingerFor, lenkerFor, trukketSide, MERKER } from './deling.js'   // runde 3b: personer, sirkler som emerger, delingene (mottakersiden tegnes i motoren)   // runde 2d (app), friksjon 14: filer i prosjektmappa som ikke er saker, og aliasene til prosjekt-treffet i søket
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
@@ -472,6 +473,7 @@ http
     const url = new URL(req.url, 'http://local')
     if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end() }
     try {
+      if (url.pathname.startsWith('/del/')) return delRute(req, res, url)   // runde 3b: mottakersiden er åpen for mottakeren — tokenet er nøkkelen (delRute nederst)
       // ── innlogging ──
       if (url.pathname === '/logg-inn') return passwordSet() ? html(res, 200, loginPage('', safeNext(url.searchParams.get('next')))) : redirect(res, '/')
       if (url.pathname === '/logg-ut') { endSession(req); return redirect(res, passwordSet() ? '/logg-inn' : '/', { 'Set-Cookie': CLEAR_COOKIE }) }
@@ -1124,6 +1126,62 @@ http
         const e = logSettAlt()
         return json(res, 200, { ok: true, at: e.at })
       }
+      // ── Runde 3b (planen videre §4 3b, Erik 24.10.2026: kollegaer først, deretter relasjoner) — kollega som første menneskelige mottaker. Egen blokk. Alt gjennom motoren (del()). ──
+      //   GET  /api/mottakere-personer → { personer: [{id, navn, epost, merke, opprettet, sist, delinger, fått: [{id, name, level, at, token}], forespørsler, aktive}], sirkler: [{id, navn, medlemmer}],
+      //                                   forslag: [{id, forslag, medlemmer, antall}], eier: {navn, epost}, merker }   personer og sirkler fra .tua/mottakere.json, «hva hver har fått» fra Utlevert (aldri innhold)
+      //   POST /api/mottakere-personer {navn, epost?, merke?} ny person · {id, navn?, epost?, merke?} rett en person · {sirkel: {id, navn}} gi det foreslåtte navnet (sirkelen emergerte — nå heter den noe) ·
+      //                                {sirkel: {id, avvis: true}} nei takk · {eier: {navn, epost}} den som deler (står på mottakersiden; «Be om hele» går dit)
+      //   POST /api/del {ids, til: [navn/e-post/sirkel] | 'Anna', nivå?: S, prosjekt?, forhåndsvis?} → motor.del(): forhåndsvis gir setningen og hva som skjermes uten å lagre; ellers delingssak + lenke
+      //                                {id, token, lenke, lenker: {tua, http, html}, kopierbar, mottakere: [{id, navn, epost, ny}], sirkelForslag, setning, kilder, linjer}. Vault → S (fail closed, linje).
+      //   GET  /api/delinger[?id=<sak>] → { delinger: [{token, sak, til, nivå, opprettet, trukket, forespørsler, rader: [{id, name, level}], lenker}] }  nyeste først, aldri innhold
+      //   POST /api/del/trekk {token} → { ok, trukket }   lenka slutter å virke (410); logges i Utlevert (hendelse trukket)
+      //   Åpne for mottakeren (uten innlogging — tokenet er nøkkelen; funksjonen delRute nederst, kalt før innloggingssjekken):
+      //   GET  /del/<token>        mottakersiden (Classical, frittstående HTML, mobil 390 først) · GET /del/<token>.html  samme side som nedlasting (Content-Disposition: attachment)
+      //   POST /del/<token>/be-om-hele {saker: [id]} → { ok }   «Be om hele» fra mottakersiden: noteres på delingen og logges i Utlevert (hendelse forespørsel). Fra en annen maskin går bare e-posten.
+      if (req.method === 'GET' && url.pathname === '/api/mottakere-personer') {
+        const m = lesMottakere(), alle = deliveries(null, Number.MAX_SAFE_INTEGER), navn = new Map(load().map((a) => [a.id, a.name])), delinger = delingerFor(null)
+        const personer = m.personer.map((p) => {
+          const mine = alle.filter((e) => e.mottaker === p.id)
+          const fått = mine.filter((e) => !e.hendelse).flatMap((e) => (e.saker || []).map((s) => ({ id: s.id, name: navn.get(s.id) || null, level: s.level || null, at: e.at, token: e.token || null })))
+          const egne = delinger.filter((d) => (d.til || []).some((t) => t.id === p.id))
+          return { ...p, fått, forespørsler: mine.filter((e) => e.hendelse === 'forespørsel').length, aktive: egne.filter((d) => !d.trukket).length, trukne: egne.filter((d) => d.trukket).length }
+        }).sort((a, b) => (b.sist || b.opprettet || 0) - (a.sist || a.opprettet || 0))
+        return json(res, 200, { personer, sirkler: m.sirkler.filter((s) => !s.foreslått), forslag: m.sirkler.filter((s) => s.foreslått), eier: eier(), merker: MERKER })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/mottakere-personer') {
+        const b = await readBody(req)
+        try {
+          if (b.eier) return json(res, 200, { ok: true, eier: settEier(b.eier) })
+          if (b.sirkel?.id) { if (b.sirkel.avvis) { avvisSirkel(b.sirkel.id); return json(res, 200, { ok: true, avvist: b.sirkel.id }) } return json(res, 200, { ok: true, sirkel: navngiSirkel(b.sirkel.id, b.sirkel.navn) }) }
+          if (b.id) return json(res, 200, { ok: true, person: oppdaterPerson(b.id, b) })
+          if (!String(b.navn || b.epost || '').trim()) return json(res, 400, { error: 'navn eller e-post kreves' })
+          const p = nyPerson({ navn: b.navn, epost: b.epost, merke: b.merke })
+          console.error(`[tua-bro] mottaker ${p.ny ? 'lagt til' : 'finnes'}: ${p.navn}`)
+          return json(res, 200, { ok: true, person: p })
+        } catch (e) { return json(res, 400, { error: e.message }) }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/del') {
+        const b = await readBody(req)
+        if (!Array.isArray(b.ids) || !b.ids.length) return json(res, 400, { error: 'ids kreves (sakene som deles)' })
+        if (!b.til || (Array.isArray(b.til) && !b.til.length)) return json(res, 400, { error: 'til kreves (navn, e-post eller sirkel)' })
+        const atoms = load()
+        try {
+          const r = del(atoms, { ids: b.ids, til: b.til, nivå: LEVELS.includes(b.nivå) ? b.nivå : 'S', prosjekt: b.prosjekt, convo: b.convo, klient: 'app', forhåndsvis: !!b.forhåndsvis, base: BRO_BASE() })
+          if (!r.forhåndsvis) { console.error(`[tua-bro] delt med ${r.til} · ${r.nivå} · ${r.kilder.length} saker · ${r.treff} skjermet · ${r.lenke}`); for (const id of b.ids) logBruk(id, 'delt') }
+          return json(res, 200, r)
+        } catch (e) { return json(res, e instanceof Blokkert ? 422 : e instanceof MotorFeil ? 400 : 500, { error: e.message, kode: e.kode || 'feil', detaljer: e.detaljer || [] }) }
+      }
+      if (req.method === 'GET' && url.pathname === '/api/delinger') {
+        const id = url.searchParams.get('id') || null
+        const delinger = delingerFor(id).map((d) => ({ token: d.token, sak: d.sak, til: d.til, sirkler: d.sirkler || [], nivå: d.nivå, opprettet: d.opprettet, trukket: d.trukket || null, forespørsler: (d.forespørsler || []).length, treff: d.treff || 0, prosjekt: d.prosjekt || null, klient: d.klient || null, rader: (d.rader || []).map(({ id, name, level, version }) => ({ id, name, level, version })), lenker: lenkerFor(d.token, BRO_BASE()) }))
+        return json(res, 200, { delinger, antall: delinger.length })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/del/trekk') {
+        const b = await readBody(req)
+        if (!b.token) return json(res, 400, { error: 'token kreves' })
+        try { const d = trekkDeling(String(b.token), { klient: 'app' }); console.error(`[tua-bro] deling trukket tilbake: ${d.til?.map((t) => t.navn).join(', ')}`); return json(res, 200, { ok: true, trukket: d.trukket, token: d.token }) }
+        catch (e) { return json(res, 404, { error: e.message }) }
+      }
       return json(res, 404, { error: 'ukjent rute' })
     } catch (e) {
       return json(res, 500, { error: String(e?.message || e) })
@@ -1135,3 +1193,25 @@ http
     const log = (m) => console.error(`[tua-bro] ${m}`)
     if (process.env.TUA_BRIDGE_VAKTER !== '0') { watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log }) }     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
   })
+
+// ── Runde 3b: mottakersiden — åpen for mottakeren (ingen innlogging; tokenet på 128 bit er nøkkelen). Kalles før innloggingssjekken. Bare lesing + «Be om hele». ──
+const BRO_BASE = () => (process.env.TUA_APP_URL ? process.env.TUA_APP_URL.replace(/\/$/, '') : `http://127.0.0.1:${PORT}`)
+async function delRute(req, res, url) {
+  const m = url.pathname.match(/^\/del\/([A-Za-z0-9_-]{8,64})(\.html)?(\/be-om-hele)?$/)
+  if (!m) return html(res, 404, trukketSide(null))
+  const [, token, fil, be] = m
+  if (be) {
+    // fra den frittstående fila (origin null / file://) kommer kallet uten preflight når kroppen er text/plain — derfor * her, og bare her (ingen cookie, ingen data ut)
+    const åpen = { 'Access-Control-Allow-Origin': '*' }
+    if (req.method === 'OPTIONS') { res.writeHead(204, { ...åpen, 'Access-Control-Allow-Methods': 'POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' }); return res.end() }
+    if (req.method !== 'POST') return json(res, 405, { error: 'bare POST' }, åpen)
+    let b = {}; try { b = await readBody(req) } catch { b = {} }
+    try { const f = beOmHele(token, { saker: Array.isArray(b.saker) ? b.saker.map(String) : [] }); console.error(`[tua-bro] «Be om hele» fra ${f.til?.map((t) => t.navn).join(', ')}: ${f.rader.map((r) => r.name).join(', ')}`); return json(res, 200, { ok: true, saker: f.rader.length }, åpen) }
+    catch (e) { return json(res, 410, { error: e.message }, åpen) }
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD') return html(res, 405, 'bare GET')
+  const side = mottakersideFor(token, { base: BRO_BASE(), frittstående: !!fil })
+  const ekstra = { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' }
+  if (side.kode === 200 && fil) { const navn = `Tua-deling-${(side.deling?.til || []).map((t) => String(t.navn || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '-')).join('-') || 'mottaker'}.html`; ekstra['Content-Disposition'] = `attachment; filename="${navn}"` }
+  return html(res, side.kode, side.html, ekstra)
+}
