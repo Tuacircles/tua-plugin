@@ -315,25 +315,28 @@ server.registerTool(
       project: stringType().optional().describe('Begrens til atomer som OPPSTO i dette prosjektet.'),
       context: stringType().optional().describe('Søk som dette prosjektet ser det: egne atomer + det som er referert inn via tua_link, aldri mer enn nivået prosjektet har fått. Utelat for å søke i ALT (standard — brukeren eier hele arkivet).'),
       limit: numberType().int().min(1).max(25).optional().describe('Maks treff (standard 8).'),
+      fanget: booleanType().optional().describe('Ta med fangede saker (det hooks og import fanget automatisk og brukeren ikke har løftet inn). Standard: holdt utenfor; svaret sier hvor mange. Sett true når brukeren sier «ta med fangede».'),
     },
   },
-  async ({ query, project, context, limit }) => {
+  async ({ query, project, context, limit, fanget }) => {
     const atoms = load();
-    const hits = search(atoms, query, { project, context, limit });
+    const hits = search(atoms, query, { project, context, limit, fanget: fanget ? 'med' : 'uten' });
+    // runde 2c: fangede saker (hook/import, ikke løftet inn) holdes utenfor til brukeren ber om dem — avisen og søket viser det som er laget med vilje
+    const fangetLinje = hits.fanget ? `\n\n${hits.fanget} fanget${hits.fanget === 1 ? ' sak' : 'e saker'} holdt utenfor — si «ta med fangede» for å søke i dem (tua_search med fanget=true).` : '';
     if (!hits.length) {
-      return text(`Ingen treff på «${query}»${project ? ` i ${project}` : ''}${context ? ` (synlig for ${context})` : ''}. Arkivet har ${atoms.length} atomer.` + onboardLine(atoms))
+      return text(`Ingen treff på «${query}»${project ? ` i ${project}` : ''}${context ? ` (synlig for ${context})` : ''}. Arkivet har ${atoms.length} atomer.` + fangetLinje + onboardLine(atoms))
     }
     const projects = new Set(hits.map((h) => h.atom.project)).size;
     const refMark = (a, max) => (context && a.project.toLowerCase() !== context.toLowerCase() ? ` (referert inn${max !== 'L' ? `, nivå ${max}` : ''})` : '');
     const sLabel = (S) => (S.level === 'S' ? 'S' : S.level === 'L' ? 'S (kort atom — alt)' : S.level === 'hvorfor' ? 'S mangler · hvorfor' : 'S mangler · utdrag');
     const lines = hits.map(({ atom: a, S, max, snippet: s }, i) =>
-      `${i + 1}. [${a.id}] ${a.name}\n   ${a.project}${refMark(a, max)} · ${a.convo || '—'} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}` +
+      `${i + 1}. [${a.id}] ${a.name}\n   ${a.project}${refMark(a, max)} · ${a.convo || '—'} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
       `\n   ${sLabel(S)}: ${S.text}${staleNote(a, 'S')}` +
       (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${a.summary}` : '') +
       (s ? `\n   Treff: ${s}` : '') +
       `\n   ↗ ${addr(a.id)}`,
     );
-    return text(`${hits.length} treff på «${query}» i ${projects} prosjekt${projects === 1 ? '' : 'er'}:\n\n${lines.join('\n\n')}` + onboardLine(atoms))
+    return text(`${hits.length} treff på «${query}» i ${projects} prosjekt${projects === 1 ? '' : 'er'}:\n\n${lines.join('\n\n')}` + fangetLinje + onboardLine(atoms))
   },
 );
 
@@ -384,6 +387,7 @@ server.registerTool(
         (a.summary && a.summary !== S.text ? `\nHvorfor: ${a.summary}` : '') +
         (a.tags?.length ? `\nTagger: ${a.tags.join(', ')}` : '') +
         (cur.refs?.length ? `\nSynlig også i: ${shareLine(cur)}` : '') +
+        (cur.fanget ? '\nFanget: automatisk (hook/import), ikke løftet inn — står utenfor avisen og søket til brukeren beholder, slår sammen eller kaster den i appen' : '') +
         `\nAdresse: ${addr(id)}` +
         openLines(cur) +
         outputLines(atoms, { ...cur, editedOutside: edited && cur.editedOutside }) +
@@ -412,10 +416,12 @@ server.registerTool(
       tag: stringType().optional().describe('Vis bare atomer med denne taggen.'),
       needs: enumType(['S', 'M']).optional().describe('Vis bare atomer som mangler eller har utdatert S (ingress) eller M (sammendrag; bare for innhold over ~3 000 tegn).'),
       limit: numberType().int().min(1).max(50).optional().describe('Maks atomer i lista (standard 20).'),
+      fanget: booleanType().optional().describe('Ta med fangede saker i lista (standard: holdt utenfor, tallet står i hodet).'),
     },
   },
-  async ({ project, tag, needs, limit = 20 }) => {
+  async ({ project, tag, needs, limit = 20, fanget }) => {
     const atoms = load();
+    const fangede = atoms.filter((a) => a.fanget).length;   // runde 2c: Fanget-bøtta — utenfor lista til de løftes inn
     const byProject = {};
     const byTag = {};
     for (const a of atoms) {
@@ -431,6 +437,7 @@ server.registerTool(
     // project-filter = «slik dette prosjektet ser det»: egne atomer + referert inn
     const wanted = atoms
       .filter((a) => visibleIn(a, project))
+      .filter((a) => fanget || !a.fanget)
       .filter((a) => !tag || (a.tags || []).some((t) => t.toLowerCase() === tag.toLowerCase()))
       .filter((a) => !needs || needsLevel(a, needs))
       .sort((x, y) => y.capturedAt - x.capturedAt);
@@ -448,6 +455,7 @@ server.registerTool(
         ` · ${a.convo || '—'} · ${fmtTime(a.capturedAt)} · v${a.version || 1} · ${(a.content || '').length} tegn` +
         (a.tags?.length ? ` · #${a.tags.join(' #')}` : '') +
         (a.refs?.length ? ` · synlig også i: ${shareLine(a)}` : '') +
+        (a.fanget ? ' · fanget' : '') +
         lvMark(a),
       );
     const filt = [project && `prosjekt=${project}`, tag && `tag=${tag}`, needs && `mangler ${needs}`].filter(Boolean).join(', ');
@@ -455,7 +463,8 @@ server.registerTool(
       `${atoms.length} atomer i arkivet\n` +
       `Prosjekter: ${projLine}\n` +
       `Tagger: ${tagLine}\n` +
-      `Nivåer: ${needS ? `${needS} mangler/utdatert S` : 'alle har S'} · ${needM ? `${needM} mangler/utdatert M` : 'alle lange har M'}\n\n` +
+      `Nivåer: ${needS ? `${needS} mangler/utdatert S` : 'alle har S'} · ${needM ? `${needM} mangler/utdatert M` : 'alle lange har M'}\n` +
+      (fangede ? `Fanget: ${fangede} sak${fangede === 1 ? '' : 'er'} fanget automatisk (hook/import) og ikke løftet inn — ${fanget ? 'tatt med her' : 'holdt utenfor lista; tua_list med fanget=true tar dem med'}\n` : '') + '\n' +
       (filt ? `Viser ${wanted.length} atomer (${filt})` : `Nyeste ${Math.min(limit, wanted.length)} av ${wanted.length}`) +
       (wanted.length > limit ? ` — øk limit for flere` : '') + ':\n';
     return text(head + (rows.join('\n') || '(tomt)') + onboardLine(atoms))

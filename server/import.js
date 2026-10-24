@@ -308,7 +308,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
       const header = `# ${s.convo}\n\n_${srcLabel} · ${s.turns} oppgaver · ${iso(s.first)}${s.last && iso(s.last) !== iso(s.first) ? ` – ${iso(s.last)}` : ''} · ${proj}${repo ? ` · ${repo}` : ''} · øktfil ${path.basename(file)}_\n\n`
       const { atom, status } = put({
         key: `samtale:${s.id}`, kind: 'samtale', name: s.convo, content: header + s.transcript, project: proj, convo: s.convo, source: srcLabel, by: 'regel',
-        tags: ['samtale', source], links, short: samtaleS(s), summary: `${srcLabel}-økt importert fra ${path.basename(file)} (${s.turns} oppgaver).`,   // S = siste vending (friksjon 9)
+        tags: ['samtale', source], links, short: samtaleS(s), summary: `${srcLabel}-økt importert fra ${path.basename(file)} (${s.turns} oppgaver).`, fanget: true,   // S = siste vending (friksjon 9) · fanget (runde 2c): alt fra en samtalelogg er fanget til det løftes inn; filer Claude skrev (fil:) er dokumenter, med vilje
       }, s.last)
       count(status); perProject[proj] = (perProject[proj] || 0) + 1
       const derived = [{ id: atom.id, version: atom.version || 1, level: 'L' }]
@@ -319,7 +319,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
         stats.prompterAlle++
         const r = put({
           key: promptKey(s.id, p.prompt), kind: 'prompt', name: promptTitle(p.prompt), content: promptL(p.prompt), project: proj, convo: s.convo, source: srcLabel, by: 'regel',
-          tags: ['prompt', source], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i ${srcLabel}-økta «${s.convo}».`,
+          tags: ['prompt', source], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i ${srcLabel}-økta «${s.convo}».`, fanget: true,
         }, p.at || s.last)
         if (r.status !== 'uendret') stats.prompter++
         for (const a of p.answers) promptFor.set(a, r.atom)
@@ -329,7 +329,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
         const pa = promptFor.get(a) || null
         const r = put({
           key: `svar:${s.id.slice(0, 8)}:${sha8(a)}`, kind: 'capture', name: titleOf(a, `Svar i ${s.convo}`), content: a, project: proj, convo: s.convo, source: 'Claude', by: 'regel',
-          tags: ['svar', 'auto'], links, derivedFrom: [...(pa ? [{ id: pa.id, version: pa.version || 1, level: 'L' }] : []), ...derived], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i Code-økta «${s.convo}».`,
+          tags: ['svar', 'auto'], links, derivedFrom: [...(pa ? [{ id: pa.id, version: pa.version || 1, level: 'L' }] : []), ...derived], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i Code-økta «${s.convo}».`, fanget: true,
         }, s.last)
         if (r.status !== 'uendret') stats.svar++
         if (pa) pa.ga = mergeGa(pa.ga, [{ id: r.atom.id, version: r.atom.version || 1 }])
@@ -685,7 +685,7 @@ export function importParsed(data, {
         key: `samtale:${c.id}`, kind: 'samtale', name: c.title, content: header + c.transcript, project: proj, convo: c.title,
         source: c.source, by: 'regel', tags: ['samtale', ...(c.tags || [])], links,
         short: c.pairs?.length ? samtaleS({ pairs: c.pairs, turns: c.pairs.length, first: c.created, last: c.updated }) : ruleS(c.title, c.firstUser),   // S = siste vending (friksjon 9)
-        summary: c.summary ? clip(c.summary, 200) : `Importert fra ${label}${via ? ` via ${via}` : ''}.`,
+        summary: c.summary ? clip(c.summary, 200) : `Importert fra ${label}${via ? ` via ${via}` : ''}.`, fanget: true,   // runde 2c: samtalen er fanget; artifacts/vedlegg/dokumenter under er laget med vilje
       }, c.updated, { moveFromDefault: !!c.project })
       count(status); perProject[atom.project] = (perProject[atom.project] || 0) + 1
       // artifacts og vedlegg med tekst → egne atomer, bygget av samtalen (men ikke leveranser)
@@ -709,14 +709,14 @@ export function importParsed(data, {
         stats.prompterAlle++
         const pr = put({
           key: promptKey(sid, p.prompt), kind: 'prompt', name: promptTitle(p.prompt), content: promptL(p.prompt), project: atom.project, convo: c.title, source: c.source, by: 'regel',
-          tags: ['prompt', ...(c.tags || [])], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i samtalen «${c.title}» (${c.source}).`,
+          tags: ['prompt', ...(c.tags || [])], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i samtalen «${c.title}» (${c.source}).`, fanget: true,
         }, p.at || c.updated, { moveFromDefault: !!c.project })
         if (pr.status !== 'uendret') stats.prompter++
         for (const a of p.answers) {
           if (a.length < MIN_SVAR || isDataDump(a)) continue
           const sv = put({
             key: `svar:${sid.slice(0, 8)}:${sha8(a)}`, kind: 'capture', name: titleOf(a, `Svar i ${c.title}`), content: a, project: atom.project, convo: c.title, source: c.source, by: 'regel',
-            tags: ['svar', 'auto'], links, derivedFrom: [{ id: pr.atom.id, version: pr.atom.version || 1, level: 'L' }, ...samtaleRef], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i samtalen «${c.title}» (${c.source}).`,
+            tags: ['svar', 'auto'], links, derivedFrom: [{ id: pr.atom.id, version: pr.atom.version || 1, level: 'L' }, ...samtaleRef], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i samtalen «${c.title}» (${c.source}).`, fanget: true,
           }, p.at || c.updated, { moveFromDefault: !!c.project })
           if (sv.status !== 'uendret') stats.svar++
           pr.atom.ga = mergeGa(pr.atom.ga, [{ id: sv.atom.id, version: sv.atom.version || 1 }])
@@ -942,7 +942,7 @@ export async function importShare(url, { dryRun = false, log = () => {}, via = '
     if (!dryRun) {
       const { status } = upsert(atoms, {
         key, kind: 'samtale', name: page.title ? `Delt: ${page.title}` : `Delt Claude-samtale ${id.slice(0, 8)}`, content, project: 'Claude-samtaler', convo: page.title || `Delt lenke ${id.slice(0, 8)}`,
-        source: 'Claude (delt lenke)', by: 'regel', tags: ['samtale', 'delt'], links: [{ kind: 'url', href: link, label: 'Delt lenke (claude.ai/share)' }],
+        source: 'Claude (delt lenke)', by: 'regel', tags: ['samtale', 'delt'], links: [{ kind: 'url', href: link, label: 'Delt lenke (claude.ai/share)' }], fanget: true,
         short: clip(`Delt Claude-samtale${page.title ? ` «${page.title}»` : ''} — ${note}.`, S_MAX), summary: `Delt lenke mottatt via ${via}; innholdet fanges fra Desktop-cachen når lenken åpnes der.`,
       })
       lines.push(`- ${link} — ${old ? status : 'peker-atom lagret'}: ${note}`)

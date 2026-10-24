@@ -10,6 +10,8 @@
 //                          prompt:<økt8>:<sha8> — samme som importen, så importen etterpå gir «uendret». STUM: stdout blir kontekst for modellen.
 //          svar-modusen lagrer også prompten (siste brukermelding i transkriptet) FØR lengdesjekken, og kobler: svaret får prompten i
 //          bygget_av, prompten får svaret i ga. Samme svar-hash som importen (sha8), så hook og import aldri lager to atomer av ett svar.
+//   Runde 2c (arb. 32 §5 sp. 1, 24.10.2026): økt-, prompt- og svar-sakene får `fanget: true` — Fanget-bøtta, utenfor avisen og søket til brukeren løfter dem inn
+//          (Behold / Slå sammen / Kast). fil-modus får det IKKE: et dokument Claude skrev ligger på disk og er laget med vilje (Forsidens «Dokumenter», runde 1).
 //
 // Leser hook-input som JSON på stdin. Skriver gjennom samme store.js (og fil-lås) som serveren — ikke via MCP,
 // fordi en hook må kunne filtrere (lengde, filtype) før den eventuelt lagrer, og `mcp_tool`-typen kan ikke det.
@@ -74,7 +76,7 @@ try {
   const convo = tr?.title || (tr?.prompts[0] ? clip(flat(tr.prompts[0]), 60) : input.prompt ? clip(flat(input.prompt), 60) : `Code-økt ${sid.slice(0, 8)}`)
   const repo = [{ kind: 'repo', href: repoRootOf(cwd), label: `Repo — ${project}` }]   // samme lenke (med etikett) som import.js, så import etter hook gir «uendret»
   // M19: prompt-saken for én brukermelding — samme nøkkel, navn, S og tagger som import.js, så importen etterpå sier «uendret»
-  const promptSak = (atoms, p) => upsert(atoms, { key: promptKey(sid, p), kind: 'prompt', name: promptTitle(p), content: promptL(p), project, convo, source: 'Claude Code', by: 'regel', tags: ['prompt', 'code'], links: repo, short: firstSentence(p), summary: `Spørsmål stilt i Claude Code-økta «${convo}».` })
+  const promptSak = (atoms, p) => upsert(atoms, { key: promptKey(sid, p), kind: 'prompt', name: promptTitle(p), content: promptL(p), project, convo, source: 'Claude Code', by: 'regel', tags: ['prompt', 'code'], links: repo, short: firstSentence(p), summary: `Spørsmål stilt i Claude Code-økta «${convo}».`, fanget: true })
 
   if (mode === 'start') {
     // Påminnelse — standard i pluginen. Stdout fra SessionStart blir kontekst for Claude.
@@ -134,7 +136,7 @@ try {
     const { atom, status } = upsert(atoms, {
       key: `svar:${sid.slice(0, 8)}:${sha8(msg)}`, kind: 'capture', name: titleOf(msg, `Svar i ${convo}`), content: msg, project, convo, source: 'Claude', by: 'regel',
       tags: ['svar', 'auto'], links: repo, ...(pa ? { derivedFrom: [{ id: pa.id, version: pa.version || 1, level: 'L' }] } : {}),
-      short: clip(firstPara(msg), S_MAX), summary: `Substansielt svar i Code-økta «${convo}».`,   // samme tekst som import.js — ellers gir importen etterpå en falsk ny versjon
+      short: clip(firstPara(msg), S_MAX), summary: `Substansielt svar i Code-økta «${convo}».`, fanget: true,   // samme tekst som import.js — ellers gir importen etterpå en falsk ny versjon
     })
     if (pa) { const før = JSON.stringify(pa.ga || []); pa.ga = mergeGa(pa.ga, [{ id: atom.id, version: atom.version || 1 }]); endret = endret || JSON.stringify(pa.ga) !== før }
     if (status !== 'uendret' || endret) save(atoms)
@@ -172,7 +174,7 @@ try {
     const { atom, status } = upsert(atoms, {
       key: `okt:${sid}`, name: `Økt: ${convo}`, content, project, convo, source: 'Claude', by: 'regel', tags: ['økt', 'auto'], links: repo,
       short: samtaleS(tr),   // friksjon 9 (24.10.2026): S = siste vending («Sist: … → …», antall og periode), samme regel som importen — ikke første prompt
-      summary: `Økt-sammendrag laget automatisk ved ${input.hook_event_name}.`,
+      summary: `Økt-sammendrag laget automatisk ved ${input.hook_event_name}.`, fanget: true,
     })
     if (status !== 'uendret') save(atoms)
     log({ status, id: atom.id, project, turns: tr.turns })

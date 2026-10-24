@@ -560,7 +560,7 @@ export function setShare(a, project, level) {
 // M19 (skive 8, V16): `ga` = [{id, version}] — svarene en prompt-sak ga. Normaliseres som derivedFrom; upsert slår lista SAMMEN (union på id), aldri erstatter.
 export const normalizeGa = (list) => (Array.isArray(list) ? list : []).filter((g) => g && g.id).map((g) => ({ id: String(g.id), version: Number(g.version) || 1 }))
 export const mergeGa = (gammel = [], ny = []) => { const ut = [...normalizeGa(gammel)]; for (const g of normalizeGa(ny)) { const i = ut.findIndex((x) => x.id === g.id); if (i < 0) ut.push(g); else ut[i] = g } return ut }
-export function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga }) {
+export function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget }) {
   const body = String(content || '').replace(/\r\n?/g, '\n').trim()   // M17: fila leses tilbake uten \r (files.js) — lagre likt, ellers blir hver import en «ny versjon»
   const now = Date.now()
   const a = {
@@ -589,6 +589,7 @@ export function makeAtom({ content, name, source, project, convo, summary, tags,
   const df = normalizeDerived(derivedFrom); if (df.length) { a.derivedFrom = df; if (!kind) a.kind = 'leveranse' }
   const rd = normalizeRenders(renders); if (rd.length) a.renders = rd
   const g = normalizeGa(ga); if (g.length) a.ga = g
+  if (fanget === true || fanget === false) a.fanget = fanget            // runde 2c: true = fanget automatisk, false = løftet inn — se Fanget-bøtta nederst
   return a
 }
 
@@ -634,17 +635,21 @@ export function upsert(atoms, { key, ...data }) {
   const renders = fresh.renders?.length ? fresh.renders : old.renders
   const ga = fresh.ga?.length || old.ga?.length ? mergeGa(old.ga, fresh.ga) : undefined   // M19: `ga` vokser av bruk — union, aldri erstatning
   const kind = data.kind || (derivedFrom?.length ? 'leveranse' : old.kind)
+  // runde 2c: en sak som finnes beholder sin fanget-tilstand. Er den løftet inn (eller lagret med vilje), setter ingen ny import flagget igjen;
+  // er den fanget, tar bare en eksplisitt `fanget: false` (Behold) det bort. Brukerens valg vinner over regelen — alltid.
+  const fanget = data.fanget === false ? false : old.fanget
   const attach = (a) => {
     if (levels) a.levels = levels; else delete a.levels
     if (links) a.links = links; else delete a.links
     if (derivedFrom) a.derivedFrom = derivedFrom; else delete a.derivedFrom
     if (renders) a.renders = renders; else delete a.renders
     if (ga) a.ga = ga; else delete a.ga
+    if (fanget === true || fanget === false) a.fanget = fanget; else delete a.fanget
     a.kind = kind
     return a
   }
   if (bodySame) {
-    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind) return { atom: old, status: 'uendret' }
+    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old })
     return { atom: atoms[i], status: 'nivåer' }
   }
@@ -720,14 +725,19 @@ export function score(a, tokens, max = 'L') {
 // søkes og vises aldri mer enn det prosjektet har lov til å se. Rangert (M12), paginert
 // med offset/limit; `total` ligger på resultatet.
 // `kind` (M19, skive 8): bare saker av én type — prompt-samlingen i appen og forslagene i Spør søker med kind=prompt.
-export function search(atoms, query, { project, context, kind, limit = 8, offset = 0 } = {}) {
+// `fanget` (runde 2c, 24.10.2026): standard `uten` — fangede saker (hook/import, ikke løftet inn) holdes utenfor; `med` tar dem med; `bare` gir bare dem.
+// Resultatet bærer `fanget` = hvor mange fangede saker som traff søket men ble holdt utenfor, så døra kan si det («N fangede saker holdt utenfor»).
+export function search(atoms, query, { project, context, kind, fanget = 'uten', limit = 8, offset = 0 } = {}) {
   const tokens = String(query || '').toLowerCase().split(/\s+/).filter(Boolean)
-  const all = atoms
+  const treff = atoms
     .filter((a) => !project || a.project.toLowerCase() === project.toLowerCase())
     .filter((a) => !kind || (a.kind || 'capture') === kind)
     .filter((a) => visibleIn(a, context))
     .map((a) => ({ a, max: maxLevel(a, context) }))
     .filter(({ a, max }) => tokens.every((t) => hay(a, max).includes(t)))
+  const utenfor = fanget === 'med' ? 0 : treff.filter(({ a }) => (fanget === 'bare' ? !a.fanget : !!a.fanget)).length
+  const all = treff
+    .filter(({ a }) => fanget === 'med' || (fanget === 'bare' ? !!a.fanget : !a.fanget))
     .map((x) => ({ ...x, score: tokens.length ? score(x.a, tokens, x.max) : 0 }))
     .sort((x, y) => y.score - x.score || y.a.capturedAt - x.a.capturedAt)
   const page = all.slice(offset, offset + limit).map(({ a, max, score: sc }) => {
@@ -737,6 +747,7 @@ export function search(atoms, query, { project, context, kind, limit = 8, offset
     return { atom: a, S, max, score: sc, snippet: inS || max === 'S' ? '' : snippet(body, tokens) }
   })
   page.total = all.length
+  page.fanget = utenfor
   return page
 }
 
@@ -808,4 +819,107 @@ export function ensureArchive() {
   save(atoms)
   fs.writeFileSync(ONBOARDING(), JSON.stringify({ state: 'aktiv', opprettet: new Date().toISOString(), sted: rootLabel(), root: FILES_ROOT }, null, 2) + '\n')
   return { created: true, root: FILES_ROOT }
+}
+
+// ── Runde 2c (arbeidsstykke 32 §5 spørsmål 1, Erik 24.10.2026: enig): Fanget-bøtta ──────────────────────────
+// «Fang alt, men i en Fanget-bøtte utenfor forsiden og søket til du løfter saken inn. Avisen viser det som er laget med vilje.»
+// Flagget `fanget: true` (frontmatter) settes av det som fanger av seg selv: hookens økt-, prompt- og svar-saker og importens samtale-, prompt-
+// og svar-saker (Code, Cowork, Desktop, eksport, delt lenke). Det brukeren lager med vilje — tua_save, Spør (prompt, svar, Forskjeller,
+// konklusjon), innlesing fra Innboks, compose, dokumenter Claude skrev som filer (de ligger på disk og kan åpnes) — får det ikke.
+// En fanget sak finnes, kan hentes (tua_get, /api/sak) og teller i related/kjente personer, men står utenfor lista og søket til den løftes inn:
+//   behold(…)     flagget til `fanget: false` (løftet inn — regelen og importen rører den aldri igjen), valgfritt til et annet prosjekt (lageret flytter fila, som /api/flytt)
+//   slåSammen(…)  innholdet legges som ny versjon av en annen sak (kildepeker i bygget_av), den fangede går i papirkurven
+//   kast(…)       fila flyttes til <arkiv>/.tua/papirkurv/<prosjekt>/ med indeks — aldri slett; angre(…) flytter den tilbake
+// Regelen for engangs-merkingen av det som alt ligger i arkivet (review.js --fanget): nøkkelen sier hvor saken kom fra.
+export const FANGET_NØKLER = /^(svar|okt|samtale):|^prompt:(?!spor:)/      // svar:<økt8>:… og prompt:<økt8>:… (hook/import), okt:<økt> (hook), samtale:<id> (import); prompt:spor: er Spør
+export function erFangetEtterRegel(a, { utlevert = 0 } = {}) {
+  if (a?.fanget === false) return false                                                   // løftet inn med Behold — brukerens valg, regelen rører den aldri igjen
+  if (!a?.key || !FANGET_NØKLER.test(a.key)) return false
+  if (a.levels?.S?.by === 'menneske' || a.levels?.M?.by === 'menneske') return false   // noen har skrevet på den — da er den med vilje (V10)
+  if ((a.refs || []).length || a.status) return false                                     // gjort synlig i et annet prosjekt eller låst/satt status: arbeidet med
+  if (utlevert > 0) return false                                                          // har vært med i en sending — brukeren har brukt den
+  return true
+}
+const PAPIRKURV = () => tuaFile('papirkurv')
+const PAPIRKURV_INDEX = () => path.join(PAPIRKURV(), 'index.json')
+const readKurv = () => { try { return JSON.parse(fs.readFileSync(PAPIRKURV_INDEX(), 'utf8')) } catch { return [] } }
+const writeKurv = (list) => { fs.mkdirSync(PAPIRKURV(), { recursive: true }); fs.writeFileSync(PAPIRKURV_INDEX(), JSON.stringify(list, null, 2) + '\n') }
+export const papirkurv = () => (filesMode() ? readKurv().sort((x, y) => y.at - x.at) : [])
+// Løft inn: flagget bort; med prosjekt flyttes saken dit (save() flytter fila — V9: samme som å dra den i Finder).
+export function behold(atoms, id, { prosjekt } = {}) {
+  const a = atoms.find((x) => x.id === id)
+  if (!a) throw new Error(`fant ikke sak ${id}`)
+  const før = { fanget: !!a.fanget, project: a.project }
+  a.fanget = false                                                     // eksplisitt false i fila: løftet inn — en ny import eller review --fanget setter det aldri igjen
+  if (prosjekt && String(prosjekt).trim() && String(prosjekt).trim().toLowerCase() !== a.project.toLowerCase()) a.project = projectAlias(String(prosjekt).trim())
+  return { atom: a, før, flyttet: før.project !== a.project }
+}
+// Slå sammen: innholdet i den fangede saken legges nederst i `innI` som NY versjon (V15: aldri merge i teksten — tillegg med skille og kildelinje),
+// bygget_av får en kildepeker til den fangede saken (id, versjon, L). Menneskeskrevet S/M på innI røres ikke (V10) — de står, og regnes som
+// utdaterte av isStale fordi versjonen gikk opp. Den fangede saken går i papirkurven (kast), så ingenting slettes.
+export function slåSammen(atoms, fraId, innIId) {
+  const fra = atoms.find((x) => x.id === fraId), inn = atoms.find((x) => x.id === innIId)
+  if (!fra) throw new Error(`fant ikke sak ${fraId}`)
+  if (!inn) throw new Error(`fant ikke sak ${innIId}`)
+  if (fra.id === inn.id) throw new Error('en sak kan ikke slås sammen med seg selv')
+  const når = new Date(fra.capturedAt || Date.now()).toLocaleString('no-NO', { dateStyle: 'short', timeStyle: 'short' })
+  const skille = `\n\n---\n\n_Slått sammen fra «${fra.name}» (${fra.source || 'ukjent kilde'}${fra.convo ? ` · ${fra.convo}` : ''} · ${når} · v${fra.version || 1})_\n\n`
+  inn.content = `${(inn.content || '').trimEnd()}${skille}${(fra.content || '').trim()}`
+  inn.size = Buffer.byteLength(inn.content, 'utf8')
+  inn.version = (inn.version || 1) + 1
+  inn.capturedAt = Date.now()
+  inn.derivedFrom = normalizeDerived([...(inn.derivedFrom || []), { id: fra.id, version: fra.version || 1, level: 'L' }])
+  const kastet = kast(atoms, fra.id, { grunn: `slått sammen inn i ${inn.id} («${inn.name}»)`, innI: inn.id })
+  return { atom: inn, kastet }
+}
+// Kast: fila til <arkiv>/.tua/papirkurv/<prosjekt>/<filnavn>, ut av indeksen og av `atoms` (i minnet — kalleren lagrer resten med save()).
+// Aldri slett: indeksen (papirkurv/index.json) husker hvor fila lå, så angre() kan legge den tilbake. Uten arkivmappe (cache-modus) finnes ingen papirkurv.
+export function kast(atoms, id, { grunn = 'kastet fra Fanget', innI = null } = {}) {
+  if (!filesMode()) throw new Error('papirkurven finnes bare når arkivmappa er valgt')
+  const i = atoms.findIndex((x) => x.id === id)
+  if (i < 0) throw new Error(`fant ikke sak ${id}`)
+  const a = atoms[i]
+  fs.mkdirSync(path.dirname(LOCK()), { recursive: true })
+  const locked = acquireLock()
+  try {
+    const index = readIndex(), wr = readWritten()
+    const rel = index[a.id] || path.join(a.project || 'Uten prosjekt', fileNameFor(a))
+    const src = path.join(FILES_ROOT, rel)
+    const dir = path.join(PAPIRKURV(), a.project || 'Uten prosjekt')
+    fs.mkdirSync(dir, { recursive: true })
+    let dest = path.join(dir, path.basename(rel))
+    if (fs.existsSync(dest)) dest = path.join(dir, `${path.basename(rel, '.md')} (${Date.now()}).md`)
+    if (fs.existsSync(src)) fs.renameSync(src, dest)
+    else fs.writeFileSync(dest, serialize(a))                       // fila var alt borte (slettet i Finder) — skriv den slik vi kjenner den, så angre virker
+    delete index[a.id]; delete wr[a.id]
+    writeIndex(index); fs.writeFileSync(WRITTEN(), JSON.stringify(wr, null, 2) + '\n')
+    const post = { id: a.id, name: a.name, project: a.project, kind: a.kind || 'capture', source: a.source || '', rel, kurv: path.relative(FILES_ROOT, dest), at: Date.now(), grunn, ...(innI ? { innI } : {}), fanget: !!a.fanget, version: a.version || 1 }
+    writeKurv([...readKurv().filter((e) => e.id !== a.id), post])
+    atoms.splice(i, 1)
+    writeCache(atoms)
+    return post
+  } finally { if (locked) releaseLock() }
+}
+// Angre: fila tilbake der den lå (finnes det alt en fil der: med id-suffiks), inn i indeksen igjen. Returnerer saken slik den leses fra fila.
+export function angre(id) {
+  if (!filesMode()) throw new Error('papirkurven finnes bare når arkivmappa er valgt')
+  const kurv = readKurv()
+  const e = kurv.find((x) => x.id === id)
+  if (!e) throw new Error(`${id} ligger ikke i papirkurven`)
+  fs.mkdirSync(path.dirname(LOCK()), { recursive: true })
+  const locked = acquireLock()
+  try {
+    const src = path.join(FILES_ROOT, e.kurv)
+    if (!fs.existsSync(src)) throw new Error(`fila i papirkurven er borte (${e.kurv})`)
+    let rel = e.rel
+    if (fs.existsSync(path.join(FILES_ROOT, rel))) rel = path.join(path.dirname(rel), `${path.basename(rel, '.md')} (${String(e.id).slice(-6)}).md`)
+    fs.mkdirSync(path.dirname(path.join(FILES_ROOT, rel)), { recursive: true })
+    fs.renameSync(src, path.join(FILES_ROOT, rel))
+    const index = readIndex(); index[e.id] = rel; writeIndex(index)
+    writeKurv(kurv.filter((x) => x.id !== id))
+    try { fs.rmdirSync(path.dirname(src)) } catch {}                  // tom prosjektmappe i kurven ryddes; ikke-tom står
+    const a = parse(fs.readFileSync(path.join(FILES_ROOT, rel), 'utf8'), { fallbackId: e.id })
+    const dir = path.dirname(rel); if (dir && dir !== '.') a.project = dir
+    return { atom: a, rel, post: e }
+  } finally { if (locked) releaseLock() }
 }

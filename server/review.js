@@ -16,14 +16,55 @@
 //   node review.js --samtaler             skriver S på nytt (by: regel) for de samtalene. Menneskeskrevet S røres aldri (V10); S skrevet av
 //                                         Claude røres bare når den er utdatert (fra en eldre versjon). Lest ut av transkriptet (L) — trenger
 //                                         ikke øktfila eller Desktop-cachen, så det virker også for samtaler kildene er borte for.
+//
+//   node review.js --fanget --dry-run     runde 2c (arb. 32 §5 sp. 1, 24.10.2026): viser hvor mange eksisterende saker som ville fått `fanget: true` etter regelen
+//                                         (store.erFangetEtterRegel): nøkkelen er svar:<økt>:…, prompt:<økt>:… (ikke prompt:spor:), okt:<økt> eller samtale:<id>
+//                                         — det hook og import fanget — OG ingen har arbeidet med saken (ikke menneskeskrevet S/M, ikke gjort synlig i annet prosjekt,
+//                                         ikke satt status, ikke vært med i en sending). Skriver ingenting.
+//   node review.js --fanget               setter flagget på dem. Angres per sak med Behold i appen (POST /api/fanget/behold). Kjør dry-run først.
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX } from './store.js'
+import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, erFangetEtterRegel, FANGET_NØKLER, deliveryCounts } from './store.js'
 import { samtaleSFraTranskript } from './import.js'
 
 const args = process.argv.slice(2)
 const atoms = load()
+
+if (args.includes('--fanget')) {
+  const dryRun = args.includes('--dry-run')
+  const sendinger = deliveryCounts()
+  const slagAv = (a) => { const k = String(a.key || ''); return k.startsWith('okt:') ? 'økt' : k.startsWith('samtale:') ? 'samtale' : k.startsWith('prompt:') ? 'prompt' : k.startsWith('svar:') ? 'svar' : a.kind || 'capture' }
+  const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
+  const tall = { saker: atoms.length, altFanget: 0, kandidater: 0, nye: 0, holdt: { menneske: 0, synlig: 0, status: 0, utlevert: 0 } }
+  const perSlag = {}, perKilde = {}, perProsjekt = {}
+  const vis = []
+  for (const a of atoms) {
+    if (a.fanget) { tall.altFanget++; continue }
+    if (!a.key || !FANGET_NØKLER.test(a.key)) continue
+    tall.kandidater++
+    const utlevert = sendinger.get(a.id) || 0
+    if (!erFangetEtterRegel(a, { utlevert })) {
+      if (a.levels?.S?.by === 'menneske' || a.levels?.M?.by === 'menneske') tall.holdt.menneske++
+      else if ((a.refs || []).length) tall.holdt.synlig++
+      else if (a.status) tall.holdt.status++
+      else if (utlevert) tall.holdt.utlevert++
+      continue
+    }
+    tall.nye++; tell(perSlag, slagAv(a)); tell(perKilde, a.source || '—'); tell(perProsjekt, a.project)
+    if (vis.length < 12) vis.push(`  ${a.project} / ${a.name}  (${slagAv(a)} · ${a.source || '—'} · ${a.key})`)
+    if (!dryRun) a.fanget = true
+  }
+  const linje = (m) => Object.entries(m).sort((x, y) => y[1] - x[1]).map(([k, n]) => `${k} (${n})`).join(', ') || '—'
+  console.log(`${tall.saker} saker · ${tall.altFanget} alt merket fanget · ${tall.kandidater} med fangst-nøkkel · ${tall.nye} ${dryRun ? 'ville fått' : 'får'} fanget: true${dryRun ? ' · DRY-RUN, ingenting skrevet' : ''}`)
+  console.log(`Holdt utenfor fordi noen har arbeidet med saken: ${tall.holdt.menneske} menneskeskrevet S/M · ${tall.holdt.synlig} synlig i annet prosjekt · ${tall.holdt.status} status satt · ${tall.holdt.utlevert} vært med i en sending`)
+  console.log(`Per slag: ${linje(perSlag)}\nPer kilde: ${linje(perKilde)}\nPer prosjekt: ${linje(perProsjekt)}\n`)
+  for (const v of vis) console.log(v)
+  if (tall.nye > vis.length) console.log(`  … og ${tall.nye - vis.length} til`)
+  if (!dryRun && tall.nye) { const written = save(atoms); console.log(`\n${tall.nye} saker merket fanget · ${written} filer skrevet. Angre per sak: Behold i appen (POST /api/fanget/behold {id}).`) }
+  else if (!dryRun) console.log('\nIngenting å skrive.')
+  process.exit(0)
+}
 
 if (args.includes('--samtaler')) {
   const dryRun = args.includes('--dry-run')

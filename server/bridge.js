@@ -99,6 +99,16 @@
 //   POST /api/onboarding {steg: modell|arkiv|historikk, sted?|sti?, verdi?} → steget fullført (arkiv: chooseArchive, ingenting flyttes, V9); alle tre → ferdig
 //   POST /api/import {kilde: alt|code|cowork|desktop|finder|innboks, dryRun?} → SSE: start {kilde,label} · del {kilde,label,stats,report|feil} · ferdig {report, tall} · feil {feil}
 //        — importAlt i import.js (samme funksjoner som tua_import), stegvis så fremdriften vises mens neste kilde leses
+//   Runde 2c (arbeidsstykke 32 §5 spørsmål 1, Erik 24.10.2026: enig) — Fanget-bøtta, serverdelen. Det hooks og import fanger av seg selv (økt, prompt, svar,
+//   samtale) har `fanget: true` i frontmatter og står utenfor avisen og søket til brukeren løfter det inn. /api/atoms gir feltet `fanget` (true når satt — appen
+//   holder dem utenfor avisen); /api/search holder dem utenfor som standard (?fanget=med tar dem med, ?fanget=bare gir bare dem; `fangetUtenfor` = hvor mange traff).
+//   GET  /api/fanget?limit&offset&prosjekt → { saker, total, alle, offset, limit, perKilde, perProsjekt, perSlag }  nyeste først, lette rader (S, aldri L)
+//   POST /api/fanget/behold {id, prosjekt?} → { atom, før, flyttet }        flagget bort; med prosjekt flyttes saken dit (lageret flytter fila, som /api/flytt)
+//   POST /api/fanget/slaa-sammen {id, inn_i} → { atom, kastet }             innholdet legges nederst i inn_i som NY versjon med kildepeker (bygget_av); den fangede → papirkurv
+//   POST /api/fanget/kast {id} → { kastet }                                 fila til <arkiv>/.tua/papirkurv/<prosjekt>/ med indeks — aldri slett
+//   POST /api/fanget/angre {id} → { atom }                                  fila tilbake fra papirkurven dit den lå
+//   GET  /api/papirkurv → { saker: [{id, name, project, kind, source, at, grunn, innI?}], antall }
+//   Engangs-merking av det som alt ligger i arkivet: node server/review.js --fanget --dry-run (viser), --fanget (setter). Alt via lageret (store.js), ingen rå filflytting.
 //
 // Lytter kun på 127.0.0.1, og slipper bare kartets origin inn (CORS).
 // Kjør: npm run bridge   (i tua-plugin/). Ingen avhengigheter.
@@ -121,6 +131,7 @@ import { spor, mottakere, trustScores, Blokkert, ord, forskjeller, konklusjon, r
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks
 import { inboxPending, inboxShareFiles } from './import.js'
 import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
+import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv } from './store.js'   // runde 2c: Fanget-bøtta
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
@@ -453,15 +464,16 @@ http
         const q = url.searchParams.get('q') || ''
         const kind = url.searchParams.get('kind') || undefined
         const alleAtomer = load(), byId = new Map(alleAtomer.map((a) => [a.id, a])), trådAv = tråder(alleAtomer).av
+        const fangetParam = url.searchParams.get('fanget') || 'uten'   // runde 2c: uten (standard) · med · bare — fangede saker holdes utenfor søket til de løftes inn
         const hits = search(alleAtomer, q, {
-          context: url.searchParams.get('context') || undefined, project: url.searchParams.get('project') || undefined, kind,
+          context: url.searchParams.get('context') || undefined, project: url.searchParams.get('project') || undefined, kind, fanget: ['med', 'bare'].includes(fangetParam) ? fangetParam : 'uten',
           limit: num(url.searchParams.get('limit'), 50), offset: num(url.searchParams.get('offset'), 0),
         })
         return json(res, 200, {
-          q, total: hits.total, offset: num(url.searchParams.get('offset'), 0), ...(kind ? { kind } : {}),
+          q, total: hits.total, offset: num(url.searchParams.get('offset'), 0), ...(kind ? { kind } : {}), fangetUtenfor: hits.fanget,
           // ord per nivå kommer fra lageret (levelOf) — Spør-skjermen (skive 2) regner ikke selv, så ordantallet er det samme som motoren sender.
           // Skive 8: prompt-treff bærer hele teksten (tekst), svarene (ga) og modellene de gikk til — forslagene i Spør fyller feltet med ett klikk.
-          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), status: statusOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet, tråd: trådAv.get(a.id) || null, tags: a.tags || [],
+          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), status: statusOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet, tråd: trådAv.get(a.id) || null, tags: a.tags || [], fanget: !!a.fanget,
             ...(a.kind === 'prompt' ? { tekst: a.content, ga: a.ga || [], modeller: modellerFor(byId, a) } : {}) })),
         })
       }
@@ -831,6 +843,65 @@ http
           hendelse('slutt', { ...r.tall, prosjekt: r.prosjekt, dryRun: r.dryRun, filer: r.filer.map(({ sti, ...f }) => f) })
         } catch (e) { hendelse('feil', { feil: e.message }) }
         return res.end()
+      }
+      // ── Runde 2c (arbeidsstykke 32 §5 spørsmål 1, 24.10.2026): Fanget-bøtta — serverdelen. Alt gjennom lageret (store.js: behold, slåSammen, kast, angre, papirkurv). ──
+      // slag = hva nøkkelen sier saken er (okt: → økt, samtale:, prompt:, svar:) — appens bøtte sorterer på det; ellers kind.
+      if (req.method === 'GET' && url.pathname === '/api/fanget') {
+        const alle = load(), trådAv = tråder(alle).av
+        const slagAv = (a) => { const k = String(a.key || ''); return k.startsWith('okt:') ? 'økt' : k.startsWith('samtale:') ? 'samtale' : k.startsWith('prompt:') ? 'prompt' : k.startsWith('svar:') ? 'svar' : a.kind || 'capture' }
+        const fangede = alle.filter((a) => a.fanget).sort((x, y) => y.capturedAt - x.capturedAt)
+        const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
+        const perKilde = {}, perProsjekt = {}, perSlag = {}
+        for (const a of fangede) { tell(perKilde, a.source || '—'); tell(perProsjekt, a.project); tell(perSlag, slagAv(a)) }
+        const prosjekt = url.searchParams.get('prosjekt') || ''
+        const liste = prosjekt ? fangede.filter((a) => same(a.project, prosjekt)) : fangede
+        const offset = num(url.searchParams.get('offset'), 0), limit = num(url.searchParams.get('limit'), 50)
+        const saker = liste.slice(offset, offset + limit).map((a) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', slag: slagAv(a), tags: a.tags || [], capturedAt: a.capturedAt, version: a.version || 1,
+          S: levelOf(a, 'S').text, ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, fanget: true }))
+        return json(res, 200, { saker, total: liste.length, alle: fangede.length, offset, limit, ...(prosjekt ? { prosjekt } : {}), perKilde, perProsjekt, perSlag })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/fanget/behold') {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves' })
+        let p = null
+        try { if (b.prosjekt) p = prosjektNavn(b.prosjekt) } catch (e) { return json(res, 400, { error: e.message }) }
+        const atoms = load()
+        if (!atoms.some((x) => x.id === b.id)) return json(res, 404, { error: `fant ikke sak ${b.id}` })
+        const r = fangetBehold(atoms, b.id, { prosjekt: p })
+        save(atoms)                                              // flagget bort i fila; med nytt prosjekt flytter lageret fila (V9)
+        console.error(`[tua-bro] fanget behold «${r.atom.name}»${r.flyttet ? `: ${r.før.project} → ${r.atom.project}` : ''}`)
+        return json(res, 200, { atom: { ...r.atom, links: linksFor(r.atom), file: fileOf(r.atom), status: statusOf(r.atom), fanget: false }, før: r.før, flyttet: r.flyttet })
+      }
+      if (req.method === 'POST' && ['/api/fanget/slaa-sammen', '/api/fanget/slå-sammen', '/api/fanget/sl%C3%A5-sammen'].includes(url.pathname)) {
+        const b = await readBody(req)
+        if (!b.id || !b.inn_i) return json(res, 400, { error: 'id og inn_i kreves' })
+        const atoms = load()
+        let r
+        try { r = fangetSlåSammen(atoms, b.id, b.inn_i) } catch (e) { return json(res, /fant ikke/.test(e.message) ? 404 : 400, { error: e.message }) }
+        save(atoms)                                              // inn_i skrives som ny versjon (forrige bevares i .tua/versions); den fangede er alt i papirkurven
+        console.error(`[tua-bro] fanget slå sammen «${r.kastet.name}» → «${r.atom.name}» (v${r.atom.version})`)
+        return json(res, 200, { atom: { ...r.atom, links: linksFor(r.atom), file: fileOf(r.atom), status: statusOf(r.atom), fanget: !!r.atom.fanget }, kastet: r.kastet })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/fanget/kast') {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves' })
+        const atoms = load()
+        let post
+        try { post = fangetKast(atoms, b.id) } catch (e) { return json(res, /fant ikke/.test(e.message) ? 404 : 400, { error: e.message }) }
+        console.error(`[tua-bro] fanget kast «${post.name}» → .tua/papirkurv/${post.project}`)
+        return json(res, 200, { kastet: post })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/fanget/angre') {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves' })
+        let r
+        try { r = fangetAngre(b.id) } catch (e) { return json(res, /ligger ikke/.test(e.message) ? 404 : 400, { error: e.message }) }
+        console.error(`[tua-bro] papirkurv angre «${r.atom.name}» → ${r.rel}`)
+        return json(res, 200, { atom: { ...r.atom, links: linksFor(r.atom), file: fileOf(r.atom), status: statusOf(r.atom), fanget: !!r.atom.fanget } })
+      }
+      if (req.method === 'GET' && url.pathname === '/api/papirkurv') {
+        const saker = fangetPapirkurv().map(({ kurv, ...e }) => e)   // aldri stien inne i .tua til klienten (runde 1: ingen stier i klartekst)
+        return json(res, 200, { saker, antall: saker.length })
       }
       return json(res, 404, { error: 'ukjent rute' })
     } catch (e) {

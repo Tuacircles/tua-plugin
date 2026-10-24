@@ -55,6 +55,7 @@ export function serialize(atom) {
     ...(atom.key ? { key: atom.key } : {}),
     ...(atom.kind ? { kind: atom.kind } : {}),
     ...(atom.status ? { status: atom.status } : {}),           // M23 (skive 4): utkast | endelig — bare når satt; standard regnes av lageret (statusOf)
+    ...(atom.fanget === true || atom.fanget === false ? { fanget: atom.fanget } : {}),   // runde 2c (arb. 32 §5 sp. 1, 24.10.2026): true = fanget automatisk (hook/import), ikke løftet inn — utenfor avisen og søket; false = løftet inn med vilje (Behold) — regelen rører den aldri igjen
     tagger: atom.tags || [],
     synlig_i: atom.refs || [],
     ...(atom.links?.length ? { lenker: atom.links } : {}),
@@ -134,6 +135,8 @@ export function parse(text, { fallbackId } = {}) {
   }
   if (fm.key) atom.key = fm.key
   if (fm.status === 'utkast' || fm.status === 'endelig') atom.status = fm.status   // M23: status på saken (V21: arbeidsløp som status på sak)
+  if (fm.fanget === true || fm.fanget === 'true') atom.fanget = true                 // runde 2c: Fanget-bøtta — true: fanget, ikke løftet inn
+  else if (fm.fanget === false || fm.fanget === 'false') atom.fanget = false          // false: løftet inn med vilje (Behold); mangler: lagret med vilje fra starten
   if (fm.nivaa && typeof fm.nivaa === 'object') atom.share = fm.nivaa
   if (Array.isArray(fm.lenker) && fm.lenker.length) atom.links = fm.lenker.filter((l) => l && l.href)
   if (Array.isArray(fm.bygget_av) && fm.bygget_av.length) atom.derivedFrom = fm.bygget_av.filter((d) => d && d.id)
