@@ -9,13 +9,14 @@
 // TUA_KEYCHAIN_PREFIX overstyrer tjenestenavnet (bare for tester).
 
 import { spawn, spawnSync } from 'node:child_process'
+import { OLLAMA_URL, OLLAMA_VERT, standardModell } from './ollama.js'   // friksjon 12: adressen og standardmodellen bor der
 
 export const PROVIDERS = [
   { id: 'claude', label: 'Claude (Anthropic)', hint: 'console.anthropic.com › API keys' },
   { id: 'openai', label: 'OpenAI (GPT)', hint: 'platform.openai.com › API keys' },
   { id: 'gemini', label: 'Gemini (Google)', hint: 'aistudio.google.com › Get API key' },
   { id: 'mistral', label: 'Mistral', hint: 'console.mistral.ai › API keys' },
-  { id: 'ollama', label: 'Ollama (lokal)', hint: 'ingen nøkkel — oppdages på 127.0.0.1:11434', local: true },
+  { id: 'ollama', label: 'Ollama (lokal)', hint: `ingen nøkkel — oppdages på ${OLLAMA_VERT}`, local: true },
 ]
 const ACCOUNT = 'tua'
 const service = (p) => `${process.env.TUA_KEYCHAIN_PREFIX || 'tua-ai'}-${p}`
@@ -65,16 +66,19 @@ export function readKey(provider) {
 // Status for alle leverandører — aldri nøkkelverdier.
 export const keyStatus = () => Object.fromEntries(PROVIDERS.filter((p) => !p.local).map((p) => [p.id, hasKey(p.id)]))
 
-// Ollama lokalt: GET /api/tags på 127.0.0.1:11434. Kort tidsavbrudd; aldri et kall mot en modell (det er M20).
+// Ollama lokalt: GET /api/tags på OLLAMA_URL (127.0.0.1:11434; TUA_OLLAMA_URL bare i tester). Kort tidsavbrudd; aldri et kall mot en modell (det er M20).
+// Friksjon 12: `modell` er standardmodellen motoren vil bruke (valgt i Innstillinger, lagret i config; ellers den første), `kilde` sier hvorfor.
 export async function ollamaStatus(timeoutMs = 1500) {
   const ctl = new AbortController()
   const t = setTimeout(() => ctl.abort(), timeoutMs)
   try {
-    const r = await fetch('http://127.0.0.1:11434/api/tags', { signal: ctl.signal })
-    if (!r.ok) return { running: false, models: [] }
+    const r = await fetch(OLLAMA_URL + '/api/tags', { signal: ctl.signal })
+    if (!r.ok) return { running: false, models: [], modell: null }
     const j = await r.json()
-    return { running: true, models: (j.models || []).map((m) => m.name).slice(0, 20) }
-  } catch { return { running: false, models: [] } } finally { clearTimeout(t) }
+    const models = (j.models || []).map((m) => m.name).slice(0, 20)
+    const std = standardModell(models)
+    return { running: true, models, modell: std.modell, kilde: std.kilde }
+  } catch { return { running: false, models: [], modell: null } } finally { clearTimeout(t) }
 }
 
 // CLI (test): node keychain.js status · node keychain.js slett <leverandør>

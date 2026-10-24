@@ -40,6 +40,12 @@
 //   POST /api/keychain {provider, key}   → nøkkelen inn i macOS Keychain (security, uten shell, via stdin — aldri fil, aldri logg)
 //   DELETE /api/keychain {provider}      → nøkkelen ut av Keychain
 //   Trust Score per connector leses fra trust-scores.json (anslag — rettes der, uten kode).
+//   Friksjon 12 (24.10.2026, bruksdag 1): Ollama-modeller fra Innstillinger — bare Ollama-serverens HTTP-API (ollama.js), aldri appens GUI.
+//   GET  /api/ollama/modeller    → { kjører, vert, maskin: {minneGB, chip, ledigGB}, lokale: [{navn, størrelseGB, parametre, standard}], standard: {modell, kilde},
+//        anbefalte: [{navn, størrelseGB, krevMinneGB, norsk, passerTil, hvorfor, passer: ja|trangt|nei, hvorforIkke, lokal, anbefalt}], start }
+//   POST /api/ollama/hent {navn} → SSE: fremdrift {status, prosent, mb, mbTotal} … ferdig {navn, modeller} | feil {feil}. Nedlasting fra ollama.com via Ollama (/api/pull).
+//   POST /api/ollama/standard {navn} → { ok, modell, mottakere }   valgt modell i ~/.tua/config.json (ollama.modell) — motoren bruker den straks
+//   DELETE /api/ollama/modeller/<navn> → { ok, navn, varStandard, modeller }   Ollama /api/delete; var den standard, faller Tua tilbake til den første
 //   M20a (skive 1): motoren — lese → skjerme → minimere → sende → logge (motor.js). Ingen kodevei utenom.
 //   GET  /api/mottakere          → { mottakere: [{id, label, endpoint, modell, trust, nøkkel: satt/ikke satt, aktiv, local, test}] } — aldri nøkkelverdier
 //   POST /api/spor  {melding, saker: [{id, nivå}], mottaker, prosjekt?, samtale?}  → SSE (text/event-stream):
@@ -109,6 +115,7 @@ import { load, save, setShare, upsert, search, levelOf, LEVELS, isVault, FILE, F
 import { watchInbox, watchDesktop, importAlt, IMPORT_STEG, historyCounts, countPrompts } from './import.js'      // M14: Innboks — eksporter som legges i mappa blir atomer · M17: Desktop-cachen · skive 8: import med fremdrift
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
+import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, settStandard as ollamaStandard, lokale as ollamaLokale } from './ollama.js'   // friksjon 12: modellene i Ollama
 import { spor, mottakere, trustScores, Blokkert, ord, forskjeller, konklusjon, rettKonklusjon, svarFor } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks
 import { inboxPending, inboxShareFiles } from './import.js'
@@ -684,6 +691,39 @@ http
           console.error(`[tua-bro] import ${kilde}${dryRun ? ' (dry-run)' : ''}: ${tall.nye} nye · ${tall.oppdatert} oppdatert · ${tall.prompter} prompter · ${tall.svar} svar`)
           hendelse('ferdig', { kilde, dryRun, tall, report: r.report })
         } catch (e) { console.error(`[tua-bro] import FEIL: ${e.message}`); hendelse('feil', { feil: e.message }) }
+        return res.end()
+      }
+      // ── Friksjon 12: Ollama-modeller (ollama.js) — bare serverens HTTP-API, aldri appens GUI ──
+      if (req.method === 'GET' && url.pathname === '/api/ollama/modeller') return json(res, 200, await ollamaModeller())
+      if (req.method === 'POST' && url.pathname === '/api/ollama/standard') {
+        const b = await readBody(req)
+        const { lokale } = await ollamaLokale()
+        let modell
+        try { modell = ollamaStandard(b.navn, lokale.map((m) => m.navn)) } catch (e) { return json(res, 400, { error: e.message }) }
+        console.error(`[tua-bro] ollama: standardmodell ${modell} (config)`)
+        return json(res, 200, { ok: true, modell, mottakere: await mottakere() })
+      }
+      if (req.method === 'DELETE' && url.pathname.startsWith('/api/ollama/modeller/')) {
+        let navn; try { navn = decodeURIComponent(url.pathname.slice('/api/ollama/modeller/'.length)) } catch { return json(res, 400, { error: 'ugyldig modellnavn' }) }
+        let r
+        try { r = await ollamaFjern(navn) } catch (e) { return json(res, /ligger ikke|not found/i.test(e.message) ? 404 : 400, { error: e.message }) }
+        console.error(`[tua-bro] ollama: fjernet ${r.navn}${r.varStandard ? ' (var standard — faller tilbake til første)' : ''}`)
+        return json(res, 200, { ok: true, ...r, modeller: await ollamaModeller() })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/ollama/hent') {
+        const b = await readBody(req)
+        const navn = String(b.navn || '').trim()
+        if (!navn) return json(res, 400, { error: 'navn kreves (f.eks. gemma3:12b)' })
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        const ctl = new AbortController(); req.on('close', () => ctl.abort())
+        console.error(`[tua-bro] ollama: henter ${navn} fra ollama.com …`)
+        try {
+          await ollamaHent(navn, { signal: ctl.signal, på: hendelse })
+          console.error(`[tua-bro] ollama: ${navn} hentet`)
+          hendelse('ferdig', { navn, modeller: await ollamaModeller() })
+        } catch (e) { console.error(`[tua-bro] ollama: henting av ${navn} FEIL: ${e.message}`); hendelse('feil', { navn, feil: e.message }) }
         return res.end()
       }
       // ── M15: innstillinger ──

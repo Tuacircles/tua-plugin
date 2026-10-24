@@ -4,6 +4,7 @@ import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LONG_L, load, logDelivery, LEVELS, filesMode, FILES_ROOT, DATA_DIR } from './store.mjs';
 import { hasKey, ollamaStatus, readKey } from './keychain.mjs';
+import { OLLAMA_VERT, OLLAMA_URL } from './ollama.mjs';
 
 // motor.js — Tua-motoren (M20a bak, skive 1 i arbeidsstykke 31): lese → skjerme → minimere → sende → logge.
 //
@@ -251,13 +252,14 @@ async function sendClaude({ system, melding, kontekst, json }, { onDel = () => {
   return { tekst, modell: fm.model, usage: { input_tokens: fm.usage?.input_tokens ?? null, output_tokens: fm.usage?.output_tokens ?? null }, stopp: fm.stop_reason }
 }
 
-// Ollama lokalt (V18: lokal modell først når den finnes). Modell: TUA_OLLAMA_MODELL eller den første i lista. NDJSON-strøm fra /api/chat.
+// Ollama lokalt (V18: lokal modell først når den finnes). Modell (friksjon 12): den som er valgt som standard i Innstillinger › AI-mottakere › Modeller
+// (~/.tua/config.json → ollama.modell), TUA_OLLAMA_MODELL foran (bare tester), ellers den første i lista — ollama.js: standardModell(). NDJSON-strøm fra /api/chat.
 async function sendOllama({ system, melding, kontekst, json }, { onDel = () => {}, signal } = {}) {
   const st = await ollamaStatus();
-  if (!st.running || !st.models.length) throw new MotorFeil('Ollama kjører ikke på 127.0.0.1:11434, eller har ingen modell (ollama pull …).')
-  const model = process.env.TUA_OLLAMA_MODELL || st.models[0];
+  if (!st.running || !st.models.length) throw new MotorFeil(`Ollama kjører ikke på ${OLLAMA_VERT}, eller har ingen modell (hent én under Innstillinger › AI-mottakere › Modeller).`)
+  const model = st.modell || st.models[0];
   const body = { model, stream: true, messages: [{ role: 'system', content: json ? system + JSON_KRAV : system }, { role: 'user', content: byggMelding(melding, kontekst) }], ...(json ? { format: 'json' } : {}) };
-  const r = await fetch('http://127.0.0.1:11434/api/chat', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const r = await fetch(OLLAMA_URL + '/api/chat', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok || !r.body) throw new MotorFeil(`Ollama svarte ${r.status}`)
   let tekst = '', rest = '', usage = { input_tokens: null, output_tokens: null };
   const dec = new TextDecoder();
@@ -353,8 +355,9 @@ function lagMottakere() {
   const liste = [
     { id: 'claude', label: 'Claude (Anthropic)', endpoint: 'api.anthropic.com', modell: CLAUDE_MODELL, trust: ts.claude || null, nøkkel: true,
       status: async () => (hasKey('claude') ? { klar: true } : { klar: false, hvorfor: 'ingen API-nøkkel i Keychain (Innstillinger › AI-mottakere)' }), send: sendClaude },
-    { id: 'ollama', label: 'Ollama (lokal)', endpoint: '127.0.0.1:11434', modell: process.env.TUA_OLLAMA_MODELL || null, trust: ts.ollama || null, local: true,
-      status: async () => { const s = await ollamaStatus(); return s.running && s.models.length ? { klar: true, modeller: s.models } : { klar: false, hvorfor: s.running ? 'Ollama kjører, men har ingen modell' : 'Ollama kjører ikke' } }, send: sendOllama },
+    { id: 'ollama', label: 'Ollama (lokal)', endpoint: OLLAMA_VERT, modell: process.env.TUA_OLLAMA_MODELL || null, trust: ts.ollama || null, local: true,
+      // friksjon 12: modell = standardmodellen (valgt i Innstillinger, ellers første), modeller = alle lokale
+      status: async () => { const s = await ollamaStatus(); return s.running && s.models.length ? { klar: true, modeller: s.models, modell: s.modell } : { klar: false, hvorfor: s.running ? 'Ollama kjører, men har ingen modell — hent én under Innstillinger › AI-mottakere › Modeller' : 'Ollama kjører ikke' } }, send: sendOllama },
     // Mistral (skive 6-tillegg): første ekstra skymodell. Raden blir av seg selv en rad i Innstillinger › AI-mottakere og en avkryssing i Spør.
     { id: 'mistral', label: 'Mistral', endpoint: 'api.mistral.ai', modell: MISTRAL_MODELL, trust: ts.mistral || null, nøkkel: true,
       status: async () => (hasKey('mistral') ? { klar: true } : { klar: false, hvorfor: 'ingen API-nøkkel i Keychain (Innstillinger › AI-mottakere)' }), send: sendMistral },
@@ -376,7 +379,7 @@ async function skriver(ønsket = process.env.TUA_SKRIVER || 'auto') {
   const alle = lagMottakere();
   const rekke = ønsket === 'auto' ? [alle.find((m) => m.id === 'ollama')] : alle.filter((m) => m.id === ønsket);
   const grunner = [];
-  for (const m of rekke.filter(Boolean)) { const st = await m.status(); if (st.klar) return { m, modell: st.modeller?.[0] || m.modell }; grunner.push(`${m.label}: ${st.hvorfor}`); }
+  for (const m of rekke.filter(Boolean)) { const st = await m.status(); if (st.klar) return { m, modell: st.modell || st.modeller?.[0] || m.modell }; grunner.push(`${m.label}: ${st.hvorfor}`); }
   return { m: null, regel: true, grunn: grunner.length ? grunner.join('; ') : ønsket === 'auto' ? 'ingen lokal modell' : `ukjent skriver «${ønsket}»` }
 }
 const setningKutt = (t, maks) => {
