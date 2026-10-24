@@ -30,7 +30,8 @@
 //   POST /api/save   {content, name?, source?, project?, convo?, summary?, short?, medium?, tags?, key?}
 //                    → M11: lagrer et atom i mappa (Demo 7 «fang» over det ekte arkivet). S/M merkes menneskeskrevet.
 //   POST /api/open   {id, target, href?}      → M9/V13: åpner LOKALT, bare fra en fast liste:
-//        target = 'finder' → `open -R <fil>`  (fila må være atomets egen .md eller en av atomets file-lenker)
+//        target = 'finder' → `open -R <fil>`  (fila må være atomets egen .md, en av atomets file-lenker, eller — friksjon 13 — en sti som står
+//                            ordrett i sakens tekst, i hjemmemappa; uten id finner broen saken som nevner stien)
 //        target = 'code'   → `open claude-cli://open?cwd=<repo>&q=…`  (repo må være en repo-lenke på atomet / i prosjektregisteret)
 //        Ingen andre programmer, ingen shell, ingen frie stier. `claude://`-lenker (Desktop-prosjekt) åpnes
 //        rett fra nettleseren og går aldri via broen.
@@ -107,7 +108,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { openSpawn, FILE_MANAGER } from './platform.js'   // M18: «Åpne i …» på macOS, Windows og Linux
+import { openSpawn, FILE_MANAGER, HOME } from './platform.js'   // M18: «Åpne i …» på macOS, Windows og Linux · HOME: hjemmemappa (TUA_HOME i tester)
 import os from 'node:os'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
@@ -350,13 +351,33 @@ const kjøringer = new Map()
 // M18: macOS open · Windows explorer/rundll32 · Linux xdg-open — se platform.js
 const run = (kind, target) => openSpawn(kind, target, { dryrun: DRYRUN })
 const realpath = (p) => { try { return fs.realpathSync(p) } catch { return null } }
+// Friksjonsrunde 1, friksjon 13 (24.10.2026): en sti som står i sakens egen tekst (en lenkeliste, et notat med «alle under <mappe>/») kan vises i
+// Finder. Ingen frie stier (V13): stien må stå ordrett i teksten — hele, eller mappa og filnavnet hver for seg (lenkelister skriver mappa én gang
+// og filnavnene under; «X.pdf/.docx» gir stammen + endelsen) — ligge i hjemmemappa, utenfor arkivets .tua, og finnes. Bare «vis i Finder», aldri kjør.
+export function stiISak(a, want, href) {
+  const tekst = String(a.content || '')
+  if (!tekst) return false
+  const hjem = realpath(HOME)
+  if (!hjem || !(want.startsWith(hjem + path.sep))) return false
+  if (want.includes(`${path.sep}.tua${path.sep}`)) return false
+  const kandidater = [String(href || ''), want].filter(Boolean)
+  for (const k of kandidater) {
+    if (tekst.includes(k)) return true
+    const dir = path.dirname(k), navn = path.basename(k), stamme = navn.replace(/\.[^.]+$/, ''), ext = path.extname(navn).slice(1)
+    const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const mappa = tekst.includes(dir + '/') || tekst.includes(dir + path.sep) || tekst.includes(dir)
+    const dobbel = stamme && ext && new RegExp(`${esc(stamme)}\\.[A-Za-z0-9]+/\\.${esc(ext)}(?![A-Za-z0-9])`).test(tekst)   // «X.pdf/.docx» nevner X.docx
+    if (mappa && (tekst.includes(navn) || dobbel)) return true
+  }
+  return false
+}
 function openTarget(a, target, href) {
   const links = linksFor(a)
   if (target === 'finder') {
-    // Lov: atomets egen fil, eller en file-lenke som står på atomet. Må finnes.
+    // Lov: atomets egen fil, en file-lenke som står på atomet, eller (friksjon 13) en sti saken selv nevner i teksten. Må finnes.
     const allowed = [fileOf(a), ...links.filter((l) => l.kind === 'file').map((l) => l.href), ...(a.renders || []).map((r) => r.path)].filter(Boolean).map(realpath).filter(Boolean)
     const want = realpath(href || fileOf(a))
-    if (!want || !allowed.includes(want)) throw new Error(`${FILE_MANAGER}: stien er ikke en av atomets egne filer`)
+    if (!want || !(allowed.includes(want) || (href && stiISak(a, want, href)))) throw new Error(`${FILE_MANAGER}: stien er verken en av atomets egne filer eller nevnt i sakens tekst${want ? '' : ' (eller fila finnes ikke)'}`)
     return run('reveal', want)
   }
   if (target === 'code') {
@@ -462,9 +483,11 @@ http
           if (!sti || !fs.existsSync(sti)) return json(res, 404, { error: `mappa «${mappe}» finnes ikke` })
           try { const r = await run('reveal', sti); console.error(`[tua-bro] open ${FILE_MANAGER} ${mappe}${DRYRUN ? ' (dryrun)' : ''}`); return json(res, 200, r) } catch (e) { return json(res, 403, { error: e.message }) }
         }
-        if (!id || !target) return json(res, 400, { error: 'id og target kreves' })
-        const a = load().find((x) => x.id === id)
-        if (!a) return json(res, 404, { error: `fant ikke atom ${id}` })
+        if (!target || (!id && !href)) return json(res, 400, { error: 'target og id (eller href) kreves' })
+        const alle = load()
+        // Friksjon 13: uten id (Markdown-leseren vet ikke alltid hvilken sak den står i) finner broen saken som nevner stien — samme regel, ingen frie stier
+        const a = id ? alle.find((x) => x.id === id) : (target === 'finder' && href ? alle.find((x) => { const w = realpath(href); return w && stiISak(x, w, href) }) : null)
+        if (!a) return json(res, id ? 404 : 403, { error: id ? `fant ikke atom ${id}` : 'ingen sak nevner denne stien' })
         try {
           const r = await openTarget(a, target, href)
           console.error(`[tua-bro] open ${target} «${a.name}»${DRYRUN ? ' (dryrun)' : ''}: ${r.ran.join(' ')}`)
