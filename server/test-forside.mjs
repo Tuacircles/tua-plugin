@@ -13,6 +13,9 @@
 // brukbarTittel (PDF-tittel fra filnavn når metadata er teknisk), og POST /api/innboks/les som SSE med fremdrift.
 // Runde 2a+2b (planen videre §1 og §3): ett sted — regler.normaliserAdresse/lesHash (/oppslag, /spor, /innboks → /, #atom → #sak), sidenSist, mapper/filnavn, radFor, runder, kortS;
 // broen svarer med app-fila for de gamle rutene og gir mtime på /api/atoms (Mapper sorterer som Finder).
+// Runde 2c (app): regler.nesteRad (j/k), fangetTekst, innlesingTekst, slippProsjekt, sidenSist med fanget, lesHash #fanget; broen: POST /api/les med fila som rå kropp
+// (dra og slipp) — SSE med side {side, av} for PDF, lander i «Uten prosjekt»; POST /api/flytt (dra en sak til en mappe); /api/search bærer fangetUtenfor;
+// POST /api/konklusjon {strøm: true} som SSE (vurderer {svar: N} → forskjeller → konklusjon-del → konklusjon → slutt).
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
 
@@ -182,6 +185,12 @@ fs.writeFileSync(øktfil, [linje('user', P1, 0), linje('assistant', A1, 1), linj
   ok('regler.runder: samtalen som runder, eldste først — hver prompt med svarene (uten Forskjeller), Forskjeller og konklusjonen', r.length === 2 && r[0].prompt.id === 'p' && r[0].svar.map((a) => a.id).join() === 's1,s2' && r[0].forskjeller?.id === 'f' && r[0].konklusjon?.id === 'k' && r[1].prompt.id === 'p2' && r[1].svar.length === 1 && r[1].forskjeller === null && r[1].konklusjon === null && regler.runder(liste, '').length === 0)
   ok('regler.kortS: første setning innen ~170 tegn, ellers klippet på ord med …', regler.kortS('Kort.') === 'Kort.' && regler.kortS('Første setning er lang nok til å telle som en ingress i seg selv, med tall og alt. Andre setning som ikke skal med fordi den er for lang til kortet.', 120) === 'Første setning er lang nok til å telle som en ingress i seg selv, med tall og alt.' && regler.kortS('x'.repeat(100) + ' ' + 'y'.repeat(100)).endsWith(' …'))
   ok('regler.sakAdresse: /#sak/<id> (kodet)', regler.sakAdresse('a 1') === '/#sak/a%201')
+  // runde 2c: hender og tastatur
+  ok('regler.nesteRad: j/k flytter blant radene som vises; uten fokus starter j øverst og k nederst; stopper i endene', regler.nesteRad(['a', 'b', 'c'], 'a', 1) === 'b' && regler.nesteRad(['a', 'b', 'c'], 'c', 1) === 'c' && regler.nesteRad(['a', 'b', 'c'], 'b', -1) === 'a' && regler.nesteRad(['a', 'b', 'c'], null, 1) === 'a' && regler.nesteRad(['a', 'b', 'c'], null, -1) === 'c' && regler.nesteRad([], 'a', 1) === null && regler.nesteRad(['a', 'b'], 'x', 1) === 'a')
+  ok('regler.fangetTekst: «12 fangede saker fra Claude Code, Desktop og Cowork» — kildene etter antall, Claude Desktop som Desktop; 0 → tom', regler.fangetTekst(12, { 'Claude Code': 6, Cowork: 2, 'Claude Desktop': 4 }) === '12 fangede saker fra Claude Code, Desktop og Cowork' && regler.fangetTekst(1, { Cowork: 1 }) === '1 fanget sak fra Cowork' && regler.fangetTekst(3) === '3 fangede saker' && regler.fangetTekst(0, { Cowork: 1 }) === '')
+  ok('regler.innlesingTekst: leser → side 2 av 5 → lest (ord, sider) → skriver ingress → «Navn» ligger i Prosjekt; feil; ukjent hendelse → null', regler.innlesingTekst('leser', {}, 'x.pdf') === 'leser «x.pdf» …' && regler.innlesingTekst('side', { side: 2, av: 5 }, 'x.pdf') === 'leser «x.pdf» … side 2 av 5' && regler.innlesingTekst('lest', { ord: 812, sider: 5 }) === 'lest: 812 ord · 5 sider — skriver ingress …' && regler.innlesingTekst('skriver', { modell: 'gemma3:4b', medM: true }) === 'gemma3:4b skriver ingress og sammendrag …' && regler.innlesingTekst('ferdig', { name: 'Leieavtale', project: 'Uten prosjekt' }) === '«Leieavtale» ligger i Uten prosjekt' && regler.innlesingTekst('feil', { feil: 'tom' }) === 'gikk ikke: tom' && regler.innlesingTekst('tull', {}) === null)
+  ok('regler.slippProsjekt: prosjektet fila slippes på, ellers «Uten prosjekt»', regler.slippProsjekt('Lager') === 'Lager' && regler.slippProsjekt('') === 'Uten prosjekt' && regler.slippProsjekt(undefined) === regler.UTEN_PROSJEKT)
+  ok('regler.sidenSist: fangede teller som «noe» (bøtta vises); lesHash(#fanget) åpner den', regler.sidenSist([], { sist: 0, innboks: 0, fanget: 3 }).fanget === 3 && regler.sidenSist([], { fanget: 3 }).noe === true && regler.sidenSist([], { fanget: 0 }).noe === false && regler.lesHash('#fanget').fanget === true)
 }
 
 // ── 4) broen: /innboks, /api/atoms-feltene, /api/innboks og /api/innboks/antall ─
@@ -190,7 +199,7 @@ const DIST = path.join(DATA, 'dist')
 fs.mkdirSync(path.join(DIST, 'assets'), { recursive: true })
 fs.writeFileSync(path.join(DIST, 'index.html'), '<!doctype html><title>app-test</title><div id="root"></div>')
 fs.writeFileSync(path.join(ROOT, 'Innboks', 'notat.txt'), 'Et notat som venter i Innboks. '.repeat(40))
-const bro = spawn(process.execPath, [path.join(HERE, 'bridge.js')], { env: { ...process.env, TUA_BRIDGE_PORT: String(PORT), TUA_KART_DIST: DIST, TUA_OPEN_DRYRUN: '1', TUA_SKRIVER: 'regel' }, stdio: ['ignore', 'ignore', 'pipe'] })
+const bro = spawn(process.execPath, [path.join(HERE, 'bridge.js')], { env: { ...process.env, TUA_BRIDGE_PORT: String(PORT), TUA_KART_DIST: DIST, TUA_OPEN_DRYRUN: '1', TUA_SKRIVER: 'regel', TUA_TESTMOTTAKERE: '2', TUA_VURDERER: 'test' }, stdio: ['ignore', 'ignore', 'pipe'] })
 let broLogg = ''
 bro.stderr.on('data', (d) => { broLogg += d })
 const vent = async (ms) => new Promise((r) => setTimeout(r, ms))
@@ -221,6 +230,45 @@ try {
   ok('runde 1: POST /api/innboks/les er SSE med fremdrift per fil (start → leser → lest → sak → slutt), fila lest inn i valgt prosjekt', sse.status === 200 && /event-stream/.test(sse.headers.get('content-type') || '') && navnSSE[0] === 'start' && navnSSE.includes('leser') && navnSSE.includes('lest') && navnSSE.includes('sak') && navnSSE.at(-1) === 'slutt' && hendelser.find((h) => h[0] === 'sak')[1].fil === 'brev.md' && hendelser.find((h) => h[0] === 'sak')[1].project === 'Lager' && hendelser.at(-1)[1].lest === 1, navnSSE.join(' '))
   ok('runde 1: fila er flyttet til Innboks/Ferdig, saken har tittel fra overskriften, Innboks er tom igjen', fs.existsSync(path.join(ROOT, 'Innboks', 'Ferdig', 'brev.md')) && load().some((a) => a.name === 'Brev om lageret' && a.project === 'Lager') && JSON.parse((await hent('/api/innboks/antall')).tekst).antall === 0)
 
+  // ── runde 2c (app): dra og slipp → POST /api/les med fila som rå kropp (SSE), flytt via /api/flytt, søk med fangetUtenfor, konklusjon som strøm ─
+  const post = async (p, body) => hent(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const sseAv = (rå) => rå.split('\n\n').filter(Boolean).map((b) => [b.match(/^event: (.+)$/m)?.[1], JSON.parse(b.match(/^data: (.+)$/m)?.[1] || '{}')])
+  const md = '# Snøbrøyting hytta\n\n' + 'Brøyteavtalen gjelder fra 1. november til 30. april og koster 6 500 kr per sesong. '.repeat(12)
+  const les1 = await fetch(`http://127.0.0.1:${PORT}/api/les?navn=${encodeURIComponent('Snøbrøyting.md')}&prosjekt=${encodeURIComponent('Uten prosjekt')}&samtale=${encodeURIComponent('Dratt inn')}`, { method: 'POST', headers: { 'Content-Type': 'text/markdown' }, body: md })
+  const h1 = sseAv(await les1.text()), n1 = h1.map((h) => h[0]), ferdig1 = h1.find((h) => h[0] === 'ferdig')?.[1]
+  ok('dra og slipp: POST /api/les med fila som rå kropp (?navn&prosjekt) → SSE leser → lest → ferdig; saken lander i «Uten prosjekt» med tittel fra overskriften', les1.status === 200 && /event-stream/.test(les1.headers.get('content-type') || '') && n1[0] === 'leser' && n1.includes('lest') && n1.at(-1) === 'ferdig' && ferdig1.project === 'Uten prosjekt' && ferdig1.name === 'Snøbrøyting hytta' && fs.existsSync(path.join(ROOT, 'Uten prosjekt', 'Snøbrøyting hytta.md')), n1.join(' '))
+  // PDF: fremdrift side for side
+  const esc = (x) => x.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
+  const lagPdf = (sider) => {
+    const objs = []; const add = (x) => { objs.push(x); return objs.length }
+    const font = add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'); const pagesId = objs.length + 1 + sider.length * 2; const pageIds = []
+    for (const linjer of sider) { const inner = linjer.map((l, i) => `BT /F1 12 Tf 72 ${760 - i * 16} Td (${esc(l)}) Tj ET`).join('\n'); const c = add(`<< /Length ${Buffer.byteLength(inner, 'latin1')} >>\nstream\n${inner}\nendstream`); pageIds.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${font} 0 R >> >> /Contents ${c} 0 R >>`)) }
+    const pages = add(`<< /Type /Pages /Kids [${pageIds.map((x) => `${x} 0 R`).join(' ')}] /Count ${pageIds.length} >>`); const cat = add(`<< /Type /Catalog /Pages ${pages} 0 R >>`)
+    let out = '%PDF-1.4\n%\xe2\xe3\xcf\xd3\n'; const offs = []
+    objs.forEach((o, i) => { offs.push(Buffer.byteLength(out, 'latin1')); out += `${i + 1} 0 obj\n${o}\nendobj\n` })
+    const xref = Buffer.byteLength(out, 'latin1')
+    out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map((o) => String(o).padStart(10, '0') + ' 00000 n \n').join('') + `trailer\n<< /Size ${objs.length + 1} /Root ${cat} 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+    return Buffer.from(out, 'latin1')
+  }
+  const pdf = lagPdf([['Leieavtale Storgata 12', 'Leien er 1 480 000 kr per aar.'], ['Side to med vilkaar.'], ['Side tre: signaturer.']])
+  const les2 = await fetch(`http://127.0.0.1:${PORT}/api/les?navn=${encodeURIComponent('Leieavtale.pdf')}&prosjekt=Lager`, { method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: pdf })
+  const h2 = sseAv(await les2.text()), sider = h2.filter((h) => h[0] === 'side').map((h) => `${h[1].side}/${h[1].av}`)
+  ok('dra og slipp (PDF): SSE gir side {side, av} per side mellom leser og lest — «leser … side 2 av 3» — og saken har 3 sider', les2.status === 200 && sider.join(' ') === '1/3 2/3 3/3' && h2.map((h) => h[0]).indexOf('side') > h2.map((h) => h[0]).indexOf('leser') && h2.find((h) => h[0] === 'lest')?.[1].sider === 3 && h2.at(-1)[0] === 'ferdig' && h2.at(-1)[1].project === 'Lager', h2.map((h) => h[0]).join(' '))
+  ok('dra og slipp: uten ?navn → 400; JSON-kropp uten sti → 400 (som før)', (await fetch(`http://127.0.0.1:${PORT}/api/les`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'x' })).status === 400 && (await post('/api/les', {})).status === 400)
+  // dra en sak til en mappe = /api/flytt (ett spørsmål i appen, så dette kallet)
+  const fl = await post('/api/flytt', { id: ferdig1.id, prosjekt: 'Lager' })
+  ok('dra en sak til en mappe: POST /api/flytt {id, prosjekt} flytter fila i arkivet og svarer med saken i det nye prosjektet', fl.status === 200 && JSON.parse(fl.tekst).atom.project === 'Lager' && JSON.parse(fl.tekst).før === 'Uten prosjekt' && fs.existsSync(path.join(ROOT, 'Lager', 'Snøbrøyting hytta.md')) && !fs.existsSync(path.join(ROOT, 'Uten prosjekt', 'Snøbrøyting hytta.md')))
+  // søket bærer fangetUtenfor (0 her — ingen fangede i dette arkivet), så forsiden kan tilby «ta med fangede»
+  const sø = JSON.parse((await hent('/api/search?q=lageret&limit=5')).tekst)
+  ok('/api/search svarer med fangetUtenfor (tall) og fanget per treff — forsidens «ta med fangede» bygger på det', typeof sø.fangetUtenfor === 'number' && sø.hits.every((h) => h.fanget === false))
+  // konklusjon som strøm: «Også til …» og «Kjør igjen» på konklusjonen viser fremdriften (vurderer {svar: N} → forskjeller → konklusjon-del → konklusjon → slutt)
+  const pr = load().find((a) => a.key === 'prompt:t')
+  const ks = await fetch(`http://127.0.0.1:${PORT}/api/konklusjon`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: pr.id, strøm: true }) })
+  const h3 = sseAv(await ks.text()), n3 = h3.map((h) => h[0])
+  const v0 = h3.find((h) => h[0] === 'vurderer')?.[1]
+  ok('POST /api/konklusjon {strøm: true}: SSE — vurderer {steg: forskjeller, svar: 2} først, så forskjeller, vurderer {konklusjon}, konklusjon-del, konklusjon, slutt med begge', ks.status === 200 && /event-stream/.test(ks.headers.get('content-type') || '') && v0?.steg === 'forskjeller' && v0?.svar === 2 && n3.includes('forskjeller') && n3.includes('konklusjon-del') && n3.includes('konklusjon') && n3.at(-1) === 'slutt' && h3.at(-1)[1].konklusjon?.tilgjengelig === true && h3.at(-1)[1].forskjeller?.tilgjengelig === true, n3.join(' '))
+  ok('POST /api/konklusjon uten strøm: JSON som før', JSON.parse((await post('/api/konklusjon', { prompt: pr.id })).tekst).konklusjon?.tilgjengelig === true)
+
   // ── 5) friksjon 13: stier i sakens tekst kan vises i Finder (dryrun) — ingen frie stier ─
   const MAPPE = path.join(HJEM, 'Dropbox', 'Advokat – Energima anke')
   fs.mkdirSync(MAPPE, { recursive: true })
@@ -229,7 +277,6 @@ try {
   const utenfor = path.join(SCRATCH, 'utenfor.txt'); fs.writeFileSync(utenfor, 'x')
   const L = `# Lenkeliste\n\nAlle under ${MAPPE}/\n\n- \`00 Orientering.pdf\` — innledende\n- \`Anke-v3.pdf/.docx\` — utkast\n- \`${path.join(HJEM, 'pakke-finnes-ikke.zip')}\` — hele pakken\n- ${utenfor} — utenfor hjemmemappa`
   const atomsL = load(); const lenkeliste = upsert(atomsL, { key: 'sak:lenkeliste', name: 'Lenkeliste', content: L, project: 'Lager', by: 'menneske' }).atom; save(atomsL)
-  const post = async (p, body) => hent(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   const åpne = (body) => post('/api/open', { target: 'finder', ...body })
   ok('mappa + filnavn hver for seg i teksten → vist (dryrun)', (await åpne({ id: lenkeliste.id, href: path.join(MAPPE, '00 Orientering.pdf') })).status === 200)
   ok('«Anke-v3.pdf/.docx»: både .pdf og .docx → vist', (await åpne({ id: lenkeliste.id, href: path.join(MAPPE, 'Anke-v3.pdf') })).status === 200 && (await åpne({ id: lenkeliste.id, href: path.join(MAPPE, 'Anke-v3.docx') })).status === 200)

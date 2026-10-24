@@ -25,7 +25,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, erFangetEtterRegel, FANGET_NØKLER, deliveryCounts } from './store.js'
+import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, fangetKandidater, slagAvNøkkel } from './store.js'
 import { samtaleSFraTranskript } from './import.js'
 
 const args = process.argv.slice(2)
@@ -33,28 +33,9 @@ const atoms = load()
 
 if (args.includes('--fanget')) {
   const dryRun = args.includes('--dry-run')
-  const sendinger = deliveryCounts()
-  const slagAv = (a) => { const k = String(a.key || ''); return k.startsWith('okt:') ? 'økt' : k.startsWith('samtale:') ? 'samtale' : k.startsWith('prompt:') ? 'prompt' : k.startsWith('svar:') ? 'svar' : a.kind || 'capture' }
-  const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
-  const tall = { saker: atoms.length, altFanget: 0, kandidater: 0, nye: 0, holdt: { menneske: 0, synlig: 0, status: 0, utlevert: 0 } }
-  const perSlag = {}, perKilde = {}, perProsjekt = {}
-  const vis = []
-  for (const a of atoms) {
-    if (a.fanget) { tall.altFanget++; continue }
-    if (!a.key || !FANGET_NØKLER.test(a.key)) continue
-    tall.kandidater++
-    const utlevert = sendinger.get(a.id) || 0
-    if (!erFangetEtterRegel(a, { utlevert })) {
-      if (a.levels?.S?.by === 'menneske' || a.levels?.M?.by === 'menneske') tall.holdt.menneske++
-      else if ((a.refs || []).length) tall.holdt.synlig++
-      else if (a.status) tall.holdt.status++
-      else if (utlevert) tall.holdt.utlevert++
-      continue
-    }
-    tall.nye++; tell(perSlag, slagAv(a)); tell(perKilde, a.source || '—'); tell(perProsjekt, a.project)
-    if (vis.length < 12) vis.push(`  ${a.project} / ${a.name}  (${slagAv(a)} · ${a.source || '—'} · ${a.key})`)
-    if (!dryRun) a.fanget = true
-  }
+  const { tall, perSlag, perKilde, perProsjekt, nye } = fangetKandidater(atoms)       // samme regel som POST /api/fanget/merk (Innstillinger › Arkiv)
+  const vis = nye.slice(0, 12).map((a) => `  ${a.project} / ${a.name}  (${slagAvNøkkel(a)} · ${a.source || '—'} · ${a.key})`)
+  if (!dryRun) for (const a of nye) a.fanget = true
   const linje = (m) => Object.entries(m).sort((x, y) => y[1] - x[1]).map(([k, n]) => `${k} (${n})`).join(', ') || '—'
   console.log(`${tall.saker} saker · ${tall.altFanget} alt merket fanget · ${tall.kandidater} med fangst-nøkkel · ${tall.nye} ${dryRun ? 'ville fått' : 'får'} fanget: true${dryRun ? ' · DRY-RUN, ingenting skrevet' : ''}`)
   console.log(`Holdt utenfor fordi noen har arbeidet med saken: ${tall.holdt.menneske} menneskeskrevet S/M · ${tall.holdt.synlig} synlig i annet prosjekt · ${tall.holdt.status} status satt · ${tall.holdt.utlevert} vært med i en sending`)
