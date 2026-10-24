@@ -71,7 +71,7 @@ const id2 = (text.match(/atom (a_[a-z0-9_]+)/) || [])[1]; assert.ok(id2); step('
 ;({ text } = await call('tua_search', { query: 'hytta', context: 'Riulf' })); assert.ok(text.includes(id2) && /referert inn/.test(text)); step('tua_search (context)', text)
 ;({ text } = await call('tua_compose', { ids: [id1, id2], name: 'Styrenotat — test', level: 'M', key: 'lev:test' })); assert.ok(/bygget av 2 atomer/.test(text)); step('tua_compose', text)
 ;({ text } = await call('tua_unlink', { id: id2, project: 'Riulf' })); assert.ok(/ikke lenger synlig/.test(text)); step('tua_unlink', text)
-;({ text } = await call('tua_share', { ids: [id1, id2], til: 'Revisor', forhåndsvis: true })); assert.ok(/Forhåndsvisning/.test(text) && /Revisor får S av 2 saker/.test(text)); step('tua_share (forhåndsvis)', text)
+;({ text } = await call('tua_share', { ids: [id1, id2], til: 'Revisor', forhandsvis: true })); assert.ok(/Forhåndsvisning/.test(text) && /Revisor får S av 2 saker/.test(text)); step('tua_share (forhåndsvis)', text)
 ;({ text } = await call('tua_share', { ids: [id1, id2], til: 'Revisor' })); assert.ok(/Delingssak lagret/.test(text) && /tua:\/\/sak\//.test(text)); step('tua_share', text)
 ;({ text } = await call('tua_import', { kilde: 'innboks', dryRun: true })); assert.ok(/Ingenting å importere/.test(text)); step('tua_import (innboks, dryRun)', text)
 const card = await call('tua_card', { id: id1 }); assert.ok(card.r.structuredContent?.atom?.id === id1 || /Likviditet/.test(card.text)); step('tua_card (atom)', card.text)

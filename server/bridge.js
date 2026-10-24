@@ -138,6 +138,7 @@ import { inboxPending, inboxShareFiles } from './import.js'
 import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
 import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv, fangetKandidater, slagAvNøkkel } from './store.js'   // runde 2c: Fanget-bøtta (+ app: engangs-merkingen)
 import { klasseAv, tellKlasser, vekt, sistRørt, trådSamlet, brukInfo, deliveryInfo, logBruk, BRUK_HENDELSER, claudeØkter } from './store.js'   // runde 2d (03-avisen §2–§5): klasser, vekt, tråden samlet, bruk-loggen, Claude-øktene
+import { projectAliases } from './store.js'   // runde 2d (app), friksjon 14: filer i prosjektmappa som ikke er saker, og aliasene til prosjekt-treffet i søket
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
@@ -427,6 +428,37 @@ function serveStatic(res, pathname) {
 }
 const mtimeAv = (f) => { try { return Math.round(fs.statSync(f).mtimeMs) } catch { return null } }
 const num = (v, d) => { if (v == null || v === '') return d; const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : d }
+
+// ── Runde 2d (app), friksjon 14 (Erik 24.10.2026): filene i en prosjektmappe som ikke er saker — PDF, HTML, docx, bilder, løse .md uten Tua-frontmatter.
+// Bare lesing, bare innenfor arkivroten (realpath), aldri .tua eller skjulte filer, aldri symlenker, inntil 3 nivåer og 500 filer per mappe.
+const FORMAT_AV = { pdf: 'pdf', html: 'html', htm: 'html', docx: 'docx', doc: 'docx', xlsx: 'xlsx', xls: 'xlsx', pptx: 'pptx', png: 'bilde', jpg: 'bilde', jpeg: 'bilde', gif: 'bilde', heic: 'bilde', webp: 'bilde', svg: 'bilde', txt: 'tekst', md: 'markdown', csv: 'csv', json: 'json', zip: 'arkiv' }
+const formatAv = (navn) => { const e = path.extname(navn).slice(1).toLowerCase(); return FORMAT_AV[e] || e || 'fil' }
+const prosjektMappe = (navn) => {   // mappa til et prosjekt, bare innenfor arkivroten — ellers null
+  const n = String(navn || '').trim()
+  if (!filesMode() || !n || n.startsWith('.') || /[\/\\\0]/.test(n) || n === 'Innboks') return null
+  const rot = realpath(FILES_ROOT), dir = realpath(path.join(FILES_ROOT, n))
+  try { return rot && dir && dir.startsWith(rot + path.sep) && fs.statSync(dir).isDirectory() ? { rot, dir } : null } catch { return null }
+}
+function filerIMappe(navn, { maks = 500, dybde = 3 } = {}) {
+  const m = prosjektMappe(navn); if (!m) return null
+  const ut = []
+  const gå = (dir, rel, d) => {
+    if (ut.length >= maks || d > dybde) return
+    let e = []; try { e = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const x of e) {
+      if (ut.length >= maks) return
+      if (x.name.startsWith('.') || x.isSymbolicLink()) continue
+      const abs = path.join(dir, x.name), r = rel ? path.join(rel, x.name) : x.name
+      if (x.isDirectory()) { gå(abs, r, d + 1); continue }
+      if (!x.isFile()) continue
+      if (x.name.toLowerCase().endsWith('.md')) continue   // alle .md i mappa er saker (lageret leser dem, også uten Tua-frontmatter) — de står i /api/atoms, ikke her
+      let st; try { st = fs.statSync(abs) } catch { continue }
+      ut.push({ navn: x.name, sti: r, format: formatAv(x.name), bytes: st.size, mtime: Math.round(st.mtimeMs) })
+    }
+  }
+  gå(m.dir, '', 0)
+  return { dir: m.dir, filer: ut.sort((a, b) => b.mtime - a.mtime) }
+}
 
 http
   .createServer(async (req, res) => {
@@ -990,6 +1022,43 @@ http
         const dok = innboksDokumenter()
         const økter = claudeØkter(alle, { dager, now })
         return json(res, 200, { dager, spørsmål, svarKom, konklusjoner, innboks: { antall: dok.length, dokumenter: dok.map((d) => d.navn) }, økter: økter.økter, økterPerDag: økter.dager, antallØkter: økter.antall })
+      }
+      // ── Runde 2d (app) — friksjon 14 (Erik 24.10.2026): søk på prosjekt gir prosjektet og filene som hører til; Mapper viser også filer som ikke er saker. Egen blokk. ──
+      //   GET  /api/mappe                 → { prosjekter: [{navn, alias: [navn…], saker, filer, sist}] }  prosjektene som mapper, med aliasene fra .tua/project-aliases.json
+      //                                     (prosjekt-treffet i søket: navn, alias eller samtale matcher) og antall filer som ikke er saker. Aldri innhold.
+      //   GET  /api/mappe?prosjekt=<navn> → { prosjekt, saker, filer: [{navn, sti, format, bytes, mtime, sak}] }  filene i prosjektmappa som ikke er saker (PDF, HTML, docx, bilder,
+      //                                     løse .md …), nyeste først; `sti` er relativ til mappa; `sak` = id når fila er en gjengivelse (renders) registrert på en sak. 404 når mappa ikke finnes.
+      //   POST /api/mappe/aapne {prosjekt, sti, hvor: finder|app} → åpner fila lokalt (Vis i Finder / Åpne i programmet) — bare filer som ligger i prosjektmappa (realpath). 400/403/404.
+      if (req.method === 'GET' && url.pathname === '/api/mappe') {
+        const prosjekt = url.searchParams.get('prosjekt')
+        const alle = load()
+        if (!prosjekt) {
+          const aliaser = projectAliases(), perProsjekt = new Map()
+          for (const a of alle) { const p = perProsjekt.get(a.project) || { saker: 0, sist: 0 }; p.saker++; p.sist = Math.max(p.sist, a.capturedAt || 0); perProsjekt.set(a.project, p) }
+          const prosjekter = alleProsjekter().map((navn) => ({ navn, alias: Object.entries(aliaser).filter(([k, v]) => same(v, navn) && !same(k, navn)).map(([k]) => k), saker: perProsjekt.get(navn)?.saker || 0, filer: filerIMappe(navn)?.filer.length || 0, sist: perProsjekt.get(navn)?.sist || 0 }))
+          return json(res, 200, { prosjekter })
+        }
+        const m = filerIMappe(prosjekt)
+        if (!m) return json(res, 404, { error: `fant ikke mappa «${prosjekt}» i arkivet` })
+        const renderAv = new Map()   // gjengivelse (sti) → sak-id, så fila kan lenkes til saken den hører til
+        for (const a of alle) for (const r of a.renders || []) for (const p of [r.path, r.copy]) { const rp = p && realpath(p); if (rp) renderAv.set(rp, a.id) }
+        const filer = m.filer.map((f) => ({ ...f, sak: renderAv.get(realpath(path.join(m.dir, f.sti))) || null }))
+        return json(res, 200, { prosjekt, saker: alle.filter((a) => same(a.project, prosjekt)).length, filer })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/mappe/aapne') {
+        const b = await readBody(req)
+        if (!b.prosjekt || !b.sti) return json(res, 400, { error: 'prosjekt og sti kreves' })
+        const m = prosjektMappe(b.prosjekt)
+        if (!m) return json(res, 404, { error: `fant ikke mappa «${b.prosjekt}» i arkivet` })
+        const rå = path.resolve(m.dir, String(b.sti))
+        if (!rå.startsWith(m.dir + path.sep)) return json(res, 403, { error: 'fila ligger ikke i prosjektmappa' })
+        const abs = realpath(rå)
+        if (!abs) return json(res, 404, { error: 'fila finnes ikke' })
+        if (!abs.startsWith(m.dir + path.sep)) return json(res, 403, { error: 'fila ligger ikke i prosjektmappa' })
+        try { if (!fs.statSync(abs).isFile()) return json(res, 403, { error: 'ikke en fil' } ) } catch { return json(res, 404, { error: 'fila finnes ikke' }) }
+        if (abs.includes(`${path.sep}.`)) return json(res, 403, { error: 'skjulte filer åpnes ikke' })
+        const r = await run(b.hvor === 'app' ? 'url' : 'reveal', abs)
+        return json(res, 200, { ok: true, ran: r.ran, hvor: b.hvor === 'app' ? 'app' : 'finder' })
       }
       return json(res, 404, { error: 'ukjent rute' })
     } catch (e) {

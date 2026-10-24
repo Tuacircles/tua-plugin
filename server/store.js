@@ -211,6 +211,8 @@ export const projectAlias = (name) => {
     return k ? m[k] : n
   } catch { return n }
 }
+// Alle aliasene (runde 2d app, friksjon 14: søket finner prosjektet også på aliaset): { alias: mappe }, uten «_»-nøkkelen.
+export const projectAliases = () => { try { const m = JSON.parse(fs.readFileSync(ALIASES(), 'utf8')); return Object.fromEntries(Object.entries(m).filter(([k, v]) => k !== '_' && typeof v === 'string')) } catch { return {} } }
 export function registerProject(name, { repo, claudeProject } = {}) {
   if (!filesMode() || !name) return false
   const all = projects()
