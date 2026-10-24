@@ -14,6 +14,8 @@
 //   node sync-tua.js --install-hook     installer .git/hooks/post-commit som kjører sync
 //
 // Arkivet er mappa ~/Dropbox/Tua (samme som MCP-serveren); S/M lages regelbasert (V10).
+// Runde 2d (03-avisen §2 A, 24.10.2026): commit-logg, manifest, status, beslutningslogg og lenker får `drift: true` — Tua om seg selv, aldri i avisen.
+// Dokumentene (HTML + PDF, key dok:…) er arbeid og får det ikke.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -155,7 +157,7 @@ const items = []
 // 1 · Commit-logg
 const gitlog = sh(`git log --date=format:'%Y-%m-%d %H:%M' --format='%h · %ad · %s%n%b' -n 200`)
 if (gitlog) items.push({
-  key: 'commit-logg', name: `Commit-logg — ${path.basename(ROOT)}`, convo: 'Git-historikk',
+  key: 'commit-logg', name: `Commit-logg — ${path.basename(ROOT)}`, convo: 'Git-historikk', drift: true,   // runde 2d (03-avisen §2 A): speilinger er drift — Tua om seg selv; i Mapper og søket på forespørsel, aldri i avisen
   summary: 'Alle commits i repoet, nyeste først. Oppdateres automatisk ved hver commit.',
   tags: ['commit', 'git', 'logg'], content: `# Commit-logg — ${path.basename(ROOT)}\n\n${gitlog}`,
   links: baseLinks(),
@@ -172,7 +174,7 @@ if (gitlog) items.push({
 for (const m of ['CLAUDE.md', 'MANIFEST.md', 'README.md']) {
   if (!exists(m)) continue
   items.push({
-    key: 'manifest', name: `Prosjektmanifest — ${PROJECT} (${m})`, convo: m,
+    key: 'manifest', name: `Prosjektmanifest — ${PROJECT} (${m})`, convo: m, drift: true,
     summary: 'Prosjektkontekst: hva det er, prinsipper og konvensjoner.',
     tags: ['manifest', m.toLowerCase().replace('.md', '')], content: read(m), ...levelsForMarkdown(read(m)),
     links: [...fileLinks(m), ...baseLinks()],
@@ -184,7 +186,7 @@ for (const m of ['CLAUDE.md', 'MANIFEST.md', 'README.md']) {
 for (const s of ['STATUS.md', 'docs/STATUS.md']) {
   if (!exists(s)) continue
   items.push({
-    key: 'status', name: `Status og veikart — ${PROJECT}`, convo: s,
+    key: 'status', name: `Status og veikart — ${PROJECT}`, convo: s, drift: true,
     summary: 'Hvor vi er: milepæler (M), faser, åpne avklaringer og hvor ting ligger. Oppdateres ved hver milepæl.',
     tags: ['status', 'veikart', 'milepæler'], content: read(s), ...levelsForMarkdown(read(s)),
     links: [...fileLinks(s), ...baseLinks()],
@@ -196,7 +198,7 @@ for (const s of ['STATUS.md', 'docs/STATUS.md']) {
 for (const b of ['concepts/00-beslutninger.md', 'BESLUTNINGER.md', 'docs/beslutninger.md', 'beslutninger.md']) {
   if (!exists(b)) continue
   items.push({
-    key: 'beslutningslogg', name: `Beslutningslogg — ${PROJECT}`, convo: b,
+    key: 'beslutningslogg', name: `Beslutningslogg — ${PROJECT}`, convo: b, drift: true,
     summary: 'Beslutninger med begrunnelser. Vedlikeholdes løpende.',
     tags: ['beslutningslogg', 'manifest'], content: read(b), ...levelsForMarkdown(read(b)),
     links: [...fileLinks(b), ...baseLinks()],
@@ -206,7 +208,7 @@ for (const b of ['concepts/00-beslutninger.md', 'BESLUTNINGER.md', 'docs/beslutn
 
 // 4 · Lenker (generelle + repoets egne fra .tua-sync.json "links")
 items.push({
-  key: 'lenker', name: `Lenker — ${PROJECT}`, convo: 'Hvor ting ligger',
+  key: 'lenker', name: `Lenker — ${PROJECT}`, convo: 'Hvor ting ligger', drift: true,
   summary: 'Repo, nøkkelfiler, dokumenter og prosjektets egne lenker/start-kommandoer.',
   tags: ['lenker'],
   links: [...fileLinks('.tua-sync.json'), ...baseLinks()],
@@ -231,7 +233,7 @@ for (const pdf of pdfs) {
   const stand = pick(html, /class="standfirst">([\s\S]*?)<\/p>/i) || ''
   const nn = (htmlPath.match(/(?:^|\/)(\d+)[-_]/) || [])[1]
   items.push({
-    key: `dok:${htmlPath}`, name: title, convo: eyebrow || path.dirname(htmlPath),
+    key: `dok:${htmlPath}`, name: title, convo: eyebrow || path.dirname(htmlPath),   // runde 2d: dokumentene er ARBEID (PDF-dokumenterte arbeidsstykker), ikke drift — ingen drift-flagg
     summary: `Ferdig dokument${nn ? ` (arbeidsstykke ${nn})` : ''} i repoet — ${htmlPath}, PDF ved siden av. Speiles automatisk ved commit.`,
     tags: ['dokument', nn ? `arbeidsstykke-${nn}` : 'arbeidsstykke'],
     content: `${htmlToText(html)}\n\n---\nFil: ${htmlPath} · PDF: ${pdf}`,

@@ -23,6 +23,9 @@
 //   GET  /api/versions?id=<sak>  → { id, versions: [{name, size, mtime}] }  tidligere versjoner av fila (.tua/versions/<id>/), lageret som før
 //   POST /api/status {id, status: utkast|endelig} → status på saken (frontmatter `status`; standard: svar = utkast, alt annet = endelig)
 //   /api/atoms og /api/search gir `status` per sak (statusOf).
+//   Runde 2d (03-avisen §2–§5): /api/atoms gir `klasse` (arbeid · spor · drift · tråd), `vekt`, `sist_rørt`, `beholdt`, `drift` per sak og `tråden` samlet på prompt-saker,
+//   pluss `klasser` (tall per klasse for hele arkivet); /api/search har ?drift=uten|med|bare og svarer med `driftUtenfor` og `klasse` per treff.
+//   Nye ruter nederst: POST /api/behold {id} · POST /api/bruk {id, hendelse} · GET /api/siden-sist?dager.
 //   Passord (valgfritt): `node bridge.js --sett-passord` setter et passord (scrypt-hash i <arkiv>/.tua/passord.json).
 //   Da krever alt — appen og /api/* — innlogging på /logg-inn (HttpOnly-cookie, 30 dager). `--fjern-passord` fjerner det.
 //   /api/* svarer da 401 { error, login: '/logg-inn' } og appen sender brukeren til /logg-inn?next=… (skive 3); sider omdirigeres dit direkte.
@@ -132,6 +135,7 @@ import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STAND
 import { inboxPending, inboxShareFiles } from './import.js'
 import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
 import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv } from './store.js'   // runde 2c: Fanget-bøtta
+import { klasseAv, tellKlasser, vekt, sistRørt, trådSamlet, brukInfo, deliveryInfo, logBruk, BRUK_HENDELSER, claudeØkter } from './store.js'   // runde 2d (03-avisen §2–§5): klasser, vekt, tråden samlet, bruk-loggen, Claude-øktene
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
@@ -456,24 +460,29 @@ http
         // samme tall som /api/search gir, fra lageret (levelOf), så anslaget i Spør er det samme uansett hvor saken ble valgt. max er L: eget arkiv (V11).
         // Runde 1 (arb. 32 §6): tråd = prompt-id for Spørs biprodukter (svar, Forskjeller, konklusjon — og prompten selv), så avisen, Oppslag og søket viser dem som én;
         // utlevert = antall sendinger saken har vært med i (forsidens hovedsak = mest arbeidet med siste døgn). Bare tellinger.
-        const trådAv = tråder(all).av, sendinger = deliveryCounts()
-        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0, mtime: mtimeAv(fileOf(a)) }))   // mtime (runde 2a): visningen Mapper sorterer som Finder — nyeste fil øverst
-        return json(res, 200, { atoms, total: all.length, offset, file: ARKIV() })
+        // Runde 2d (03-avisen §2–§4): klasse (arbeid · spor · drift · tråd), vekt og sist_rørt per sak; `tråden` samlet på prompt-saken ({svar, forskjeller, konklusjon, åpen, …}).
+        // `tråd` er fortsatt prompt-id (streng) på alle sakene i en tråd — appen (regler.slåSammenTråder) leser den slik; det samlede objektet har eget navn så ingenting brekker.
+        const { av: trådAv, per: trådPer } = trådSamlet(all), sendinger = deliveryCounts(), utlev = deliveryInfo(), bruk = brukInfo(), now = Date.now()
+        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0, mtime: mtimeAv(fileOf(a)),   // mtime (runde 2a): visningen Mapper sorterer som Finder — nyeste fil øverst
+          klasse: klasseAv(a), vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), tråd: a.kind === 'konklusjon' || a.kind === 'svar' ? trådPer.get(trådAv.get(a.id)) || null : null, now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }), tråden: a.kind === 'prompt' ? trådPer.get(a.id) || null : null }))
+        return json(res, 200, { atoms, total: all.length, offset, file: ARKIV(), klasser: tellKlasser(all) })
       }
       if (req.method === 'GET' && url.pathname === '/api/search') {
         const q = url.searchParams.get('q') || ''
         const kind = url.searchParams.get('kind') || undefined
         const alleAtomer = load(), byId = new Map(alleAtomer.map((a) => [a.id, a])), trådAv = tråder(alleAtomer).av
         const fangetParam = url.searchParams.get('fanget') || 'uten'   // runde 2c: uten (standard) · med · bare — fangede saker holdes utenfor søket til de løftes inn
+        const driftParam = url.searchParams.get('drift') || 'uten'     // runde 2d (03-avisen §2 A): drift holdes utenfor søket til noen ber om den — ?drift=med tar den med, bare gir bare den
         const hits = search(alleAtomer, q, {
           context: url.searchParams.get('context') || undefined, project: url.searchParams.get('project') || undefined, kind, fanget: ['med', 'bare'].includes(fangetParam) ? fangetParam : 'uten',
+          drift: ['med', 'bare'].includes(driftParam) ? driftParam : 'uten',
           limit: num(url.searchParams.get('limit'), 50), offset: num(url.searchParams.get('offset'), 0),
         })
         return json(res, 200, {
-          q, total: hits.total, offset: num(url.searchParams.get('offset'), 0), ...(kind ? { kind } : {}), fangetUtenfor: hits.fanget,
+          q, total: hits.total, offset: num(url.searchParams.get('offset'), 0), ...(kind ? { kind } : {}), fangetUtenfor: hits.fanget, driftUtenfor: hits.drift,
           // ord per nivå kommer fra lageret (levelOf) — Spør-skjermen (skive 2) regner ikke selv, så ordantallet er det samme som motoren sender.
           // Skive 8: prompt-treff bærer hele teksten (tekst), svarene (ga) og modellene de gikk til — forslagene i Spør fyller feltet med ett klikk.
-          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), status: statusOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet, tråd: trådAv.get(a.id) || null, tags: a.tags || [], fanget: !!a.fanget,
+          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), status: statusOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet, tråd: trådAv.get(a.id) || null, tags: a.tags || [], fanget: !!a.fanget, drift: a.drift === true, klasse: klasseAv(a),
             ...(a.kind === 'prompt' ? { tekst: a.content, ga: a.ga || [], modeller: modellerFor(byId, a) } : {}) })),
         })
       }
@@ -902,6 +911,49 @@ http
       if (req.method === 'GET' && url.pathname === '/api/papirkurv') {
         const saker = fangetPapirkurv().map(({ kurv, ...e }) => e)   // aldri stien inne i .tua til klienten (runde 1: ingen stier i klartekst)
         return json(res, 200, { saker, antall: saker.length })
+      }
+      // ── Runde 2d (arbeidsstykke 32 del 3, 03-avisen §3–§5, Erik 24.10.2026: ja til A–E): klasser og vekt — serverdelen. Alt gjennom lageret (store.js). ──
+      //   POST /api/behold {id}           → { atom }   «Behold» på et svar (eller en hvilken som helst sak): beholdt: true i fila — et beholdt svar er arbeid, ikke tråd (D);
+      //                                    var saken fanget eller drift, løftes den samtidig inn (fanget: false / drift: false). Samme lager-funksjon som Fanget-bøttas Behold.
+      //   POST /api/bruk {id, hendelse}   → { ok, at }  lett hendelse til <arkiv>/.tua/bruk.jsonl (lest_M · lest_L · tatt_med · åpnet · redigert · delt) — teller i vekten og sist_rørt. Bare metadata.
+      //   GET  /api/siden-sist?dager=7    → det «Siden sist» trenger: spørsmål i arbeid (åpne Spør-tråder), svar som kom tilbake (ubeholdte svar siste N dager), konklusjoner som venter
+      //                                    (utkast), filer i Innboks (tall), og Claude-øktene siste N dager — én linje per økt og én tekstlinje per dag («I Claude i dag: 3 økter, 14 filer skrevet,
+      //                                    2 svar beholdt») med økt-id → sakene i økta (fanget). Bare id-er, navn, S og tall — aldri innhold.
+      if (req.method === 'POST' && url.pathname === '/api/behold') {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves' })
+        const atoms = load()
+        if (!atoms.some((x) => x.id === b.id)) return json(res, 404, { error: `fant ikke sak ${b.id}` })
+        const r = fangetBehold(atoms, b.id)                      // beholdt: true, fanget: false, drift: false (var den drift) — brukerens valg vinner over regelen, alltid
+        save(atoms)
+        console.error(`[tua-bro] behold «${r.atom.name}» (${klasseAv(r.atom)})`)
+        return json(res, 200, { atom: { ...r.atom, links: linksFor(r.atom), file: fileOf(r.atom), status: statusOf(r.atom), klasse: klasseAv(r.atom), beholdt: true, fanget: false }, før: r.før })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/bruk') {
+        const b = await readBody(req)
+        if (!b.id || !b.hendelse) return json(res, 400, { error: 'id og hendelse kreves', hendelser: BRUK_HENDELSER })
+        if (!BRUK_HENDELSER.includes(b.hendelse)) return json(res, 400, { error: `ukjent hendelse «${b.hendelse}»`, hendelser: BRUK_HENDELSER })
+        if (!load().some((x) => x.id === b.id)) return json(res, 404, { error: `fant ikke sak ${b.id}` })
+        const e = logBruk(b.id, b.hendelse)
+        return json(res, 200, { ok: true, id: e.id, hendelse: e.hendelse, at: e.at })
+      }
+      if (req.method === 'GET' && url.pathname === '/api/siden-sist') {
+        const dager = Math.min(90, Math.max(1, num(url.searchParams.get('dager'), 7)))
+        const now = Date.now(), fra = now - dager * 86400e3
+        const alle = load(), byId = new Map(alle.map((a) => [a.id, a]))
+        const { av, per } = trådSamlet(alle), utlev = deliveryInfo(), bruk = brukInfo()
+        const rad = (a) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: levelOf(a, 'S').text, status: statusOf(a), klasse: klasseAv(a), tråd: av.get(a.id) || null, vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }) })
+        // Spørsmål i arbeid: åpne tråder (ingen konklusjon låst, ingen svar beholdt) rørt siste N dager — prompten med tråden samlet
+        const spørsmål = [...per.values()].filter((t) => t.åpen && t.sist >= fra && byId.has(t.prompt) && byId.get(t.prompt).fanget !== true && byId.get(t.prompt).drift !== true)
+          .sort((x, y) => y.sist - x.sist).map((t) => ({ ...rad(byId.get(t.prompt)), tråden: t, konklusjon_venter: !!t.konklusjon && t.konklusjon_status !== 'endelig' }))
+        // Svar som kom tilbake: svar-saker (fra Spør, ikke fanget) som ikke er beholdt eller låst, siste N dager
+        const svarKom = alle.filter((a) => a.kind === 'svar' && a.fanget !== true && a.drift !== true && klasseAv(a) === 'tråd' && (a.capturedAt || 0) >= fra && !(a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller'))
+          .sort((x, y) => y.capturedAt - x.capturedAt).map((a) => ({ ...rad(a), tråd: av.get(a.id) || null }))
+        // Konklusjoner som venter på låsing (utkast)
+        const konklusjoner = alle.filter((a) => a.kind === 'konklusjon' && statusOf(a) !== 'endelig').sort((x, y) => y.capturedAt - x.capturedAt).map((a) => ({ ...rad(a), tråd: av.get(a.id) || null }))
+        const dok = innboksDokumenter()
+        const økter = claudeØkter(alle, { dager, now })
+        return json(res, 200, { dager, spørsmål, svarKom, konklusjoner, innboks: { antall: dok.length, dokumenter: dok.map((d) => d.navn) }, økter: økter.økter, økterPerDag: økter.dager, antallØkter: økter.antall })
       }
       return json(res, 404, { error: 'ukjent rute' })
     } catch (e) {

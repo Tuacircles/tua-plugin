@@ -560,7 +560,7 @@ export function setShare(a, project, level) {
 // M19 (skive 8, V16): `ga` = [{id, version}] — svarene en prompt-sak ga. Normaliseres som derivedFrom; upsert slår lista SAMMEN (union på id), aldri erstatter.
 export const normalizeGa = (list) => (Array.isArray(list) ? list : []).filter((g) => g && g.id).map((g) => ({ id: String(g.id), version: Number(g.version) || 1 }))
 export const mergeGa = (gammel = [], ny = []) => { const ut = [...normalizeGa(gammel)]; for (const g of normalizeGa(ny)) { const i = ut.findIndex((x) => x.id === g.id); if (i < 0) ut.push(g); else ut[i] = g } return ut }
-export function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget }) {
+export function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget, drift, beholdt }) {
   const body = String(content || '').replace(/\r\n?/g, '\n').trim()   // M17: fila leses tilbake uten \r (files.js) — lagre likt, ellers blir hver import en «ny versjon»
   const now = Date.now()
   const a = {
@@ -590,6 +590,8 @@ export function makeAtom({ content, name, source, project, convo, summary, tags,
   const rd = normalizeRenders(renders); if (rd.length) a.renders = rd
   const g = normalizeGa(ga); if (g.length) a.ga = g
   if (fanget === true || fanget === false) a.fanget = fanget            // runde 2c: true = fanget automatisk, false = løftet inn — se Fanget-bøtta nederst
+  if ((drift === true && !erMenneskeskrevet(a)) || drift === false) a.drift = drift   // runde 2d: Tua om seg selv — aldri på noe et menneske har skrevet
+  if (beholdt === true) a.beholdt = true                                   // runde 2d: beholdt av brukeren
   return a
 }
 
@@ -638,6 +640,9 @@ export function upsert(atoms, { key, ...data }) {
   // runde 2c: en sak som finnes beholder sin fanget-tilstand. Er den løftet inn (eller lagret med vilje), setter ingen ny import flagget igjen;
   // er den fanget, tar bare en eksplisitt `fanget: false` (Behold) det bort. Brukerens valg vinner over regelen — alltid.
   const fanget = data.fanget === false ? false : old.fanget
+  // runde 2d: drift følger samme logikk — har brukeren sagt «dette er arbeid» (drift: false), setter ingen regel det igjen; menneskeskrevet merkes aldri drift.
+  const drift = old.drift === false || data.drift === false ? false : data.drift === true && !erMenneskeskrevet(old) ? true : old.drift
+  const beholdt = data.beholdt === false ? undefined : data.beholdt === true ? true : old.beholdt   // beholdt tas bare bort eksplisitt
   const attach = (a) => {
     if (levels) a.levels = levels; else delete a.levels
     if (links) a.links = links; else delete a.links
@@ -645,11 +650,13 @@ export function upsert(atoms, { key, ...data }) {
     if (renders) a.renders = renders; else delete a.renders
     if (ga) a.ga = ga; else delete a.ga
     if (fanget === true || fanget === false) a.fanget = fanget; else delete a.fanget
+    if (drift === true || drift === false) a.drift = drift; else delete a.drift
+    if (beholdt === true) a.beholdt = true; else delete a.beholdt
     a.kind = kind
     return a
   }
   if (bodySame) {
-    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget) return { atom: old, status: 'uendret' }
+    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old })
     return { atom: atoms[i], status: 'nivåer' }
   }
@@ -727,7 +734,9 @@ export function score(a, tokens, max = 'L') {
 // `kind` (M19, skive 8): bare saker av én type — prompt-samlingen i appen og forslagene i Spør søker med kind=prompt.
 // `fanget` (runde 2c, 24.10.2026): standard `uten` — fangede saker (hook/import, ikke løftet inn) holdes utenfor; `med` tar dem med; `bare` gir bare dem.
 // Resultatet bærer `fanget` = hvor mange fangede saker som traff søket men ble holdt utenfor, så døra kan si det («N fangede saker holdt utenfor»).
-export function search(atoms, query, { project, context, kind, fanget = 'uten', limit = 8, offset = 0 } = {}) {
+// `drift` (runde 2d, 03-avisen §2 A): standard `uten` — drift (Tua om seg selv) holdes utenfor søket; `med` tar den med; `bare` gir bare den.
+// Resultatet bærer `drift` = hvor mange drift-saker som traff men ble holdt utenfor. Rekkefølgen: fanget-filteret først, så drift-filteret.
+export function search(atoms, query, { project, context, kind, fanget = 'uten', drift = 'uten', limit = 8, offset = 0 } = {}) {
   const tokens = String(query || '').toLowerCase().split(/\s+/).filter(Boolean)
   const treff = atoms
     .filter((a) => !project || a.project.toLowerCase() === project.toLowerCase())
@@ -736,8 +745,10 @@ export function search(atoms, query, { project, context, kind, fanget = 'uten', 
     .map((a) => ({ a, max: maxLevel(a, context) }))
     .filter(({ a, max }) => tokens.every((t) => hay(a, max).includes(t)))
   const utenfor = fanget === 'med' ? 0 : treff.filter(({ a }) => (fanget === 'bare' ? !a.fanget : !!a.fanget)).length
-  const all = treff
-    .filter(({ a }) => fanget === 'med' || (fanget === 'bare' ? !!a.fanget : !a.fanget))
+  const etterFanget = treff.filter(({ a }) => fanget === 'med' || (fanget === 'bare' ? !!a.fanget : !a.fanget))
+  const driftUtenfor = drift === 'med' ? 0 : etterFanget.filter(({ a }) => (drift === 'bare' ? a.drift !== true : a.drift === true)).length
+  const all = etterFanget
+    .filter(({ a }) => drift === 'med' || (drift === 'bare' ? a.drift === true : a.drift !== true))
     .map((x) => ({ ...x, score: tokens.length ? score(x.a, tokens, x.max) : 0 }))
     .sort((x, y) => y.score - x.score || y.a.capturedAt - x.a.capturedAt)
   const page = all.slice(offset, offset + limit).map(({ a, max, score: sc }) => {
@@ -748,6 +759,7 @@ export function search(atoms, query, { project, context, kind, fanget = 'uten', 
   })
   page.total = all.length
   page.fanget = utenfor
+  page.drift = driftUtenfor
   return page
 }
 
@@ -835,7 +847,7 @@ export const FANGET_NØKLER = /^(svar|okt|samtale):|^prompt:(?!spor:)/      // s
 export function erFangetEtterRegel(a, { utlevert = 0 } = {}) {
   if (a?.fanget === false) return false                                                   // løftet inn med Behold — brukerens valg, regelen rører den aldri igjen
   if (!a?.key || !FANGET_NØKLER.test(a.key)) return false
-  if (a.levels?.S?.by === 'menneske' || a.levels?.M?.by === 'menneske') return false   // noen har skrevet på den — da er den med vilje (V10)
+  if (erMenneskeskrevet(a)) return false                                                  // noen har skrevet på den, eller et menneske er kilden — da er den med vilje (V10)
   if ((a.refs || []).length || a.status) return false                                     // gjort synlig i et annet prosjekt eller låst/satt status: arbeidet med
   if (utlevert > 0) return false                                                          // har vært med i en sending — brukeren har brukt den
   return true
@@ -849,8 +861,10 @@ export const papirkurv = () => (filesMode() ? readKurv().sort((x, y) => y.at - x
 export function behold(atoms, id, { prosjekt } = {}) {
   const a = atoms.find((x) => x.id === id)
   if (!a) throw new Error(`fant ikke sak ${id}`)
-  const før = { fanget: !!a.fanget, project: a.project }
+  const før = { fanget: !!a.fanget, drift: a.drift === true, project: a.project }
   a.fanget = false                                                     // eksplisitt false i fila: løftet inn — en ny import eller review --fanget setter det aldri igjen
+  a.beholdt = true                                                     // runde 2d: beholdt av brukeren — et beholdt svar er arbeid (klasseAv), og det teller i vekten
+  if (a.drift === true) a.drift = false                                // runde 2d: var saken drift, sier brukeren nå «dette er arbeid» — regelen (review --drift) rører den aldri igjen
   if (prosjekt && String(prosjekt).trim() && String(prosjekt).trim().toLowerCase() !== a.project.toLowerCase()) a.project = projectAlias(String(prosjekt).trim())
   return { atom: a, før, flyttet: før.project !== a.project }
 }
@@ -922,4 +936,174 @@ export function angre(id) {
     const dir = path.dirname(rel); if (dir && dir !== '.') a.project = dir
     return { atom: a, rel, post: e }
   } finally { if (locked) releaseLock() }
+}
+
+// ── Runde 2d (arbeidsstykke 32 del 3, 03-avisen §2–§5, Erik 24.10.2026: ja til A–E): klassene, drift, vekt, tråden samlet, Claude-økta ──
+// «Avisen viser det som er laget med vilje og er ferdig nok til å leses; alt annet finnes, men venter på å bli spurt etter.»
+// Fire klasser, avledet ved lesing (ingen ny nøkkel i fila utover flaggene fanget/drift/beholdt):
+//   arbeid  laget med vilje: notat, dokument lest inn, konklusjon låst, svar beholdt, sak løftet inn fra Fanget
+//   spor    fanget automatisk (fanget: true) eller en samtale (kind: samtale, V14: samtalen er et filter) — bøtta og samtalespalta
+//   drift   Tua om seg selv (drift: true): speilinger fra sync, importrapporter, helsesjekk, byggeøkter — Mapper under prosjektet og søket på forespørsel, aldri avisen
+//   tråd    Spørs mellomprodukter: prompt, svar som ikke er beholdt eller låst, Forskjeller, konklusjon i utkast — vises inne i saken eller i «Siden sist», aldri som egen rad
+export const KLASSER = ['arbeid', 'spor', 'drift', 'tråd']
+const erForskjellerSak = (a) => a?.kind === 'svar' && (a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller')
+export function klasseAv(a) {
+  if (!a) return 'arbeid'
+  if (a.drift === true) return 'drift'
+  if (a.fanget === true) return 'spor'
+  if (a.kind === 'samtale') return a.beholdt === true ? 'arbeid' : 'spor'
+  if (a.kind === 'prompt') return 'tråd'
+  if (a.kind === 'konklusjon') return statusOf(a) === 'endelig' ? 'arbeid' : 'tråd'
+  if (a.kind === 'svar') return a.beholdt === true || (!erForskjellerSak(a) && a.status === 'endelig') ? 'arbeid' : 'tråd'
+  return 'arbeid'
+}
+export const tellKlasser = (atoms) => { const t = Object.fromEntries(KLASSER.map((k) => [k, 0])); for (const a of atoms) t[klasseAv(a)]++; return t }
+// Sikkerhet for merkingen (review --drift / --fanget): det et menneske har skrevet, merkes aldri drift eller fanget — S eller M skrevet av et menneske,
+// eller en kilde som ikke er en maskin (kilde «Erik» fra /api/save og innlesing). Maskinkildene kjennes på ordene; alt annet regnes som menneske.
+const MASKINKILDE = /claude|chatgpt|gpt|gemini|ollama|^tua\b|tua$|test|perplexity|cowork|desktop|sync|agent|design|copilot|cursor|mistral|llama|regel|^$/i
+export const erMenneskeskrevet = (a) => !!a && (a.levels?.S?.by === 'menneske' || a.levels?.M?.by === 'menneske' || !MASKINKILDE.test(String(a.source || '').trim()))
+// Drift-regelen for det som alt ligger i arkivet (review.js --drift): nøkkelen sier at Tua skrev saken om seg selv — sync (commit-logg, manifest, status, lenker,
+// beslutningslogg), importrapporter (import:…), helsesjekk (helsesjekk:…) — eller saken er en byggeøkt (økt-, samtale-, prompt- og svar-sak fra hook/import) i
+// Tuas eget prosjekt: et prosjekt hvis registrerte repo ER Tua-repoet (tua-plugin/server/store.js finnes der), eller prosjektet «Tua» (pluginens eget).
+// PDF-dokumenterte arbeidsstykker (dok:…) er arbeid, ikke drift. En sak med drift: false (Behold) eller noe menneskeskrevet merkes aldri.
+export const DRIFT_NØKLER = /^(commit-logg|manifest|status|lenker|beslutningslogg|import:|helsesjekk:)/
+export const BYGGEØKT_NØKLER = /^(okt|samtale|svar):|^prompt:(?!spor:)/
+export const erTuaRepo = (root) => !!root && fs.existsSync(path.join(String(root), 'tua-plugin', 'server', 'store.js'))
+export const DRIFT_PROSJEKT = 'Tua'
+export function driftProsjekter() {
+  const ut = new Set([DRIFT_PROSJEKT.toLowerCase()])
+  for (const [navn, p] of Object.entries(projects())) if (p?.repo && erTuaRepo(p.repo)) ut.add(String(navn).toLowerCase())
+  return ut
+}
+export const erDriftProsjekt = (project, set = driftProsjekter()) => set.has(String(project || '').toLowerCase())
+export function erDriftEtterRegel(a, { prosjekter = driftProsjekter() } = {}) {
+  if (!a || a.drift === false) return false
+  if (erMenneskeskrevet(a)) return false
+  const key = String(a.key || '')
+  if (DRIFT_NØKLER.test(key)) return true
+  if (BYGGEØKT_NØKLER.test(key) && erDriftProsjekt(a.project, prosjekter)) return true
+  return false
+}
+// Hvorfor en sak er drift — til dry-run-tallene: sync · import · helsesjekk · byggeøkt
+export const driftSlag = (a) => { const k = String(a?.key || ''); return k.startsWith('import:') ? 'import' : k.startsWith('helsesjekk:') ? 'helsesjekk' : DRIFT_NØKLER.test(k) ? 'sync' : BYGGEØKT_NØKLER.test(k) ? 'byggeøkt' : 'annet' }
+
+// Bruk-loggen (03-avisen §3 «rørt av Erik»): lette hendelser appen melder — lest M, lest L, tatt med til Spør, åpnet, redigert. <arkiv>/.tua/bruk.jsonl,
+// én linje per hendelse {at, id, hendelse}, bare metadata. Brukes bare til vekt og sist_rørt; aldri innhold, aldri sendt noe sted.
+export const BRUK_HENDELSER = ['lest_M', 'lest_L', 'tatt_med', 'åpnet', 'redigert', 'delt']
+const BRUK = () => (filesMode() ? tuaFile('bruk.jsonl') : path.join(DATA_DIR, 'bruk.jsonl'))
+export function logBruk(id, hendelse) {
+  if (!id || !BRUK_HENDELSER.includes(hendelse)) throw new Error(`hendelse må være en av ${BRUK_HENDELSER.join(', ')}`)
+  const e = { at: Date.now(), id: String(id), hendelse }
+  fs.mkdirSync(path.dirname(BRUK()), { recursive: true })
+  fs.appendFileSync(BRUK(), JSON.stringify(e) + '\n')
+  return e
+}
+// id → { antall, sist, per: {hendelse: n} } for hele arkivet — én lesing
+export function brukInfo() {
+  const m = new Map()
+  try {
+    for (const l of fs.readFileSync(BRUK(), 'utf8').split('\n')) {
+      if (!l) continue
+      let e; try { e = JSON.parse(l) } catch { continue }
+      if (!e?.id) continue
+      const b = m.get(e.id) || { antall: 0, sist: 0, per: {} }
+      b.antall++; b.sist = Math.max(b.sist, e.at || 0); b.per[e.hendelse] = (b.per[e.hendelse] || 0) + 1
+      m.set(e.id, b)
+    }
+  } catch {}
+  return m
+}
+// Utleveringene per sak med tidspunkt: id → { antall, sist } (deliveryCounts gir bare tallet)
+export function deliveryInfo() {
+  const m = new Map()
+  try {
+    for (const l of fs.readFileSync(DELIVERY(), 'utf8').split('\n')) {
+      if (!l) continue
+      let e; try { e = JSON.parse(l) } catch { continue }
+      const ider = Array.isArray(e.saker) ? e.saker.map((s) => s && s.id).filter(Boolean) : e.id ? [e.id] : []
+      for (const id of new Set(ider)) { const d = m.get(id) || { antall: 0, sist: 0 }; d.antall++; d.sist = Math.max(d.sist, e.at || 0); m.set(id, d) }
+    }
+  } catch {}
+  return m
+}
+export const antallOrd = (s) => (String(s || '').trim().match(/\S+/g) || []).length
+const DØGN = 86400e3
+// Når ble saken sist rørt: skrevet/endret (capturedAt), utlevert, eller en bruk-hendelse
+export const sistRørt = (a, { utlevering = null, bruk = null } = {}) => Math.max(a?.capturedAt || 0, utlevering?.sist || 0, bruk?.sist || 0)   // ikke createdAt: en gammel sak som ikke er rørt, er gammel
+// Vekten (03-avisen §3): grunnvilkår arbeid (ellers 0). Opp for størrelse (ord i L, logaritmisk), versjoner utover den første, runder i tråden (svar og Forskjeller
+// bak en konklusjon eller et beholdt svar), rørt av brukeren (menneskeskrevet S/M, status satt, beholdt, synlig i annet prosjekt, redigert utenfor Tua), utleveringer
+// og bruk-hendelser. Ned for kort tekst uten M. Ferskhet som faktor: rørt siste døgn ×1,5, siste uke ×1,2, siste 30 dager ×1, eldre ×0,5 — nylig rørt teller mer,
+// 30 dager urørt synker. Samme vekt til hovedsak, rekkefølge i avisen og «Siden sist»; Mapper bruker den ikke (ren filstruktur, C).
+export function vekt(a, { utlevering = null, bruk = null, tråd = null, now = Date.now() } = {}) {
+  if (!a || klasseAv(a) !== 'arbeid') return 0
+  let v = 1
+  v += Math.log2(1 + antallOrd(a.content) / 100)
+  v += Math.min(5, (a.version || 1) - 1)
+  if (tråd) v += Math.min(5, (tråd.svar?.length || 0) + (tråd.forskjeller?.length || 0))
+  const rørt = (a.levels?.S?.by === 'menneske' ? 1 : 0) + (a.levels?.M?.by === 'menneske' ? 1 : 0) + (a.status ? 1 : 0) + (a.beholdt === true ? 1 : 0) + ((a.refs || []).length ? 1 : 0) + (a.editedOutside ? 1 : 0)
+  v += rørt * 2
+  v += Math.min(5, utlevering?.antall || 0)
+  v += Math.min(5, bruk?.antall || 0) * 0.5
+  if ((a.content || '').trim().length < S_MAX && !a.levels?.M?.text) v *= 0.5
+  const dager = (now - sistRørt(a, { utlevering, bruk })) / DØGN
+  v *= dager <= 1 ? 1.5 : dager <= 7 ? 1.2 : dager <= 30 ? 1 : 0.5
+  return Math.round(v * 100) / 100
+}
+// Tråden samlet (03-avisen §4, D): for hver prompt → { prompt, svar: [id], forskjeller: [id], konklusjon: id|null, konklusjon_status, beholdt: [id], åpen, runder, sist }.
+// åpen = ingenting i tråden har blitt arbeid ennå: ingen konklusjon låst (endelig), ingen svar beholdt eller låst. Da hører tråden til «Spørsmål i arbeid» i Siden sist.
+export function trådSamlet(atoms) {
+  const { av, per } = tråder(atoms)
+  const byId = new Map(atoms.map((a) => [a.id, a]))
+  const ut = new Map()
+  for (const [pid, t] of per) {
+    const p = byId.get(pid), svar = t.svar.map((id) => byId.get(id)).filter(Boolean), fk = t.forskjeller.map((id) => byId.get(id)).filter(Boolean)
+    const k = t.konklusjon ? byId.get(t.konklusjon) : null
+    const beholdt = svar.filter((s) => klasseAv(s) === 'arbeid').map((s) => s.id)
+    const låst = !!k && statusOf(k) === 'endelig'
+    const sist = Math.max(p?.capturedAt || 0, ...svar.map((s) => s.capturedAt || 0), ...fk.map((s) => s.capturedAt || 0), k?.capturedAt || 0)
+    ut.set(pid, { prompt: pid, svar: t.svar, forskjeller: t.forskjeller, konklusjon: t.konklusjon, konklusjon_status: k ? statusOf(k) : null, beholdt, åpen: !låst && !beholdt.length, runder: t.svar.length, sist })
+  }
+  return { av, per: ut }
+}
+// Claude-øktene (03-avisen §5, E): én linje per økt. Økt-id leses av nøkkelen — okt:<økt> (hook), samtale:<økt> (import), svar:<økt8>:… og prompt:<økt8>:… — og
+// normaliseres til de åtte første tegnene, så hookens og importens saker fra samme økt lander i samme linje. Filene Claude skrev (fil:…) har ingen økt i nøkkelen;
+// de knyttes til økta via samtalenavnet (convo) i samme prosjekt. Bare metadata og id-er — enkeltsakene er fanget til brukeren løfter dem inn.
+const ØKT_NØKKEL = /^(?:okt|samtale):([^:]+)$|^(?:svar|prompt):(?!spor:)([^:]+):/
+export const øktIdAv = (key) => { const m = ØKT_NØKKEL.exec(String(key || '')); const id = m ? (m[1] || m[2]) : null; return id ? id.slice(0, 8) : null }
+export function claudeØkter(atoms, { dager = 7, now = Date.now() } = {}) {
+  const fra = now - dager * DØGN
+  const økter = new Map()
+  for (const a of atoms) {
+    const id = øktIdAv(a.key); if (!id) continue
+    const ø = økter.get(id) || { økt: id, name: '', project: a.project, source: '', convo: a.convo || '', start: Infinity, sist: 0, saker: [], prompter: 0, svar: 0, filer: 0, beholdt: 0, drift: false }
+    const k = String(a.key)
+    if (k.startsWith('okt:') || k.startsWith('samtale:')) { ø.name = ø.name || a.name; ø.source = ø.source || a.source || ''; ø.convo = a.convo || ø.convo; ø.project = a.project }
+    else if (k.startsWith('prompt:')) ø.prompter++
+    else if (k.startsWith('svar:')) { ø.svar++; ø.source = ø.source || ''; }
+    if (a.fanget === false || a.beholdt === true) ø.beholdt++
+    if (a.drift === true) ø.drift = true
+    ø.start = Math.min(ø.start, a.createdAt || a.capturedAt || now); ø.sist = Math.max(ø.sist, a.capturedAt || 0)
+    ø.saker.push(a.id)
+    økter.set(id, ø)
+  }
+  // filer skrevet i økta: fil:-saker med samme samtalenavn i samme prosjekt
+  const perConvo = new Map()
+  for (const ø of økter.values()) if (ø.convo) perConvo.set(`${ø.project.toLowerCase()}\n${ø.convo.toLowerCase()}`, ø)
+  for (const a of atoms) {
+    if (!String(a.key || '').startsWith('fil:') || !a.convo) continue
+    const ø = perConvo.get(`${a.project.toLowerCase()}\n${a.convo.toLowerCase()}`); if (!ø) continue
+    ø.filer++; ø.saker.push(a.id); ø.sist = Math.max(ø.sist, a.capturedAt || 0)
+  }
+  const liste = [...økter.values()].filter((ø) => ø.sist >= fra).map((ø) => ({ ...ø, name: ø.name || ø.convo || `Økt ${ø.økt}`, source: ø.source || 'Claude', start: ø.start === Infinity ? ø.sist : ø.start })).sort((x, y) => y.sist - x.sist)
+  // én linje per dag: «I Claude i dag: 3 økter, 14 filer skrevet, 2 svar beholdt»
+  const dagAv = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+  const iDag = dagAv(now), iGår = dagAv(now - DØGN)
+  const dagerM = new Map()
+  for (const ø of liste) { const d = dagAv(ø.sist); const r = dagerM.get(d) || { dag: d, økter: [], filer: 0, beholdt: 0 }; r.økter.push(ø.økt); r.filer += ø.filer; r.beholdt += ø.beholdt; dagerM.set(d, r) }
+  const flertall = (n, en, fl) => `${n} ${n === 1 ? en : fl}`
+  const dagerUt = [...dagerM.values()].sort((x, y) => (x.dag < y.dag ? 1 : -1)).map((r) => ({
+    ...r, antall: r.økter.length,
+    tekst: `I Claude ${r.dag === iDag ? 'i dag' : r.dag === iGår ? 'i går' : r.dag.slice(8, 10) + '.' + r.dag.slice(5, 7)}: ${flertall(r.økter.length, 'økt', 'økter')}, ${flertall(r.filer, 'fil skrevet', 'filer skrevet')}, ${flertall(r.beholdt, 'svar beholdt', 'svar beholdt')}`,
+  }))
+  return { økter: liste, dager: dagerUt, antall: liste.length }
 }

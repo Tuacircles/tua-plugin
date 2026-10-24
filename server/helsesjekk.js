@@ -10,6 +10,7 @@
 // Regler (instruksen §«Regler som aldri brytes»): sletter/flytter/endrer aldri et atom · endrer aldri config · ingen nettverk ·
 // tester bare mot scratch-arkiv · feiler sjekken selv, er det rapporten. Skriver bare: rapport-atomet, minne-atomet,
 // <arkiv>/.tua/helsesjekk-varsel.txt (ved rødt) og <data>/helsesjekk-state.json (rekker og forrige resultat, maskinlokalt).
+// Runde 2d (03-avisen §2 A): rapporten og minnet er drift (`drift: true`) — Tua om seg selv, aldri i avisen.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -312,8 +313,8 @@ async function main() {
       forslagTilErik.length ? `Forslag som venter på Erik: ${forslagTilErik.map((f) => clip(f, 110)).join('; ')}.` : 'Ingen forslag venter på Erik.',
     ].join('\n\n').slice(0, 2500)
     if (DRY) { console.log(text); console.log('\n--- M ---\n' + M); console.log('\n--- minne ---\n' + minne); console.log(`\n(dry-run: ingenting skrevet${isRed ? ' — ville skrevet varsel' : ''})`); return }
-    const { atom: rapport } = upsert(atoms, { key: `helsesjekk:${today}`, name: `Helsesjekk ${today}`, content: text, project: PROJECT, convo: 'Helsesjekk', source: 'Tua', by: 'regel', kind: 'capture', tags: ['helsesjekk', 'auto'], short: clip(S, 300), medium: M, summary: 'Nattlig helsesjekk av Tua: feilmeldinger, regresjonslista R1–R8, arkivets tilstand og ryddeforslag.' })
-    upsert(atoms, { key: 'helsesjekk:minne', name: 'Helsesjekk — minne', content: minne, project: PROJECT, convo: 'Helsesjekk', source: 'Tua', by: 'regel', kind: 'capture', tags: ['helsesjekk', 'minne'], short: clip(`Minne for helsesjekken. ${S}`, 300), summary: 'Rutinens eget minne: rekker, kjente feil, hva som skal sjekkes i morgen, forslag som venter.' })
+    const { atom: rapport } = upsert(atoms, { key: `helsesjekk:${today}`, name: `Helsesjekk ${today}`, content: text, project: PROJECT, convo: 'Helsesjekk', source: 'Tua', by: 'regel', kind: 'capture', drift: true, tags: ['helsesjekk', 'auto'], short: clip(S, 300), medium: M, summary: 'Nattlig helsesjekk av Tua: feilmeldinger, regresjonslista R1–R8, arkivets tilstand og ryddeforslag.' })
+    upsert(atoms, { key: 'helsesjekk:minne', name: 'Helsesjekk — minne', content: minne, project: PROJECT, convo: 'Helsesjekk', source: 'Tua', by: 'regel', kind: 'capture', drift: true, tags: ['helsesjekk', 'minne'], short: clip(`Minne for helsesjekken. ${S}`, 300), summary: 'Rutinens eget minne: rekker, kjente feil, hva som skal sjekkes i morgen, forslag som venter.' })
     save(atoms)
     fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(STATE, JSON.stringify(state, null, 2) + '\n')
     if (isRed) fs.writeFileSync(VARSEL(), `${today}: ${S}\n`)
@@ -327,7 +328,7 @@ async function main() {
     console.error(S)
     if (DRY) return
     try {
-      if (atoms.length || FILES_ROOT) { const a = atoms.length ? atoms : load(); upsert(a, { key: `helsesjekk:${today}`, name: `Helsesjekk ${today}`, content: `# Helsesjekk ${today}\n\n**${S}**\n\n${e.stack || ''}`, project: PROJECT, convo: 'Helsesjekk', source: 'Tua', by: 'regel', kind: 'capture', tags: ['helsesjekk', 'auto'], short: clip(S, 300), summary: 'Helsesjekken feilet.' }); save(a) }
+      if (atoms.length || FILES_ROOT) { const a = atoms.length ? atoms : load(); upsert(a, { key: `helsesjekk:${today}`, name: `Helsesjekk ${today}`, content: `# Helsesjekk ${today}\n\n**${S}**\n\n${e.stack || ''}`, project: PROJECT, convo: 'Helsesjekk', source: 'Tua', by: 'regel', kind: 'capture', drift: true, tags: ['helsesjekk', 'auto'], short: clip(S, 300), summary: 'Helsesjekken feilet.' }); save(a) }
       if (FILES_ROOT) fs.writeFileSync(VARSEL(), `${today}: ${S}\n`)
     } catch {}
     process.exitCode = 1

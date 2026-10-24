@@ -22,17 +22,61 @@
 //                                         — det hook og import fanget — OG ingen har arbeidet med saken (ikke menneskeskrevet S/M, ikke gjort synlig i annet prosjekt,
 //                                         ikke satt status, ikke vært med i en sending). Skriver ingenting.
 //   node review.js --fanget               setter flagget på dem. Angres per sak med Behold i appen (POST /api/fanget/behold). Kjør dry-run først.
+//
+//   node review.js --drift --dry-run      runde 2d (03-avisen §2 A og §7 B, 24.10.2026): viser hvor mange eksisterende saker som ville fått `drift: true` etter regelen
+//                                         (store.erDriftEtterRegel): nøkkelen er sync (commit-logg, manifest, status, lenker, beslutningslogg), import:…, helsesjekk:…,
+//                                         eller en byggeøkt-sak (okt:, samtale:, svar:, prompt: — ikke prompt:spor:) i Tuas eget prosjekt (registrert repo er Tua-repoet, eller «Tua»).
+//                                         Menneskeskrevet (S/M av menneske, eller kilde som ikke er en maskin) merkes aldri; drift: false (Behold) røres aldri. Skriver ingenting.
+//   node review.js --drift                setter flagget. Begge viser tall per klasse (arbeid · spor · drift · tråd) før og etter, og per prosjekt. Angres per sak med POST /api/behold {id}.
+//   Rekkefølge for Erik: --drift --dry-run → --drift → --fanget --dry-run → --fanget (drift først, så det som er byggeøkter ikke havner i Fanget-bøtta).
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, erFangetEtterRegel, FANGET_NØKLER, deliveryCounts } from './store.js'
+import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, erFangetEtterRegel, FANGET_NØKLER, deliveryCounts, erDriftEtterRegel, erMenneskeskrevet, driftProsjekter, driftSlag, DRIFT_NØKLER, BYGGEØKT_NØKLER, tellKlasser, klasseAv, KLASSER } from './store.js'
 import { samtaleSFraTranskript } from './import.js'
 
 const args = process.argv.slice(2)
 const atoms = load()
 
+const linjeAv = (m) => Object.entries(m).sort((x, y) => y[1] - x[1]).map(([k, n]) => `${k} (${n})`).join(', ') || '—'
+const klasseLinje = (liste) => { const t = tellKlasser(liste); return KLASSER.map((k) => `${k} ${t[k]}`).join(' · ') }
+const perProsjektKlasse = (liste) => { const m = {}; for (const a of liste) { const p = m[a.project] || (m[a.project] = { arbeid: 0, spor: 0, drift: 0, tråd: 0 }); p[klasseAv(a)]++ } return Object.entries(m).sort((x, y) => (y[1].arbeid + y[1].spor + y[1].drift + y[1].tråd) - (x[1].arbeid + x[1].spor + x[1].drift + x[1].tråd)) }
+
+if (args.includes('--drift')) {
+  const dryRun = args.includes('--dry-run')
+  const prosjekter = driftProsjekter()
+  const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
+  const tall = { saker: atoms.length, altDrift: 0, kandidater: 0, nye: 0, holdt: { menneske: 0, behold: 0 } }
+  const perSlag = {}, perProsjekt = {}
+  const før = klasseLinje(atoms)
+  const vis = []
+  for (const a of atoms) {
+    if (a.drift === true) { tall.altDrift++; continue }
+    const key = String(a.key || '')
+    const kandidat = DRIFT_NØKLER.test(key) || (BYGGEØKT_NØKLER.test(key) && prosjekter.has(a.project.toLowerCase()))
+    if (!kandidat) continue
+    tall.kandidater++
+    if (!erDriftEtterRegel(a, { prosjekter })) { if (a.drift === false) tall.holdt.behold++; else if (erMenneskeskrevet(a)) tall.holdt.menneske++; continue }
+    tall.nye++; tell(perSlag, driftSlag(a)); tell(perProsjekt, a.project)
+    if (vis.length < 12) vis.push(`  ${a.project} / ${a.name}  (${driftSlag(a)} · ${a.source || '—'} · ${a.key})`)
+    if (!dryRun) a.drift = true
+  }
+  console.log(`${tall.saker} saker · ${tall.altDrift} alt merket drift · ${tall.kandidater} med drift-nøkkel · ${tall.nye} ${dryRun ? 'ville fått' : 'får'} drift: true${dryRun ? ' · DRY-RUN, ingenting skrevet' : ''}`)
+  console.log(`Holdt utenfor: ${tall.holdt.menneske} menneskeskrevet · ${tall.holdt.behold} brukeren sa «dette er arbeid» (drift: false)`)
+  console.log(`Tuas egne prosjekter (byggeøkter er drift): ${[...prosjekter].join(', ')}`)
+  console.log(`Per slag: ${linjeAv(perSlag)}\nPer prosjekt: ${linjeAv(perProsjekt)}`)
+  const etter = dryRun ? klasseLinje(atoms.map((a) => (a.drift !== true && erDriftEtterRegel(a, { prosjekter }) ? { ...a, drift: true } : a))) : klasseLinje(atoms)
+  console.log(`Klasser før: ${før}\nKlasser etter: ${etter}\n`)
+  for (const v of vis) console.log(v)
+  if (tall.nye > vis.length) console.log(`  … og ${tall.nye - vis.length} til`)
+  if (!dryRun && tall.nye) { const written = save(atoms); console.log(`\n${tall.nye} saker merket drift · ${written} filer skrevet. Angre per sak: POST /api/behold {id} (saken blir arbeid, og regelen rører den aldri igjen).`) }
+  else if (!dryRun) console.log('\nIngenting å skrive.')
+  process.exit(0)
+}
+
 if (args.includes('--fanget')) {
   const dryRun = args.includes('--dry-run')
+  const før = klasseLinje(atoms)
   const sendinger = deliveryCounts()
   const slagAv = (a) => { const k = String(a.key || ''); return k.startsWith('okt:') ? 'økt' : k.startsWith('samtale:') ? 'samtale' : k.startsWith('prompt:') ? 'prompt' : k.startsWith('svar:') ? 'svar' : a.kind || 'capture' }
   const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
@@ -41,6 +85,7 @@ if (args.includes('--fanget')) {
   const vis = []
   for (const a of atoms) {
     if (a.fanget) { tall.altFanget++; continue }
+    if (a.drift === true) continue                                           // runde 2d: drift er alt utenfor avisen — byggeøkter hører ikke i Fanget-bøtta
     if (!a.key || !FANGET_NØKLER.test(a.key)) continue
     tall.kandidater++
     const utlevert = sendinger.get(a.id) || 0
@@ -59,6 +104,9 @@ if (args.includes('--fanget')) {
   console.log(`${tall.saker} saker · ${tall.altFanget} alt merket fanget · ${tall.kandidater} med fangst-nøkkel · ${tall.nye} ${dryRun ? 'ville fått' : 'får'} fanget: true${dryRun ? ' · DRY-RUN, ingenting skrevet' : ''}`)
   console.log(`Holdt utenfor fordi noen har arbeidet med saken: ${tall.holdt.menneske} menneskeskrevet S/M · ${tall.holdt.synlig} synlig i annet prosjekt · ${tall.holdt.status} status satt · ${tall.holdt.utlevert} vært med i en sending`)
   console.log(`Per slag: ${linje(perSlag)}\nPer kilde: ${linje(perKilde)}\nPer prosjekt: ${linje(perProsjekt)}\n`)
+  const etter = dryRun ? klasseLinje(atoms.map((a) => (!a.fanget && a.key && FANGET_NØKLER.test(a.key) && erFangetEtterRegel(a, { utlevert: sendinger.get(a.id) || 0 }) ? { ...a, fanget: true } : a))) : klasseLinje(atoms)
+  console.log(`Klasser før: ${før}\nKlasser etter: ${etter}`)   // runde 2d: tall per klasse (arbeid · spor · drift · tråd)
+  console.log(`Per prosjekt etter: ${perProsjektKlasse(atoms).slice(0, 12).map(([p, t]) => `${p} (arbeid ${t.arbeid}, spor ${t.spor}, drift ${t.drift}, tråd ${t.tråd})`).join(' · ')}\n`)
   for (const v of vis) console.log(v)
   if (tall.nye > vis.length) console.log(`  … og ${tall.nye - vis.length} til`)
   if (!dryRun && tall.nye) { const written = save(atoms); console.log(`\n${tall.nye} saker merket fanget · ${written} filer skrevet. Angre per sak: Behold i appen (POST /api/fanget/behold {id}).`) }

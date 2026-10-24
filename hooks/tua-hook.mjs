@@ -175,6 +175,7 @@ try {
       key: `okt:${sid}`, name: `Økt: ${convo}`, content, project, convo, source: 'Claude', by: 'regel', tags: ['økt', 'auto'], links: repo,
       short: samtaleS(tr),   // friksjon 9 (24.10.2026): S = siste vending («Sist: … → …», antall og periode), samme regel som importen — ikke første prompt
       summary: `Økt-sammendrag laget automatisk ved ${input.hook_event_name}.`, fanget: true,
+      ...(fs.existsSync(path.join(repoRootOf(cwd), 'tua-plugin', 'server', 'store.js')) ? { drift: true } : {}),   // runde 2d (03-avisen §5 E): en økt i Tua-repoet er en byggeøkt — drift (Tua om seg selv), ikke spor
     })
     if (status !== 'uendret') save(atoms)
     log({ status, id: atom.id, project, turns: tr.turns })

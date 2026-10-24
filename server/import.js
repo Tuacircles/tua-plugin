@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url'
 import { unzipToTemp } from './unzip.js'   // 19.10.2026: utpakking uten shell, skilt ut (validatoren så fetch + spawn i samme fil)
 import {
   load, save, upsert, FILES_ROOT, INBOX_DIR, ensureArchive, registerProject, projectOf as registeredProject, claudeProjectHref,
-  finishOnboarding, noteImport, importState, S_MAX, SHORT_L, filesMode, erTuaSak, mergeGa, sha8, hashOf,
+  finishOnboarding, noteImport, importState, S_MAX, SHORT_L, filesMode, erTuaSak, mergeGa, sha8, hashOf, erTuaRepo,
 } from './store.js'
 export { sha8, hashOf }
 import { collectDesktop, countDesktopConversations, importedDesktop, noteImportedDesktop, cacheAvailable, CACHE_DIR, desktopFolderGrants, desktopStaleness } from './desktop.js'   // M17 · 20.10: samtalelageret + stillhetsvakt
@@ -305,10 +305,11 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
       if (isTuaCommand(s.prompts[0])) { stats.tuaprat = (stats.tuaprat || 0) + 1; continue }   // økta er en test av Tua (/tua_card …), ikke arbeid
       const repo = over.repo !== undefined ? over.repo : repoRootOf(s.cwd)
       const links = repo ? [{ kind: 'repo', href: repo, label: `Repo — ${proj}` }] : []
+      const drift = erTuaRepo(repo)                                            // runde 2d (03-avisen §5 E): en økt i Tua-repoet er en byggeøkt — drift, ikke spor
       const header = `# ${s.convo}\n\n_${srcLabel} · ${s.turns} oppgaver · ${iso(s.first)}${s.last && iso(s.last) !== iso(s.first) ? ` – ${iso(s.last)}` : ''} · ${proj}${repo ? ` · ${repo}` : ''} · øktfil ${path.basename(file)}_\n\n`
       const { atom, status } = put({
         key: `samtale:${s.id}`, kind: 'samtale', name: s.convo, content: header + s.transcript, project: proj, convo: s.convo, source: srcLabel, by: 'regel',
-        tags: ['samtale', source], links, short: samtaleS(s), summary: `${srcLabel}-økt importert fra ${path.basename(file)} (${s.turns} oppgaver).`, fanget: true,   // S = siste vending (friksjon 9) · fanget (runde 2c): alt fra en samtalelogg er fanget til det løftes inn; filer Claude skrev (fil:) er dokumenter, med vilje
+        tags: ['samtale', source], links, short: samtaleS(s), summary: `${srcLabel}-økt importert fra ${path.basename(file)} (${s.turns} oppgaver).`, fanget: true, ...(drift ? { drift } : {}),   // S = siste vending (friksjon 9) · fanget (runde 2c): alt fra en samtalelogg er fanget til det løftes inn; filer Claude skrev (fil:) er dokumenter, med vilje
       }, s.last)
       count(status); perProject[proj] = (perProject[proj] || 0) + 1
       const derived = [{ id: atom.id, version: atom.version || 1, level: 'L' }]
@@ -319,7 +320,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
         stats.prompterAlle++
         const r = put({
           key: promptKey(s.id, p.prompt), kind: 'prompt', name: promptTitle(p.prompt), content: promptL(p.prompt), project: proj, convo: s.convo, source: srcLabel, by: 'regel',
-          tags: ['prompt', source], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i ${srcLabel}-økta «${s.convo}».`, fanget: true,
+          tags: ['prompt', source], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i ${srcLabel}-økta «${s.convo}».`, fanget: true, ...(drift ? { drift } : {}),
         }, p.at || s.last)
         if (r.status !== 'uendret') stats.prompter++
         for (const a of p.answers) promptFor.set(a, r.atom)
@@ -329,7 +330,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
         const pa = promptFor.get(a) || null
         const r = put({
           key: `svar:${s.id.slice(0, 8)}:${sha8(a)}`, kind: 'capture', name: titleOf(a, `Svar i ${s.convo}`), content: a, project: proj, convo: s.convo, source: 'Claude', by: 'regel',
-          tags: ['svar', 'auto'], links, derivedFrom: [...(pa ? [{ id: pa.id, version: pa.version || 1, level: 'L' }] : []), ...derived], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i Code-økta «${s.convo}».`, fanget: true,
+          tags: ['svar', 'auto'], links, derivedFrom: [...(pa ? [{ id: pa.id, version: pa.version || 1, level: 'L' }] : []), ...derived], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i Code-økta «${s.convo}».`, fanget: true, ...(drift ? { drift } : {}),
         }, s.last)
         if (r.status !== 'uendret') stats.svar++
         if (pa) pa.ga = mergeGa(pa.ga, [{ id: r.atom.id, version: r.atom.version || 1 }])
@@ -368,7 +369,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
   ].filter((l) => l !== null).join('\n')
   if (!dryRun) {
     upsert(atoms, {
-      key: `import:${source}-økter`, name: title, content: report, project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'],
+      key: `import:${source}-økter`, name: title, content: report, project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], drift: true,
       short: clip(`${srcLabel}-økter: ${stats.nye} nye og ${stats.oppdatert} oppdaterte økter, ${stats.svar} svar og ${stats.filer} dokumenter som egne atomer. Prosjekter: ${projLine}.`, S_MAX),
       summary: `Rapport fra import av ${srcLabel}-økter ${new Date().toLocaleDateString('no-NO')}.`,
     })
@@ -603,7 +604,7 @@ export function importExport(src, { dryRun = false, project = null, minChars = D
   if (fs.statSync(src).isFile() && isManifest(src)) {
     const st = manifestStatus() || { manifest: name, files: [], missing: [], present: [] }
     const report = manifestReport(st)
-    if (!dryRun) { const atoms = load(); upsert(atoms, { key: 'import:eksport-manifest', name: 'Claude-eksport: mottak', content: report, project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], short: clip(`Claude-eksport: ${st.present.length} av ${st.files.length} filer mottatt${st.missing.length ? `; mangler ${st.missing.map((f) => f.filename).join(', ')}` : ''}.`, S_MAX) }); save(atoms) }
+    if (!dryRun) { const atoms = load(); upsert(atoms, { key: 'import:eksport-manifest', name: 'Claude-eksport: mottak', content: report, project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], drift: true, short: clip(`Claude-eksport: ${st.present.length} av ${st.files.length} filer mottatt${st.missing.length ? `; mangler ${st.missing.map((f) => f.filename).join(', ')}` : ''}.`, S_MAX) }); save(atoms) }
     log(`${name}: manifest — ${st.present.length} av ${st.files.length} filer mottatt`)
     return { report, stats: { manifest: true, present: st.present.length, total: st.files.length }, kind: 'manifest', count: 0 }
   }
@@ -630,7 +631,7 @@ export function importExport(src, { dryRun = false, project = null, minChars = D
     reportKey: `import:${name.replace(/ \(.*\)(?=\.zip$)/, '')}`, reportName: `Import: ${name}`, reportConvo: 'Innboks',
     afterSave: (atoms) => {
       const st = manifestStatus()                                      // oppdater mottaksstatusen når en kategori-zip er lest
-      if (st) upsert(atoms, { key: 'import:eksport-manifest', name: 'Claude-eksport: mottak', content: manifestReport(st), project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], short: clip(`Claude-eksport: ${st.present.length} av ${st.files.length} filer mottatt${st.missing.length ? `; mangler ${st.missing.map((f) => f.filename).join(', ')}` : ''}.`, S_MAX) })
+      if (st) upsert(atoms, { key: 'import:eksport-manifest', name: 'Claude-eksport: mottak', content: manifestReport(st), project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], drift: true, short: clip(`Claude-eksport: ${st.present.length} av ${st.files.length} filer mottatt${st.missing.length ? `; mangler ${st.missing.map((f) => f.filename).join(', ')}` : ''}.`, S_MAX) })
       noteImport('eksport', { fil: name, kind, nye: stats.nye, oppdatert: stats.oppdatert })
     },
   })
@@ -780,7 +781,7 @@ export function importParsed(data, {
     const changed = stats.nye + stats.oppdatert + stats.flyttet + stats.dokumenter + stats.artifacts + stats.vedlegg + stats.minner + stats.prompter + stats.svar
     if (afterSave) afterSave(atoms, stats)
     upsert(atoms, {
-      key: reportKey || `import:${name}`, name: reportName || `Import: ${name}`, content: report, project: 'Tua', convo: reportConvo, source: 'Tua', by: 'regel', tags: ['import'],
+      key: reportKey || `import:${name}`, name: reportName || `Import: ${name}`, content: report, project: 'Tua', convo: reportConvo, source: 'Tua', by: 'regel', tags: ['import'], drift: true,
       short: clip(`${label}${name ? ` «${name}»` : ''}: ${stats.nye} nye og ${stats.oppdatert} oppdaterte samtaler, ${stats.korte} hoppet over (under ${minChars} tegn)${stats.dokumenter ? `, ${stats.dokumenter} dokumenter` : ''}${stats.artifacts ? `, ${stats.artifacts} artifacts/filer` : ''}${stats.minner ? `, ${stats.minner} Claude-minner` : ''}. Prosjekter: ${projLine}.`, S_MAX),
       summary: `Rapport fra import (${label}) ${new Date().toLocaleDateString('no-NO')}.`,
     })

@@ -11,6 +11,8 @@
 //
 // M9: frontmatter `lenker` = atomets egne pekere [{kind, href, label}],
 // kind ∈ file · url · repo · claude-project · claude-chat.
+// Runde 2d (arb. 32 del 3, 03-avisen §2–§4, 24.10.2026): `fanget` (2c), `drift` og `beholdt` er de tre flaggene klassen regnes av
+// (store.klasseAv): arbeid · spor (fanget eller samtale) · drift (Tua om seg selv) · tråd (prompt/svar/konklusjon som ikke er beholdt eller låst).
 // M10: `kind: "leveranse"` = bygget av andre atomer. `bygget_av` = [{id, version, level}]
 // (hvilken versjon av hvert kildeatom, lest på hvilket nivå), `gjengivelser` = [{format, path, sha256, at}]
 // (html/pdf/artifact rendret fra denne markdown-kilden — fila er en gjengivelse, atomet er sannheten).
@@ -56,6 +58,8 @@ export function serialize(atom) {
     ...(atom.kind ? { kind: atom.kind } : {}),
     ...(atom.status ? { status: atom.status } : {}),           // M23 (skive 4): utkast | endelig — bare når satt; standard regnes av lageret (statusOf)
     ...(atom.fanget === true || atom.fanget === false ? { fanget: atom.fanget } : {}),   // runde 2c (arb. 32 §5 sp. 1, 24.10.2026): true = fanget automatisk (hook/import), ikke løftet inn — utenfor avisen og søket; false = løftet inn med vilje (Behold) — regelen rører den aldri igjen
+    ...(atom.drift === true || atom.drift === false ? { drift: atom.drift } : {}),      // runde 2d (03-avisen §2, A): true = Tua om seg selv (sync, importrapport, helsesjekk, byggeøkt) — aldri i avisen, i søket bare på forespørsel; false = brukeren sa «dette er arbeid» (Behold) — regelen rører den aldri igjen
+    ...(atom.beholdt === true ? { beholdt: true } : {}),                                  // runde 2d (03-avisen §4, D): brukeren trykket Behold på et svar (eller løftet saken inn) — et beholdt svar er arbeid, ikke tråd
     tagger: atom.tags || [],
     synlig_i: atom.refs || [],
     ...(atom.links?.length ? { lenker: atom.links } : {}),
@@ -137,6 +141,9 @@ export function parse(text, { fallbackId } = {}) {
   if (fm.status === 'utkast' || fm.status === 'endelig') atom.status = fm.status   // M23: status på saken (V21: arbeidsløp som status på sak)
   if (fm.fanget === true || fm.fanget === 'true') atom.fanget = true                 // runde 2c: Fanget-bøtta — true: fanget, ikke løftet inn
   else if (fm.fanget === false || fm.fanget === 'false') atom.fanget = false          // false: løftet inn med vilje (Behold); mangler: lagret med vilje fra starten
+  if (fm.drift === true || fm.drift === 'true') atom.drift = true                     // runde 2d: drift — Tua om seg selv
+  else if (fm.drift === false || fm.drift === 'false') atom.drift = false
+  if (fm.beholdt === true || fm.beholdt === 'true') atom.beholdt = true               // runde 2d: beholdt av brukeren
   if (fm.nivaa && typeof fm.nivaa === 'object') atom.share = fm.nivaa
   if (Array.isArray(fm.lenker) && fm.lenker.length) atom.links = fm.lenker.filter((l) => l && l.href)
   if (Array.isArray(fm.bygget_av) && fm.bygget_av.length) atom.derivedFrom = fm.bygget_av.filter((d) => d && d.id)
