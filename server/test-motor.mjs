@@ -25,7 +25,7 @@ fs.rmSync(ROOT, { recursive: true, force: true }); fs.rmSync(DATA, { recursive: 
 fs.mkdirSync(ROOT, { recursive: true }); fs.mkdirSync(DATA, { recursive: true })
 
 const { load, save, upsert, deliveries, fileOf } = await import('./store.js')
-const { skjerm, lagSkjermer, avskjerm, gyldigFødselsnummer, kjentePersoner, minimer, sjekkTillatt, spor, mottakere, Blokkert, MotorFeil, anslåTokens } = await import('./motor.js')
+const { skjerm, lagSkjermer, avskjerm, gyldigFødselsnummer, kjentePersoner, minimer, sjekkTillatt, spor, mottakere, Blokkert, MotorFeil, anslåTokens, standardNivå, standardNivåer, forhåndsvis } = await import('./motor.js')
 
 let feil = 0
 const ok = (navn, cond, info = '') => { console.log(`${cond ? '✓' : '✗'} ${navn}${info ? ` — ${info}` : ''}`); if (!cond) feil++ }
@@ -129,6 +129,32 @@ ok('mottakere: test (trust 3), claude (ikke satt), ollama', TEST && TEST.trust.s
   ok('spor: blokkeres FØR noe sendes eller lagres', e instanceof Blokkert && !load().some((a) => a.kind === 'prompt'), e?.message)
   e = null; try { await spor({ melding: 'Hei', saker: [], mottaker: 'claude' }) } catch (x) { e = x }
   ok('spor: Claude uten nøkkel er ikke klar → MotorFeil, ingen sending', e instanceof MotorFeil && /ikke klar/.test(e.message), e?.message)
+}
+
+// ── 3b) friksjon 15: standardnivået en sak får som kilde — det høyeste mottakeren får ─────────────────────────────────
+{
+  const all = load()
+  const lokal = { id: 'ollama', label: 'Ollama', local: true, trust: { score: 5 } }, claude = { id: 'claude', label: 'Claude', trust: { score: 4 } }, lav = { id: 'x', trust: { score: 2 } }
+  ok('standardNivå: lokal modell (Trust 5) → L', standardNivå(lokal, all.find((a) => a.id === a1.id)) === 'L')
+  ok('standardNivå: Claude (Trust 4) → M, ikke L (V15: S+M som standard, L bare på forespørsel)', standardNivå(claude, all.find((a) => a.id === a1.id)) === 'M')
+  ok('standardNivå: test (Trust 3) → M; Trust 2 → S; uten mottaker → S', standardNivå(TEST, all.find((a) => a.id === a1.id)) === 'M' && standardNivå(lav) === 'S' && standardNivå(null) === 'S')
+  ok('standardNivå: Vault-merket sak → S uansett mottaker (også lokal)', standardNivå(lokal, all.find((a) => a.id === a2.id)) === 'S' && standardNivå(claude, all.find((a) => a.id === a2.id)) === 'S' && standardNivå(lokal, { vault: true }) === 'S')
+  ok('standardNivå: klampes til sak.max (V11)', standardNivå(lokal, { vault: false, max: 'M' }) === 'M' && standardNivå(lokal, { vault: false, max: 'S' }) === 'S')
+  const n = standardNivåer([lokal, claude], all.find((a) => a.id === a1.id))
+  ok('standardNivåer: per mottaker (L/M) og laveste felles M', n.per.ollama === 'L' && n.per.claude === 'M' && n.felles === 'M', JSON.stringify(n))
+  ok('mottakere(): nivå og nivåVault per rad (ollama L/S, claude M/S, test M/S)', (await mottakere()).every((m) => ['S', 'M', 'L'].includes(m.nivå) && m.nivåVault === 'S') && (await mottakere()).find((m) => m.id === 'ollama').nivå === 'L' && (await mottakere()).find((m) => m.id === 'claude').nivå === 'M' && TEST.nivå === 'M', JSON.stringify((await mottakere()).map((m) => [m.id, m.nivå, m.nivåVault])))
+  // forhåndsvis: det samme som spor() ville sendt — uten å sende, lagre eller logge
+  const utlevertFør = fs.existsSync(path.join(ROOT, '.tua', 'utlevering.jsonl')) ? fs.readFileSync(path.join(ROOT, '.tua', 'utlevering.jsonl'), 'utf8') : ''
+  const antallFør = load().length
+  const f = forhåndsvis({ melding: `Hva foreslo ${PERSON}?`, saker: [{ id: a1.id, nivå: 'M' }], mottaker: 'test', prosjekt: 'Testprosjekt' })
+  ok('forhåndsvis: tekst skjermet (plassholdere, aldri navnet/e-posten), saker med nivå, tokens, ord, ingen blokkering', !f.blokkert && f.saker[0].level === 'M' && f.saker[0].id === a1.id && !f.tekst.includes(PERSON) && !f.tekst.includes(EPOST) && /\[Person A\]/.test(f.tekst) && f.treff > 0 && typeof f.tokens.ca === 'number' && f.tokens.per.test === f.tokens.ca && f.ord > 10 && f.mottaker === 'test', JSON.stringify({ treff: f.treff, tokens: f.tokens, saker: f.saker }))
+  ok('forhåndsvis: ingenting sendt, lagret eller logget (ingen prompt-sak, Utlevert uendret)', load().length === antallFør && (fs.existsSync(path.join(ROOT, '.tua', 'utlevering.jsonl')) ? fs.readFileSync(path.join(ROOT, '.tua', 'utlevering.jsonl'), 'utf8') : '') === utlevertFør)
+  const b = forhåndsvis({ melding: 'Hei', saker: [{ id: a3.id, nivå: 'L' }], mottaker: 'test' })
+  ok('forhåndsvis: L til Trust 3 → blokkert {feil, detaljer, mottaker} i svaret (ikke kastet), teksten likevel med', b.blokkert && /krever minst 4/.test(b.blokkert.feil) && b.blokkert.mottaker === 'test' && b.blokkert.detaljer.length === 1 && b.tekst.includes('Kort sak'), b.blokkert?.feil)
+  const b2 = forhåndsvis({ melding: 'Hei', saker: [{ id: a2.id, nivå: 'M' }], mottakere: ['test', 'ollama'] })
+  ok('forhåndsvis med to mottakere: Vault på M stoppes hos test, meldingen sier at ingenting sendes til noen', b2.blokkert?.mottaker === 'test' && /ingenting sendes til noen/.test(b2.blokkert.feil) && b2.mottakere.length === 2 && b2.tokens.per.ollama != null)
+  let e = null; try { forhåndsvis({ melding: 'Hei', saker: [], mottaker: 'finnes-ikke' }) } catch (x) { e = x }
+  ok('forhåndsvis: ukjent mottaker → MotorFeil; uten mottaker → MotorFeil', e instanceof MotorFeil && (() => { try { forhåndsvis({ melding: 'x' }); return false } catch (y) { return y instanceof MotorFeil } })())
 }
 
 // ── 4) hele løpet med test-mottakeren ──────────────────────────────────────

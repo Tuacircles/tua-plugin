@@ -1012,6 +1012,22 @@ export function erDriftEtterRegel(a, { prosjekter = driftProsjekter() } = {}) {
 }
 // Hvorfor en sak er drift — til dry-run-tallene: sync · import · helsesjekk · byggeøkt
 export const driftSlag = (a) => { const k = String(a?.key || ''); return k.startsWith('import:') ? 'import' : k.startsWith('helsesjekk:') ? 'helsesjekk' : DRIFT_NØKLER.test(k) ? 'sync' : BYGGEØKT_NØKLER.test(k) ? 'byggeøkt' : 'annet' }
+// Friksjon 15: drift-merkingen som én funksjon — review.js --drift og POST /api/arkiv/merk (Innstillinger › Arkivsted) bruker den samme, som fangetKandidater.
+// Teller, fordeler per slag/prosjekt og peker på sakene som ville fått `drift: true`; skriver ingenting selv (kalleren setter a.drift = true og save()).
+export function driftKandidater(atoms, { prosjekter = driftProsjekter() } = {}) {
+  const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
+  const tall = { saker: atoms.length, altDrift: 0, kandidater: 0, nye: 0, holdt: { menneske: 0, behold: 0 } }
+  const perSlag = {}, perProsjekt = {}, nye = []
+  for (const a of atoms) {
+    if (a.drift === true) { tall.altDrift++; continue }
+    const key = String(a.key || '')
+    if (!(DRIFT_NØKLER.test(key) || (BYGGEØKT_NØKLER.test(key) && erDriftProsjekt(a.project, prosjekter)))) continue
+    tall.kandidater++
+    if (!erDriftEtterRegel(a, { prosjekter })) { if (a.drift === false) tall.holdt.behold++; else if (erMenneskeskrevet(a)) tall.holdt.menneske++; continue }
+    tall.nye++; tell(perSlag, driftSlag(a)); tell(perProsjekt, a.project); nye.push(a)
+  }
+  return { tall, perSlag, perProsjekt, nye, prosjekter: [...prosjekter] }
+}
 
 // Bruk-loggen (03-avisen §3 «rørt av Erik»): lette hendelser appen melder — lest M, lest L, tatt med til Spør, åpnet, redigert. <arkiv>/.tua/bruk.jsonl,
 // én linje per hendelse {at, id, hendelse}, bare metadata. Brukes bare til vekt og sist_rørt; aldri innhold, aldri sendt noe sted.

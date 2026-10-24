@@ -20,6 +20,8 @@ import { OLLAMA_VERT, OLLAMA_URL } from './ollama.mjs';
 //                            fast liste over norske fornavn som oppdager «Fornavn Etternavn» i teksten som sendes. Lista vokser
 //                            av bruk (.tua/kjente-personer.json) og har stoppliste for firma- og produktnavn.
 //   minimer(saker, nivå)     konteksten av valgte saker på S/M/L via lageret (levelOf/clampLevel/maxLevel). L bare når valgt.
+//   standardNivå(m, sak)     friksjon 15: nivået en sak får som kilde når ingen har valgt — det høyeste mottakeren får (L lokal, M ekstern, S Vault).
+//   forhåndsvis(…)           friksjon 15: det samme som spor() ser FØR noe sendes (minimer → fail closed → skjerm → tokens) — ingenting sendes eller logges.
 //   send(mottaker, …)        mottaker-grensesnittet {id, label, endpoint, trust, send()}. Første mottaker er Claude med egen
 //                            nøkkel fra Keychain (lest per kall, glemt etter kallet), så Ollama når den finnes lokalt, og «test»
 //                            som ekkoer uten å sende noe. FAIL CLOSED: nivå over det Trust Score eller Vault-taggen tillater
@@ -386,7 +388,10 @@ function lagMottakere() {
     { id: 'test', label: 'Test (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test', 'Tua selv: ekko-mottakeren i motor.js. Score 3 er satt lavt med vilje så fail closed kan prøves (L blokkeres).'), test: true,
       status: async () => ({ klar: true }), send: sendTest },
   ];
-  if (process.env.TUA_TESTMOTTAKERE === '2') liste.push({ id: 'test2', label: 'Test 2 (ekko B — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test 2', 'Tua selv: andre ekko-mottaker i motor.js (TUA_TESTMOTTAKERE=2) — svarer annerledes enn Test så Forskjeller kan testes uten modell.'), test: true, status: async () => ({ klar: true }), send: sendTest2 });
+  const tm = String(process.env.TUA_TESTMOTTAKERE || '');
+  if (tm === '2' || tm === '3') liste.push({ id: 'test2', label: 'Test 2 (ekko B — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test 2', 'Tua selv: andre ekko-mottaker i motor.js (TUA_TESTMOTTAKERE=2) — svarer annerledes enn Test så Forskjeller kan testes uten modell.'), test: true, status: async () => ({ klar: true }), send: sendTest2 });
+  // friksjon 15 (TUA_TESTMOTTAKERE=3): en LOKAL ekko-mottaker med Trust 5 — så testene kan vise at standardnivået blir L og at L faktisk sendes, uten Ollama.
+  if (tm === '3') liste.push({ id: 'testlokal', label: 'Test lokal (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: { ...TEST_TRUST('Test lokal', 'Tua selv: lokal ekko-mottaker i motor.js (TUA_TESTMOTTAKERE=3) — Trust 5 som Ollama, så standardnivå L kan testes uten modell.'), score: 5 }, local: true, test: true, status: async () => ({ klar: true }), send: sendTest });
   return liste
 }
 

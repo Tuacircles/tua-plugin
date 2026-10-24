@@ -32,7 +32,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, fangetKandidater, slagAvNøkkel, erDriftEtterRegel, erMenneskeskrevet, driftProsjekter, driftSlag, DRIFT_NØKLER, BYGGEØKT_NØKLER, tellKlasser, klasseAv, KLASSER } from './store.js'
+import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, fangetKandidater, slagAvNøkkel, driftKandidater, erDriftEtterRegel, driftProsjekter, driftSlag, tellKlasser, klasseAv, KLASSER } from './store.js'
 import { samtaleSFraTranskript } from './import.js'
 
 const args = process.argv.slice(2)
@@ -45,22 +45,10 @@ const perProsjektKlasse = (liste) => { const m = {}; for (const a of liste) { co
 if (args.includes('--drift')) {
   const dryRun = args.includes('--dry-run')
   const prosjekter = driftProsjekter()
-  const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
-  const tall = { saker: atoms.length, altDrift: 0, kandidater: 0, nye: 0, holdt: { menneske: 0, behold: 0 } }
-  const perSlag = {}, perProsjekt = {}
   const før = klasseLinje(atoms)
-  const vis = []
-  for (const a of atoms) {
-    if (a.drift === true) { tall.altDrift++; continue }
-    const key = String(a.key || '')
-    const kandidat = DRIFT_NØKLER.test(key) || (BYGGEØKT_NØKLER.test(key) && prosjekter.has(a.project.toLowerCase()))
-    if (!kandidat) continue
-    tall.kandidater++
-    if (!erDriftEtterRegel(a, { prosjekter })) { if (a.drift === false) tall.holdt.behold++; else if (erMenneskeskrevet(a)) tall.holdt.menneske++; continue }
-    tall.nye++; tell(perSlag, driftSlag(a)); tell(perProsjekt, a.project)
-    if (vis.length < 12) vis.push(`  ${a.project} / ${a.name}  (${driftSlag(a)} · ${a.source || '—'} · ${a.key})`)
-    if (!dryRun) a.drift = true
-  }
+  const { tall, perSlag, perProsjekt, nye } = driftKandidater(atoms, { prosjekter })       // friksjon 15: samme regel som POST /api/arkiv/merk (Innstillinger › Arkivsted)
+  const vis = nye.slice(0, 12).map((a) => `  ${a.project} / ${a.name}  (${driftSlag(a)} · ${a.source || '—'} · ${a.key})`)
+  if (!dryRun) for (const a of nye) a.drift = true
   console.log(`${tall.saker} saker · ${tall.altDrift} alt merket drift · ${tall.kandidater} med drift-nøkkel · ${tall.nye} ${dryRun ? 'ville fått' : 'får'} drift: true${dryRun ? ' · DRY-RUN, ingenting skrevet' : ''}`)
   console.log(`Holdt utenfor: ${tall.holdt.menneske} menneskeskrevet · ${tall.holdt.behold} brukeren sa «dette er arbeid» (drift: false)`)
   console.log(`Tuas egne prosjekter (byggeøkter er drift): ${[...prosjekter].join(', ')}`)
