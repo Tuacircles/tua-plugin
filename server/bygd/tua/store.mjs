@@ -494,7 +494,7 @@ function setShare(a, project, level) {
 // M19 (skive 8, V16): `ga` = [{id, version}] — svarene en prompt-sak ga. Normaliseres som derivedFrom; upsert slår lista SAMMEN (union på id), aldri erstatter.
 const normalizeGa = (list) => (Array.isArray(list) ? list : []).filter((g) => g && g.id).map((g) => ({ id: String(g.id), version: Number(g.version) || 1 }));
 const mergeGa = (gammel = [], ny = []) => { const ut = [...normalizeGa(gammel)]; for (const g of normalizeGa(ny)) { const i = ut.findIndex((x) => x.id === g.id); if (i < 0) ut.push(g); else ut[i] = g; } return ut };
-function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga }) {
+function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget }) {
   const body = String(content || '').replace(/\r\n?/g, '\n').trim();   // M17: fila leses tilbake uten \r (files.js) — lagre likt, ellers blir hver import en «ny versjon»
   const now = Date.now();
   const a = {
@@ -523,6 +523,7 @@ function makeAtom({ content, name, source, project, convo, summary, tags, short,
   const df = normalizeDerived(derivedFrom); if (df.length) { a.derivedFrom = df; if (!kind) a.kind = 'leveranse'; }
   const rd = normalizeRenders(renders); if (rd.length) a.renders = rd;
   const g = normalizeGa(ga); if (g.length) a.ga = g;
+  if (fanget === true || fanget === false) a.fanget = fanget;            // runde 2c: true = fanget automatisk, false = løftet inn — se Fanget-bøtta nederst
   return a
 }
 
@@ -568,17 +569,21 @@ function upsert(atoms, { key, ...data }) {
   const renders = fresh.renders?.length ? fresh.renders : old.renders;
   const ga = fresh.ga?.length || old.ga?.length ? mergeGa(old.ga, fresh.ga) : undefined;   // M19: `ga` vokser av bruk — union, aldri erstatning
   const kind = data.kind || (derivedFrom?.length ? 'leveranse' : old.kind);
+  // runde 2c: en sak som finnes beholder sin fanget-tilstand. Er den løftet inn (eller lagret med vilje), setter ingen ny import flagget igjen;
+  // er den fanget, tar bare en eksplisitt `fanget: false` (Behold) det bort. Brukerens valg vinner over regelen — alltid.
+  const fanget = data.fanget === false ? false : old.fanget;
   const attach = (a) => {
     if (levels) a.levels = levels; else delete a.levels;
     if (links) a.links = links; else delete a.links;
     if (derivedFrom) a.derivedFrom = derivedFrom; else delete a.derivedFrom;
     if (renders) a.renders = renders; else delete a.renders;
     if (ga) a.ga = ga; else delete a.ga;
+    if (fanget === true || fanget === false) a.fanget = fanget; else delete a.fanget;
     a.kind = kind;
     return a
   };
   if (bodySame) {
-    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind) return { atom: old, status: 'uendret' }
+    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old });
     return { atom: atoms[i], status: 'nivåer' }
   }
@@ -654,14 +659,19 @@ function score(a, tokens, max = 'L') {
 // søkes og vises aldri mer enn det prosjektet har lov til å se. Rangert (M12), paginert
 // med offset/limit; `total` ligger på resultatet.
 // `kind` (M19, skive 8): bare saker av én type — prompt-samlingen i appen og forslagene i Spør søker med kind=prompt.
-function search(atoms, query, { project, context, kind, limit = 8, offset = 0 } = {}) {
+// `fanget` (runde 2c, 24.10.2026): standard `uten` — fangede saker (hook/import, ikke løftet inn) holdes utenfor; `med` tar dem med; `bare` gir bare dem.
+// Resultatet bærer `fanget` = hvor mange fangede saker som traff søket men ble holdt utenfor, så døra kan si det («N fangede saker holdt utenfor»).
+function search(atoms, query, { project, context, kind, fanget = 'uten', limit = 8, offset = 0 } = {}) {
   const tokens = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
-  const all = atoms
+  const treff = atoms
     .filter((a) => !project || a.project.toLowerCase() === project.toLowerCase())
     .filter((a) => !kind || (a.kind || 'capture') === kind)
     .filter((a) => visibleIn(a, context))
     .map((a) => ({ a, max: maxLevel(a, context) }))
-    .filter(({ a, max }) => tokens.every((t) => hay(a, max).includes(t)))
+    .filter(({ a, max }) => tokens.every((t) => hay(a, max).includes(t)));
+  const utenfor = fanget === 'med' ? 0 : treff.filter(({ a }) => (fanget === 'bare' ? !a.fanget : !!a.fanget)).length;
+  const all = treff
+    .filter(({ a }) => fanget === 'med' || (fanget === 'bare' ? !!a.fanget : !a.fanget))
     .map((x) => ({ ...x, score: tokens.length ? score(x.a, tokens, x.max) : 0 }))
     .sort((x, y) => y.score - x.score || y.a.capturedAt - x.a.capturedAt);
   const page = all.slice(offset, offset + limit).map(({ a, max, score: sc }) => {
@@ -671,6 +681,7 @@ function search(atoms, query, { project, context, kind, limit = 8, offset = 0 } 
     return { atom: a, S, max, score: sc, snippet: inS || max === 'S' ? '' : snippet(body, tokens) }
   });
   page.total = all.length;
+  page.fanget = utenfor;
   return page
 }
 
