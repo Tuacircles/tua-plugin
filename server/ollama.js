@@ -105,7 +105,7 @@ export async function modeller() {
     lokale: lok.map((m) => ({ ...m, standard: std.modell === m.navn, anbefaling: ANBEFALTE.find((a) => a.navn === m.navn) || null })),
     standard: { ...std, lagret: lagretStandard() },
     anbefalte,
-    start: process.platform === 'darwin' ? 'open -a Ollama' : 'ollama serve',
+    start: process.platform === 'darwin' ? 'open /Applications/Ollama.app' : 'ollama serve',   // `open -a Ollama` feilet 23.10 rett etter installasjonen; full sti virker
   }
 }
 

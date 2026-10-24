@@ -102,7 +102,7 @@ ok('modeller(): standard = den første når ingenting er valgt (kilde «første�
 ok('modeller(): anbefalte merket lokal der de ligger på maskinen', m0.anbefalte.find((a) => a.navn === 'gemma3:4b').lokal && m0.anbefalte.find((a) => a.navn === 'qwen3:8b').lokal && !m0.anbefalte.find((a) => a.navn === 'gemma3:12b').lokal)
 ok('modeller(): nøyaktig én «anbefalt for denne maskinen», og den passer (ja)', m0.anbefalte.filter((a) => a.anbefalt).length === 1 && m0.anbefalte.find((a) => a.anbefalt).passer === 'ja', m0.anbefalte.find((a) => a.anbefalt)?.navn)
 ok('modeller(): hver anbefalt rad har passer ja/trangt/nei', m0.anbefalte.every((a) => ['ja', 'trangt', 'nei'].includes(a.passer)))
-ok('modeller(): start-kommandoen er serveren, ikke appens innstillinger', /open -a Ollama|ollama serve/.test(m0.start))
+ok('modeller(): start-kommandoen er serveren, ikke appens innstillinger', /open \/Applications\/Ollama\.app|ollama serve/.test(m0.start))
 ok('standardModell(): valgt i config brukes bare når den ligger lokalt', standardModell(['a:1', 'b:2']).modell === 'a:1' && (() => { fs.mkdirSync(path.dirname(KONFIG), { recursive: true }); fs.writeFileSync(KONFIG, JSON.stringify({ ollama: { modell: 'b:2' } })); const r1 = standardModell(['a:1', 'b:2']); const r2 = standardModell(['a:1']); fs.rmSync(KONFIG); return r1.modell === 'b:2' && r1.kilde === 'valgt' && r2.modell === 'a:1' && r2.kilde === 'første' && r2.valgtFinnes === false })())
 const st0 = await ollamaStatus()
 ok('ollamaStatus(): running, models og modell (standard)', st0.running && st0.models.length === 2 && st0.modell === 'gemma3:4b')
@@ -183,7 +183,7 @@ try {
   // Ollama kjører ikke
   await new Promise((r) => ollama.close(r))
   const g4 = await jsonAv('/api/ollama/modeller')
-  ok('Ollama nede: GET /api/ollama/modeller → kjører false, ingen lokale, anbefalte og start-kommandoen står', g4.status === 200 && g4.j.kjører === false && g4.j.lokale.length === 0 && g4.j.anbefalte.length >= 5 && /open -a Ollama|ollama serve/.test(g4.j.start))
+  ok('Ollama nede: GET /api/ollama/modeller → kjører false, ingen lokale, anbefalte og start-kommandoen står', g4.status === 200 && g4.j.kjører === false && g4.j.lokale.length === 0 && g4.j.anbefalte.length >= 5 && /open \/Applications\/Ollama\.app|ollama serve/.test(g4.j.start))
   const mo2 = await jsonAv('/api/mottakere')
   ok('Ollama nede: mottakeren er ikke klar med grunn «Ollama kjører ikke», ikke standard', (() => { const o = mo2.j.mottakere.find((m) => m.id === 'ollama'); return !o.aktiv && /kjører ikke/.test(o.hvorfor) && !o.standard })())
   const h5 = await sse('/api/ollama/hent', { navn: 'gemma3:12b' })
