@@ -522,7 +522,7 @@ function setShare(a, project, level) {
 // M19 (skive 8, V16): `ga` = [{id, version}] — svarene en prompt-sak ga. Normaliseres som derivedFrom; upsert slår lista SAMMEN (union på id), aldri erstatter.
 const normalizeGa = (list) => (Array.isArray(list) ? list : []).filter((g) => g && g.id).map((g) => ({ id: String(g.id), version: Number(g.version) || 1 }));
 const mergeGa = (gammel = [], ny = []) => { const ut = [...normalizeGa(gammel)]; for (const g of normalizeGa(ny)) { const i = ut.findIndex((x) => x.id === g.id); if (i < 0) ut.push(g); else ut[i] = g; } return ut };
-function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget }) {
+function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget, drift, beholdt }) {
   const body = String(content || '').replace(/\r\n?/g, '\n').trim();   // M17: fila leses tilbake uten \r (files.js) — lagre likt, ellers blir hver import en «ny versjon»
   const now = Date.now();
   const a = {
@@ -552,6 +552,8 @@ function makeAtom({ content, name, source, project, convo, summary, tags, short,
   const rd = normalizeRenders(renders); if (rd.length) a.renders = rd;
   const g = normalizeGa(ga); if (g.length) a.ga = g;
   if (fanget === true || fanget === false) a.fanget = fanget;            // runde 2c: true = fanget automatisk, false = løftet inn — se Fanget-bøtta nederst
+  if ((drift === true && !erMenneskeskrevet(a)) || drift === false) a.drift = drift;   // runde 2d: Tua om seg selv — aldri på noe et menneske har skrevet
+  if (beholdt === true) a.beholdt = true;                                   // runde 2d: beholdt av brukeren
   return a
 }
 
@@ -600,6 +602,9 @@ function upsert(atoms, { key, ...data }) {
   // runde 2c: en sak som finnes beholder sin fanget-tilstand. Er den løftet inn (eller lagret med vilje), setter ingen ny import flagget igjen;
   // er den fanget, tar bare en eksplisitt `fanget: false` (Behold) det bort. Brukerens valg vinner over regelen — alltid.
   const fanget = data.fanget === false ? false : old.fanget;
+  // runde 2d: drift følger samme logikk — har brukeren sagt «dette er arbeid» (drift: false), setter ingen regel det igjen; menneskeskrevet merkes aldri drift.
+  const drift = old.drift === false || data.drift === false ? false : data.drift === true && !erMenneskeskrevet(old) ? true : old.drift;
+  const beholdt = data.beholdt === false ? undefined : data.beholdt === true ? true : old.beholdt;   // beholdt tas bare bort eksplisitt
   const attach = (a) => {
     if (levels) a.levels = levels; else delete a.levels;
     if (links) a.links = links; else delete a.links;
@@ -607,11 +612,13 @@ function upsert(atoms, { key, ...data }) {
     if (renders) a.renders = renders; else delete a.renders;
     if (ga) a.ga = ga; else delete a.ga;
     if (fanget === true || fanget === false) a.fanget = fanget; else delete a.fanget;
+    if (drift === true || drift === false) a.drift = drift; else delete a.drift;
+    if (beholdt === true) a.beholdt = true; else delete a.beholdt;
     a.kind = kind;
     return a
   };
   if (bodySame) {
-    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget) return { atom: old, status: 'uendret' }
+    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old });
     return { atom: atoms[i], status: 'nivåer' }
   }
@@ -689,7 +696,9 @@ function score(a, tokens, max = 'L') {
 // `kind` (M19, skive 8): bare saker av én type — prompt-samlingen i appen og forslagene i Spør søker med kind=prompt.
 // `fanget` (runde 2c, 24.10.2026): standard `uten` — fangede saker (hook/import, ikke løftet inn) holdes utenfor; `med` tar dem med; `bare` gir bare dem.
 // Resultatet bærer `fanget` = hvor mange fangede saker som traff søket men ble holdt utenfor, så døra kan si det («N fangede saker holdt utenfor»).
-function search(atoms, query, { project, context, kind, fanget = 'uten', limit = 8, offset = 0 } = {}) {
+// `drift` (runde 2d, 03-avisen §2 A): standard `uten` — drift (Tua om seg selv) holdes utenfor søket; `med` tar den med; `bare` gir bare den.
+// Resultatet bærer `drift` = hvor mange drift-saker som traff men ble holdt utenfor. Rekkefølgen: fanget-filteret først, så drift-filteret.
+function search(atoms, query, { project, context, kind, fanget = 'uten', drift = 'uten', limit = 8, offset = 0 } = {}) {
   const tokens = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
   const treff = atoms
     .filter((a) => !project || a.project.toLowerCase() === project.toLowerCase())
@@ -698,8 +707,10 @@ function search(atoms, query, { project, context, kind, fanget = 'uten', limit =
     .map((a) => ({ a, max: maxLevel(a, context) }))
     .filter(({ a, max }) => tokens.every((t) => hay(a, max).includes(t)));
   const utenfor = fanget === 'med' ? 0 : treff.filter(({ a }) => (fanget === 'bare' ? !a.fanget : !!a.fanget)).length;
-  const all = treff
-    .filter(({ a }) => fanget === 'med' || (fanget === 'bare' ? !!a.fanget : !a.fanget))
+  const etterFanget = treff.filter(({ a }) => fanget === 'med' || (fanget === 'bare' ? !!a.fanget : !a.fanget));
+  const driftUtenfor = drift === 'med' ? 0 : etterFanget.filter(({ a }) => (drift === 'bare' ? a.drift !== true : a.drift === true)).length;
+  const all = etterFanget
+    .filter(({ a }) => drift === 'med' || (drift === 'bare' ? a.drift === true : a.drift !== true))
     .map((x) => ({ ...x, score: tokens.length ? score(x.a, tokens, x.max) : 0 }))
     .sort((x, y) => y.score - x.score || y.a.capturedAt - x.a.capturedAt);
   const page = all.slice(offset, offset + limit).map(({ a, max, score: sc }) => {
@@ -710,6 +721,7 @@ function search(atoms, query, { project, context, kind, fanget = 'uten', limit =
   });
   page.total = all.length;
   page.fanget = utenfor;
+  page.drift = driftUtenfor;
   return page
 }
 
@@ -782,5 +794,10 @@ function ensureArchive() {
   fs__default.writeFileSync(ONBOARDING(), JSON.stringify({ state: 'aktiv', opprettet: new Date().toISOString(), sted: rootLabel(), root: FILES_ROOT }, null, 2) + '\n');
   return { created: true, root: FILES_ROOT }
 }
+// Sikkerhet for merkingen (review --drift / --fanget): det et menneske har skrevet, merkes aldri drift eller fanget — S eller M skrevet av et menneske,
+// eller en kilde som ikke er en maskin (kilde «Erik» fra /api/save og innlesing). Maskinkildene kjennes på ordene; alt annet regnes som menneske.
+const MASKINKILDE = /claude|chatgpt|gpt|gemini|ollama|^tua\b|tua$|test|perplexity|cowork|desktop|sync|agent|design|copilot|cursor|mistral|llama|regel|^$/i;
+const erMenneskeskrevet = (a) => !!a && (a.levels?.S?.by === 'menneske' || a.levels?.M?.by === 'menneske' || !MASKINKILDE.test(String(a.source || '').trim()));
+const erTuaRepo = (root) => !!root && fs__default.existsSync(path__default.join(String(root), 'tua-plugin', 'server', 'store.js'));
 
-export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, hashOf, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, maxLevel, mergeGa, needsLevel, noteImport, onboardingActive, projectOf, projects, readConfig, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sha8, sources, staleSources, statusOf, tråder, upsert, vaultClamp, versions, visibleIn, welcomeAtom };
+export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaRepo, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, hashOf, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, maxLevel, mergeGa, needsLevel, noteImport, onboardingActive, projectOf, projects, readConfig, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sha8, sources, staleSources, statusOf, tråder, upsert, vaultClamp, versions, visibleIn, welcomeAtom };
