@@ -5,7 +5,7 @@
 //                          M24: peker på /tua_start første gang, og tilbyr /tua_auto når repoet mangler .tua-sync.json
 //   svar   Stop          → lagre siste substansielle svar (≥ 1 500 tegn) som atom
 //   fil    PostToolUse   → Write|Edit på et tekstdokument (.md/.txt/…) → atom med file-lenke; samme fil = ny versjon
-//   okt    PreCompact/SessionEnd → økt-sammendrag (oppgaver, filer, siste svar) som atom, key per økt
+//   okt    PreCompact/SessionEnd → økt-sammendrag (oppgaver, filer, siste svar) som atom, key per økt; S = siste vending (samtaleS, friksjon 9)
 //   prompt UserPromptSubmit → M19 (skive 8, V16): prompten som egen sak idet den sendes (≥ 80 tegn, ikke kommando/bekreftelse), nøkkel
 //                          prompt:<økt8>:<sha8> — samme som importen, så importen etterpå gir «uendret». STUM: stdout blir kontekst for modellen.
 //          svar-modusen lagrer også prompten (siste brukermelding i transkriptet) FØR lengdesjekken, og kobler: svaret får prompten i
@@ -38,7 +38,7 @@ const imp = await import(mod('import.js'))
 const desk = await import(mod('desktop.js'))
 const { posix, insideTmp } = await import(mod('platform.js'))
 const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState, mergeGa } = store
-const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts, sha8, promptKey, worthKeeping, promptTitle, promptL, firstSentence } = imp
+const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts, sha8, promptKey, worthKeeping, promptTitle, promptL, firstSentence, samtaleS } = imp
 
 // 0.5.1: innstillingen «arkivmappe» → ~/.tua/config.json, samme fil og samme skrivemåte som tua_setup (store.chooseArchive),
 // så serveren finner arkivet uten TUA_FILES_ROOT — også i Cowork, der innstillingen aldri når serveren. Bare når innstillingen
@@ -171,7 +171,7 @@ try {
     const atoms = load()
     const { atom, status } = upsert(atoms, {
       key: `okt:${sid}`, name: `Økt: ${convo}`, content, project, convo, source: 'Claude', by: 'regel', tags: ['økt', 'auto'], links: repo,
-      short: clip(`${tr.turns} oppgaver i ${project}${files.length ? `, ${files.length} filer skrevet` : ''}. Første: ${flat(tr.prompts[0])}`, S_MAX),
+      short: samtaleS(tr),   // friksjon 9 (24.10.2026): S = siste vending («Sist: … → …», antall og periode), samme regel som importen — ikke første prompt
       summary: `Økt-sammendrag laget automatisk ved ${input.hook_event_name}.`,
     })
     if (status !== 'uendret') save(atoms)

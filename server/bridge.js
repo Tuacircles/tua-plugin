@@ -3,7 +3,7 @@
 // appen (ferdigbygd fra tua2-sandbox/dist) og er broen til det EKTE arkivet
 // (mappa ~/Dropbox/Tua, samme som MCP-serveren bruker).
 //
-//   GET  /  /spor  /kart  /oppslag  /innstillinger → appen (dist/index.html, skive 3: én app med klient-ruting; /forside = /)
+//   GET  /  /spor  /kart  /oppslag  /innboks  /innstillinger → appen (dist/index.html, skive 3: én app med klient-ruting; /forside = /)
 //   GET  /sandkasse            → demoene (dist/sandkasse.html)
 //   GET  /assets/*  /fonter/*  → bygde filer og de lokale fontene
 //   GET  /api/atoms?offset&limit → { atoms, total, file }   (hvert atom har `links` ferdig utregnet + `file`,
@@ -74,6 +74,7 @@
 //   GET  /api/innboks        { sti, dokumenter: [{navn, format, label, bytes}], eksporter, lenker, antall, ferdig, prosjekter, standard }  hva som venter i <arkiv>/Innboks
 //   POST /api/innboks/kjør   {prosjekt?, dryRun?} → { filer, tall: {filer, lest, feilet}, report }   leser dokumentene inn som saker (standard prosjekt «Innboks»), flytter til Innboks/Ferdig
 //   GET  /api/prosjekter     { prosjekter: [navn] }   prosjektene i arkivet (til prosjektvelgeren i Spør)
+//   GET  /api/innboks/antall { antall, dokumenter: [navn] }   bare tellingen — app-hodet (Innboks N) og forsidens linje «N filer i Innboks» (friksjonsrunde 1); /innboks er app-rute
 //   POST /api/flytt          {id, prosjekt} → { atom }   flytter saken til et annet prosjekt (fila flyttes av lageret — det samme som å dra den i Finder, V9)
 //   M19 + M14 (skive 8): prompter som førsteklasses saker, datasettet og onboardingen i appen.
 //   GET  /api/search?kind=prompt   bare saker av én type; prompt-treff har også `tekst` (hele prompten), `ga` og `modeller` — til forslagene i Spør og Prompter-visningen
@@ -345,7 +346,7 @@ function openTarget(a, target, href) {
 
 // Statisk: appen og sandkassen fra dist/. Ingen stier utenfor dist (realpath-sjekk).
 // Skive 3: appen er én fil (index.html) med klient-ruting — alle app-rutene får samme fil, og appen leser stien selv (router.jsx).
-export const APP_RUTER = ['/', '/forside', '/spor', '/kart', '/oppslag', '/innstillinger', '/start']   // /start: onboardingen (skive 8), kan åpnes igjen fra Innstillinger
+export const APP_RUTER = ['/', '/forside', '/spor', '/kart', '/oppslag', '/innstillinger', '/start', '/innboks']   // /start: onboardingen (skive 8), kan åpnes igjen fra Innstillinger · /innboks: Innboks som egen side (friksjon 5)
 const APP_FIL = 'index.html'
 function serveStatic(res, pathname) {
   const rel = APP_RUTER.includes(pathname) ? '/' + APP_FIL : pathname === '/sandkasse' ? '/sandkasse.html' : pathname
@@ -688,6 +689,13 @@ http
         console.error(`[tua-bro] ${isLink ? 'link' : 'unlink'} «${a.name}» ${isLink ? '→' : '⤫'} ${p}${level ? ` (${level})` : ''}`)
         return json(res, 200, { atom: { ...a, status: statusOf(a) } })
       }
+      // ── Friksjonsrunde 1 (24.10.2026, friksjon 5): Innboks i navigasjonen og på forsiden ──
+      // GET /api/innboks/antall → { antall, dokumenter: [navn] }  bare tellingen (readdir), lett nok til å spørres hvert 10.–30. sekund fra app-hodet og forsiden;
+      // GET /api/innboks (over) har alt det andre (eksporter, lenkefiler, Ferdig, prosjekter) og brukes av Innboks-sida.
+      if (req.method === 'GET' && url.pathname === '/api/innboks/antall') {
+        const dok = innboksDokumenter()
+        return json(res, 200, { antall: dok.length, dokumenter: dok.map((d) => d.navn) })
+      }
       return json(res, 404, { error: 'ukjent rute' })
     } catch (e) {
       return json(res, 500, { error: String(e?.message || e) })
@@ -695,7 +703,7 @@ http
   })
   .listen(PORT, '127.0.0.1', () => {
     const built = fs.existsSync(path.join(DIST, APP_FIL))
-    console.error(`[tua-bro] appen: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} (forsiden · /spor · /oppslag · /kart · /innstillinger · /sandkasse; POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
+    console.error(`[tua-bro] appen: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} (forsiden · /spor · /oppslag · /innboks · /kart · /innstillinger · /sandkasse; POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
     const log = (m) => console.error(`[tua-bro] ${m}`)
     if (process.env.TUA_BRIDGE_VAKTER !== '0') { watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log }) }     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
   })
