@@ -222,6 +222,7 @@ function linksFor(a) {
 // En leveranse er et atom (kind 'leveranse') bygget av andre atomer: derivedFrom fryser
 // hvilken versjon av hvert kildeatom som ble lest, på hvilket nivå. Filene (html/pdf/artifact)
 // er gjengivelser (renders) av markdown-kilden — atomet er sannheten, fila kan være utdatert.
+const KINDS_GAMLE = new Set(['capture', 'leveranse', 'samtale', 'minne']);
 const KINDS = ['capture', 'leveranse', 'samtale', 'minne', 'prompt', 'svar', 'konklusjon'];   // samtale (M14): importert samtale/økt · minne (M14): Claudes eget minne om brukeren, fra eksporten
 // prompt (M20a/V16): spørsmålet brukeren stilte, eget atom, gjenbrukbart på tvers av modeller · svar (M20a): det en mottaker (modell) svarte,
 // bygget_av peker til prompten og kildene som ble sendt. Ikke «leveranse»: en leveranse settes sammen av arkivet selv (compose), et svar kommer
@@ -439,9 +440,18 @@ function saveUnlocked(atoms) {
     }
     delete a.editedOutside;                              // festes nå: versjonen er talt opp, teksten under bevares
     if (a.renders?.length) exportRenders(a);              // M11: html/pdf-kopi ved siden av atomet i arkivet
-    const md = serialize(a);
     let before = null;
     try { before = fs__default.readFileSync(abs, 'utf8'); } catch {}
+    // 24.10.2026 (etter at en eldre plugin-versjon strøk `drift`/`fanget` fra 1 035 filer): flagg og status som står i fila på disk,
+    // men mangler i minnet, beholdes. Fila er sannheten (V9); en prosess som ikke kjenner et felt skal ikke kunne slette det.
+    if (before !== null) {
+      try {
+        const påDisk = parse(before, { fallbackId: a.id });
+        for (const felt of ['drift', 'fanget', 'beholdt', 'status']) if (a[felt] === undefined && påDisk[felt] !== undefined) a[felt] = påDisk[felt];
+        if ((!a.kind || a.kind === 'capture') && påDisk.kind && påDisk.kind !== 'capture' && !KINDS_GAMLE.has(påDisk.kind)) a.kind = påDisk.kind;
+      } catch {}
+    }
+    const md = serialize(a);
     if (before !== md) {
       if (before !== null) keepVersion(a.id, before);   // historikk: forrige versjon bevares som egen fil
       fs__default.writeFileSync(abs, md);
