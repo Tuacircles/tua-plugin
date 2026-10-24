@@ -299,6 +299,20 @@ try {
   ok('POST /api/fanget/merk (ekte): skriver {antall: 1} før slutt {nye: 1, filer: 1}; saken har fanget: true på disk og er i /api/fanget', hm2.some((h) => h[0] === 'skriver' && h[1].antall === 1) && hm2.at(-1)[1].nye === 1 && hm2.at(-1)[1].filer === 1 && load().find((a) => a.key === 'svar:gammel99:cafe0001').fanget === true && (await hent('/api/fanget')).json.saker.some((x) => x.name === 'Svar før flagget'), hm2.map((h) => h[0]).join(' '))
   const m3 = sseAv(await (await fetch(`http://127.0.0.1:${PORT}/api/fanget/merk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).text())
   ok('merk igjen: 0 nye, ingen skriver-hendelse (idempotent)', m3.at(-1)[1].nye === 0 && !m3.some((h) => h[0] === 'skriver'))
+  // friksjon 15: «Merk arkivet (drift, så fanget)» — POST /api/arkiv/merk {hva: 'begge'} som SSE: drift først (samme regel som review --drift), så fanget på resten; dry-run først
+  { const at3 = load()
+    upsert(at3, { key: 'commit-logg', content: 'Commit-loggen Tua speiler om seg selv. '.repeat(30), name: 'Commit-logg', project: 'Tua_tua', tags: ['sync'], by: 'regel', source: 'Tua sync', short: 'Commit-logg.' })
+    upsert(at3, { key: 'svar:gammel98:cafe0002', content: 'Et svar hooken fanget i et vanlig prosjekt. '.repeat(40), name: 'Svar før flagget 2', project: 'Prosjekt', tags: ['svar', 'auto'], by: 'regel', short: 'Før flagget 2.' })
+    save(at3) }
+  const am = async (body) => { const r = await fetch(`http://127.0.0.1:${PORT}/api/arkiv/merk`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, h: sseAv(await r.text()) } }
+  const d1 = await am({ hva: 'begge', dryRun: true })
+  const tD = d1.h.find((h) => h[0] === 'tall' && h[1].hva === 'drift')?.[1], tF = d1.h.find((h) => h[0] === 'tall' && h[1].hva === 'fanget')?.[1], s1 = d1.h.at(-1)
+  ok('POST /api/arkiv/merk {begge, dryRun}: start → tall drift (1 ny, sync) → tall fanget (1 ny) → slutt {drift, fanget, klasser før/etter, dryRun}; ingen skriver, ingenting skrevet', d1.status === 200 && d1.h[0][0] === 'start' && d1.h[0][1].hva === 'begge' && tD?.tall.nye === 1 && tD.perSlag.sync === 1 && tD.eksempler[0].name === 'Commit-logg' && tF?.tall.nye === 1 && s1[0] === 'slutt' && s1[1].dryRun === true && s1[1].drift.nye === 1 && s1[1].fanget.nye === 1 && s1[1].nye === 2 && s1[1].klasser.etter.drift === s1[1].klasser.før.drift + 1 && s1[1].klasser.etter.spor === s1[1].klasser.før.spor + 1 && !d1.h.some((h) => h[0] === 'skriver') && load().find((a) => a.key === 'commit-logg').drift === undefined, d1.h.map((h) => h[0] + (h[1].hva ? ':' + h[1].hva : '')).join(' '))
+  const d2 = await am({ hva: 'begge' })
+  const s2 = d2.h.at(-1)[1]
+  ok('POST /api/arkiv/merk {begge} (ekte): skriver drift så fanget, slutt {drift 1, fanget 1, filer 2}; drift: true og fanget: true på disk', d2.h.filter((h) => h[0] === 'skriver').map((h) => h[1].hva).join(',') === 'drift,fanget' && s2.drift.nye === 1 && s2.fanget.nye === 1 && s2.filer === 2 && load().find((a) => a.key === 'commit-logg').drift === true && load().find((a) => a.key === 'svar:gammel98:cafe0002').fanget === true && (await hent('/api/atoms')).json.atoms.find((a) => a.key === 'commit-logg').klasse === 'drift', JSON.stringify(s2))
+  const d3 = await am({ hva: 'begge' })
+  ok('merk arkivet igjen: 0 nye, ingen skriver (idempotent); hva: drift alene gir bare drift-tall', d3.h.at(-1)[1].nye === 0 && !d3.h.some((h) => h[0] === 'skriver') && (await am({ hva: 'drift', dryRun: true })).h.filter((h) => h[0] === 'tall').map((h) => h[1].hva).join() === 'drift')
   // tua_get-adferd gjennom /api/sak: en fanget sak kan hentes som før
   const sak = (await hent(`/api/sak?id=${samtaleRad.id}`)).json
   ok('/api/sak på en fanget sak virker som før (nivåene er der)', sak && sak.id === samtaleRad.id && sak.nivåer?.L?.tekst?.length > 100)

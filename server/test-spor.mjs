@@ -10,9 +10,11 @@
 //   (test + test2) → to svar-saker i valgt prosjekt, forskjeller og konklusjon også der · «Stopp» (POST /api/spor/stopp {kjøring}) midt i strømmen →
 //   event ferdig {avbrutt}, svar-sak med taggen avbrutt, Utlevert-linje med avbrutt: true, SSE-rekkefølgen ellers uendret (skjermet → del… → ferdig) ·
 //   stopp FØR noe kom → event feil {avbrutt}, ingen svar-sak · motoren direkte: spor() med signal avbrutt → avbrutt svar · GET /api/sak gir teksten per nivå.
+//   Friksjon 15: /api/mottakere har nivå/nivåVault per rad · GET /api/niva per mottaker og laveste felles · POST /api/spor/forhandsvis (tekst, tokens, blokkert — ingenting
+//   logget) · POST /api/spor med nivå L til en lokal Trust-5-mottaker (testlokal) sender L: kilden på L i skjermet, i svarets bygget_av og i Utlevert-linja.
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
-process.env.TUA_TESTMOTTAKERE = '2'
+process.env.TUA_TESTMOTTAKERE = '3'   // test, test2 og testlokal (lokal ekko med Trust 5 — friksjon 15)
 process.env.TUA_VURDERER = 'test'
 
 import fs from 'node:fs'
@@ -157,6 +159,28 @@ try {
   const sak = await get(`/api/sak?id=${encodeURIComponent(a1.id)}`)
   ok('GET /api/sak: teksten per nivå (S = ingressen, L = alt), ord/tegn, prosjekt, kind', sak.status === 200 && sak.json.nivåer.S.tekst === 'Notat om anken; fristen er 14 dager.' && sak.json.nivåer.L.tekst.includes(PERSON) && sak.json.nivåer.M.fallback && sak.json.ord.L > sak.json.ord.S && sak.json.project === 'Energima' && sak.json.kind === 'capture', JSON.stringify({ S: sak.json.nivåer?.S, fallbackM: sak.json.nivåer?.M?.fallback }))
   ok('GET /api/sak med ukjent id → 404', (await get('/api/sak?id=a_finnes_ikke')).status === 404)
+
+  // ── friksjon 15: standardnivå etter mottaker, forhåndsvisning før sending, L sendes til en lokal mottaker ──
+  const mo = (await get('/api/mottakere')).json.mottakere
+  const tl = mo.find((m) => m.id === 'testlokal')
+  ok('GET /api/mottakere: testlokal (lokal, Trust 5) med nivå L; test (Trust 3) nivå M; nivåVault S for alle', tl && tl.local && tl.trust.score === 5 && tl.nivå === 'L' && mo.find((m) => m.id === 'test').nivå === 'M' && mo.every((m) => m.nivåVault === 'S'), JSON.stringify(mo.map((m) => [m.id, m.nivå, m.nivåVault])))
+  const nv = await get(`/api/niva?mottaker=testlokal,test&id=${a1.id}`)
+  ok('GET /api/niva?mottaker=testlokal,test&id: per mottaker (L/M), laveste felles M, vault false', nv.status === 200 && nv.json.per.testlokal === 'L' && nv.json.per.test === 'M' && nv.json.felles === 'M' && nv.json.vault === false, JSON.stringify(nv.json))
+  ok('GET /api/niva: ukjent mottaker → 400, ukjent sak → 404', (await get('/api/niva?mottaker=finnes-ikke')).status === 400 && (await get('/api/niva?mottaker=test&id=a_x')).status === 404)
+  const utlevertFør = UTLEVERT().length, antallFør = load().length
+  const fv = await post('/api/spor/forhandsvis', { melding: `Hva mener ${PERSON}?`, saker: [{ id: a1.id, nivå: 'L' }], mottaker: 'testlokal', prosjekt: 'Energima' })
+  ok('POST /api/spor/forhandsvis: 200 med tekst (skjermet), saker på L, tokens, treff — som hendelsen skjermet', fv.status === 200 && !fv.json.blokkert && fv.json.saker[0].level === 'L' && !fv.json.tekst.includes(PERSON) && fv.json.treff > 0 && typeof fv.json.tokens.ca === 'number' && fv.json.ord > 100, JSON.stringify({ treff: fv.json.treff, saker: fv.json.saker, tokens: fv.json.tokens }))
+  ok('forhandsvis logger ingenting og lagrer ingenting', UTLEVERT().length === utlevertFør && load().length === antallFør)
+  const fb = await post('/api/spor/forhandsvis', { melding: 'Hei', saker: [{ id: a1.id, nivå: 'L' }], mottaker: 'test' })
+  ok('forhandsvis med L til Trust 3: blokkert i svaret (Stoppet-linja før sending), 200', fb.status === 200 && fb.json.blokkert && /krever minst 4/.test(fb.json.blokkert.feil) && fb.json.blokkert.mottaker === 'test', fb.json.blokkert?.feil)
+  ok('forhandsvis uten mottaker → 400, ukjent mottaker → 400', (await post('/api/spor/forhandsvis', { melding: 'x' })).status === 400 && (await post('/api/spor/forhandsvis', { melding: 'x', mottaker: 'finnes-ikke' })).status === 400)
+  const rl = await sse({ melding: 'Hva står i anken?', saker: [{ id: a1.id, nivå: 'L' }], mottaker: 'testlokal', prosjekt: 'Energima' })
+  const skj = rl.hendelser.find((h) => h[0] === 'skjermet')?.[1], fl = rl.hendelser.at(-1)?.[1]
+  const svL = load().find((a) => a.id === fl?.svar)
+  ok('POST /api/spor med nivå L til testlokal: sendes på L — skjermet sier L, maks L, hele teksten med', rl.status === 200 && skj?.saker[0].level === 'L' && skj.maks === 'L' && skj.tekst.includes('Mer om anken') && skj.saker[0].ord > 100, JSON.stringify(skj?.saker))
+  ok('svaret er bygget på kilden på L, og Utlevert-linja sier L til testlokal', svL?.derivedFrom.some((d) => d.id === a1.id && d.level === 'L') && UTLEVERT().at(-1).mottaker === 'testlokal' && UTLEVERT().at(-1).saker[0].level === 'L', JSON.stringify(UTLEVERT().at(-1)?.saker))
+  const rb = await sse({ melding: 'Hva står i anken?', saker: [{ id: a1.id, nivå: 'L' }], mottaker: 'test', prosjekt: 'Energima' })
+  ok('samme sending med L til test (Trust 3): blokkert — fail closed står (V21)', rb.hendelser[0][0] === 'blokkert' && /krever minst 4/.test(rb.hendelser[0][1].feil))
 } finally { bro.kill() }
 
 console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT}`)

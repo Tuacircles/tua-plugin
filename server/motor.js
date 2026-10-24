@@ -12,6 +12,8 @@
 //                            fast liste over norske fornavn som oppdager «Fornavn Etternavn» i teksten som sendes. Lista vokser
 //                            av bruk (.tua/kjente-personer.json) og har stoppliste for firma- og produktnavn.
 //   minimer(saker, nivå)     konteksten av valgte saker på S/M/L via lageret (levelOf/clampLevel/maxLevel). L bare når valgt.
+//   standardNivå(m, sak)     friksjon 15: nivået en sak får som kilde når ingen har valgt — det høyeste mottakeren får (L lokal, M ekstern, S Vault).
+//   forhåndsvis(…)           friksjon 15: det samme som spor() ser FØR noe sendes (minimer → fail closed → skjerm → tokens) — ingenting sendes eller logges.
 //   send(mottaker, …)        mottaker-grensesnittet {id, label, endpoint, trust, send()}. Første mottaker er Claude med egen
 //                            nøkkel fra Keychain (lest per kall, glemt etter kallet), så Ollama når den finnes lokalt, og «test»
 //                            som ekkoer uten å sende noe. FAIL CLOSED: nivå over det Trust Score eller Vault-taggen tillater
@@ -390,7 +392,10 @@ function lagMottakere() {
     { id: 'test', label: 'Test (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test', 'Tua selv: ekko-mottakeren i motor.js. Score 3 er satt lavt med vilje så fail closed kan prøves (L blokkeres).'), test: true,
       status: async () => ({ klar: true }), send: sendTest },
   ]
-  if (process.env.TUA_TESTMOTTAKERE === '2') liste.push({ id: 'test2', label: 'Test 2 (ekko B — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test 2', 'Tua selv: andre ekko-mottaker i motor.js (TUA_TESTMOTTAKERE=2) — svarer annerledes enn Test så Forskjeller kan testes uten modell.'), test: true, status: async () => ({ klar: true }), send: sendTest2 })
+  const tm = String(process.env.TUA_TESTMOTTAKERE || '')
+  if (tm === '2' || tm === '3') liste.push({ id: 'test2', label: 'Test 2 (ekko B — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test 2', 'Tua selv: andre ekko-mottaker i motor.js (TUA_TESTMOTTAKERE=2) — svarer annerledes enn Test så Forskjeller kan testes uten modell.'), test: true, status: async () => ({ klar: true }), send: sendTest2 })
+  // friksjon 15 (TUA_TESTMOTTAKERE=3): en LOKAL ekko-mottaker med Trust 5 — så testene kan vise at standardnivået blir L og at L faktisk sendes, uten Ollama.
+  if (tm === '3') liste.push({ id: 'testlokal', label: 'Test lokal (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: { ...TEST_TRUST('Test lokal', 'Tua selv: lokal ekko-mottaker i motor.js (TUA_TESTMOTTAKERE=3) — Trust 5 som Ollama, så standardnivå L kan testes uten modell.'), score: 5 }, local: true, test: true, status: async () => ({ klar: true }), send: sendTest })
   return liste
 }
 // Lista til appen (GET /api/mottakere): uten send(), med status. Nøkkel: satt/ikke satt — aldri verdien.
@@ -399,6 +404,7 @@ export async function mottakere() {
   const liste = await Promise.all(lagMottakere().map(async (m) => {
     const st = await m.status()
     return { id: m.id, label: m.label, endpoint: m.endpoint, modell: st.modell || st.modeller?.[0] || m.modell, trust: m.trust, local: !!m.local, test: !!m.test,
+      nivå: standardNivå(m), nivåVault: standardNivå(m, { vault: true }),   // friksjon 15: standardnivået en sak får som kilde til denne mottakeren (vanlig sak / Vault-merket)
       tegnPerToken: TEGN_PER_TOKEN[m.id] || 3.5,                 // Spør-skjermens anslag før sending bruker samme faktor som motoren (skive 2)
       ...(m.nøkkel ? { nøkkel: hasKey(m.id) ? 'satt' : 'ikke satt' } : {}), aktiv: st.klar, ...(st.hvorfor ? { hvorfor: st.hvorfor } : {}) }
   }))
@@ -413,6 +419,25 @@ export const standardMottaker = async () => (await mottakere()).find((m) => m.st
 // Nivået en vurderer får lese svar-sakene på: det høyeste Trust Score tillater (L for lokal og Claude, M for test). Vault-arv stoppes
 // fortsatt hos en ekstern vurderer i sjekkTillatt — det klampes ikke ned til S i det stille (forskjeller av ingresser ville være verdiløse).
 export const maksNivå = (m) => { const score = Number(m?.trust?.score) || 1; return LEVELS.filter((l) => NIVÅ_KREVER_TRUST[l] <= score).at(-1) || 'S' }
+
+// ── Friksjon 15 (24.10.2026): standardnivået en sak får som kilde når man spør ──────────────────────────────────────────
+// Før gikk saken alltid på S inne i saken (bare ingressen), så en lokal modell svarte uten å ha sett saken. Regelen bor her, ikke i appen:
+//   det høyeste mottakeren får — L til en lokal modell (Trust 5: ingenting forlater maskinen), M til en ekstern med Trust ≥ 3 (V15: S+M som
+//   standard, L bare på forespørsel), S til lavere Trust — og S for Vault-merkede saker uansett mottaker (brukeren kan heve til L for en lokal
+//   modell; sjekkTillatt tillater det). Klampes til sak.max (V11) når det er gitt. Brukeren kan alltid velge noe annet før sending; fail closed står.
+//   Flere mottakere: nivået per mottaker, og det LAVESTE felles er det som sendes til alle — Forskjeller sammenlikner svar bygget på samme tekst.
+export const NIVÅ_STANDARD_EKSTERN = 'M'
+export function standardNivå(mottaker, sak = null) {
+  const vault = sak ? (typeof sak.vault === 'boolean' ? sak.vault : isVault(sak)) : false
+  let n = vault ? 'S' : mottaker?.local ? 'L' : clampLevel(NIVÅ_STANDARD_EKSTERN, maksNivå(mottaker))
+  if (sak?.max && LEVELS.includes(sak.max)) n = clampLevel(n, sak.max)
+  return n
+}
+export const lavesteNivå = (nivåer = []) => { const l = nivåer.filter((n) => LEVELS.includes(n)); return l.length ? l.sort((a, b) => LEVELS.indexOf(a) - LEVELS.indexOf(b))[0] : 'S' }
+export function standardNivåer(mottakere = [], sak = null) {
+  const per = Object.fromEntries((mottakere || []).filter(Boolean).map((m) => [m.id, standardNivå(m, sak)]))
+  return { per, felles: lavesteNivå(Object.values(per)) }
+}
 const svarKilde = (atoms, s, nivå) => { const a = s.id ? atoms.find((x) => x.id === s.id) : null; const tekst = a ? levelOf(a, nivå).text : String(s.tekst || ''); return { id: s.id || null, name: a?.name || `Svar fra ${s.label || s.mottaker}`, version: a?.version || s.version || 1, level: nivå, vault: a ? isVault(a) : false, tekst } }
 export async function vurderer() {
   const alle = lagMottakere()
@@ -518,6 +543,32 @@ export async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, k
 // versjon av samme sak (versjon bare når teksten endres), og svaret kobles til den.
 const tittelAv = (s) => (String(s || '').split('\n').find((l) => l.trim()) || 'Spørsmål').trim().replace(/^#+\s*/, '').slice(0, 70)
 const førsteSetning = (t, maks = 300) => { const s = String(t || '').replace(/\s+/g, ' ').trim(); if (s.length <= maks) return s; const m = s.slice(0, maks).match(/^[\s\S]*?[.!?](?=\s|$)/); return m && m[0].length >= 20 ? m[0] : s.slice(0, maks - 1).trimEnd() + '…' }
+// Friksjon 15: «før du sender, ser du hva som sendes». Samme trinn som spor() fram til sendingen — minimer → sjekkTillatt per mottaker → skjerm → tokens —
+// men ingenting sendes, lagres eller logges, og kjent-personer-lista lærer ingenting. Svaret har samme form som hendelsen `skjermet` i spor(), pluss
+// `blokkert` {feil, detaljer, mottaker} når fail closed ville stoppet sendingen (da er `tekst` likevel med, så linja kan vise hva som ville gått).
+export function forhåndsvis({ melding = '', saker = [], mottaker: mId, mottakere: mIds, prosjekt } = {}) {
+  const alle = lagMottakere()
+  const ids = [...new Set([...(Array.isArray(mIds) ? mIds : []), ...(mId ? [mId] : [])].map((x) => String(x || '').trim()).filter(Boolean))]
+  if (!ids.length) throw new MotorFeil('mottaker kreves')
+  const ms = ids.map((id) => { const m = alle.find((x) => x.id === id); if (!m) throw new MotorFeil(`ukjent mottaker «${id}» — en av ${alle.map((x) => x.id).join(', ')}`); return m })
+  const atoms = load()
+  const { kontekst, kilder, notater } = minimer(atoms, saker, { prosjekt })
+  const maks = {}
+  let blokkert = null
+  for (const m of ms) {
+    try { maks[m.id] = sjekkTillatt(m, kilder).maks } catch (e) {
+      if (!(e instanceof Blokkert)) throw e
+      maks[m.id] = maksNivå(m)
+      if (!blokkert) blokkert = { feil: ms.length > 1 ? `Stoppet hos ${m.label} — ingenting sendes til noen av mottakerne. ${e.message}` : e.message, detaljer: e.detaljer, mottaker: m.id }
+    }
+  }
+  const sk = lagSkjermer(kjentePersoner(atoms))
+  const sendes = `${SYSTEM}\n\n${byggMelding(sk.skjerm(String(melding || '')), sk.skjerm(kontekst))}`
+  const tokensCa = Object.fromEntries(ms.map((m) => [m.id, anslåTokens(sendes, m.id)]))
+  return { mottaker: ms[0].id, mottakere: ids, antall: { ...sk.antall }, treff: sk.treff, ord: ord(sendes), tokens: { ca: tokensCa[ms[0].id], per: tokensCa }, maks: maks[ms[0].id], maksPer: maks, tekst: sendes,
+    saker: kilder.map(({ id, name, version, level, ord: o, tegn }) => ({ id, name, version, level, ord: o, tegn })), notater, blokkert }
+}
+
 export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds, prosjekt, samtale, prompt: promptId, klient = 'app', signal, på = () => {} }) {
   if (!melding || !String(melding).trim()) throw new MotorFeil('melding kreves')
   const alle = lagMottakere()

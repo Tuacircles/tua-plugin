@@ -113,6 +113,10 @@
 //   POST /api/fanget/angre {id} → { atom }                                  fila tilbake fra papirkurven dit den lå
 //   GET  /api/papirkurv → { saker: [{id, name, project, kind, source, at, grunn, innI?}], antall }
 //   POST /api/fanget/merk {dryRun} → SSE start · tall · skriver · slutt     engangs-merkingen fra Innstillinger › Arkiv (runde 2c app) — samme regel som review.js --fanget
+//   POST /api/arkiv/merk {hva: drift|fanget|begge, dryRun} → SSE start · tall {hva: drift} · tall {hva: fanget} · skriver · slutt {drift, fanget, klasser}   friksjon 15: «Merk arkivet
+//        (drift, så fanget)» — review --drift og så --fanget i én strøm (drift først, så byggeøkter ikke havner i Fanget-bøtta); /api/fanget/merk er det samme med hva: fanget.
+//   GET  /api/niva?mottaker=a,b&id=<sak>  → { per: {a: 'L', b: 'M'}, felles: 'M', vault }   friksjon 15: standardnivået en sak får som kilde — regelen i motoren (standardNivå)
+//   POST /api/spor/forhandsvis {melding?, saker, mottakere|mottaker, prosjekt?} → det `skjermet` ville sagt (tekst, tokens, skjermet, saker med nivå) + `blokkert` — ingenting sendes/logges
 //   POST /api/konklusjon {…, strøm: true} → SSE (vurderer, vurderer-del, forskjeller, konklusjon-del, konklusjon, slutt) — fremdrift for «Også til …» (runde 2c app)
 //   Engangs-merking av det som alt ligger i arkivet: node server/review.js --fanget --dry-run (viser), --fanget (setter). Alt via lageret (store.js), ingen rå filflytting.
 //
@@ -133,11 +137,11 @@ import { watchInbox, watchDesktop, importAlt, IMPORT_STEG, historyCounts, countP
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
 import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, settStandard as ollamaStandard, lokale as ollamaLokale } from './ollama.js'   // friksjon 12: modellene i Ollama
-import { spor, mottakere, trustScores, Blokkert, ord, forskjeller, konklusjon, rettKonklusjon, svarFor } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
+import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks
 import { inboxPending, inboxShareFiles } from './import.js'
 import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
-import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv, fangetKandidater, slagAvNøkkel } from './store.js'   // runde 2c: Fanget-bøtta (+ app: engangs-merkingen)
+import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv, fangetKandidater, slagAvNøkkel, driftKandidater, driftSlag } from './store.js'   // runde 2c: Fanget-bøtta (+ app: engangs-merkingen)
 import { klasseAv, tellKlasser, vekt, sistRørt, trådSamlet, brukInfo, deliveryInfo, logBruk, BRUK_HENDELSER, claudeØkter } from './store.js'   // runde 2d (03-avisen §2–§5): klasser, vekt, tråden samlet, bruk-loggen, Claude-øktene
 import { ulestAv, ulestFra, logSettAlt, settAltSist } from './store.js'   // friksjon 16: ulest fra bruk-loggen og siste «sett alt»
 import { projectAliases } from './store.js'   // runde 2d (app), friksjon 14: filer i prosjektmappa som ikke er saker, og aliasene til prosjekt-treffet i søket
@@ -678,6 +682,26 @@ http
       }
       // ── M20a: motoren ──
       if (req.method === 'GET' && url.pathname === '/api/mottakere') return json(res, 200, { mottakere: await mottakere(), trust: { merk: trustScores()._merk || '' } })
+      // Friksjon 15: standardnivået per mottaker for én sak (regelen bor i motoren; /api/mottakere har alt `nivå`/`nivåVault` per rad, så appen trenger sjelden denne)
+      if (req.method === 'GET' && url.pathname === '/api/niva') {
+        const ids = String(url.searchParams.get('mottaker') || url.searchParams.get('mottakere') || '').split(',').map((s) => s.trim()).filter(Boolean)
+        const alle = await mottakere()
+        const ms = ids.length ? ids.map((id) => alle.find((m) => m.id === id)).filter(Boolean) : alle.filter((m) => m.standard)
+        if (ids.length && ms.length !== ids.length) return json(res, 400, { error: `ukjent mottaker — en av ${alle.map((m) => m.id).join(', ')}` })
+        const id = url.searchParams.get('id') || ''
+        const sak = id ? load().find((a) => a.id === id) : null
+        if (id && !sak) return json(res, 404, { error: `fant ikke sak ${id}` })
+        return json(res, 200, { id: id || null, vault: sak ? isVault(sak) : false, ...standardNivåer(ms, sak) })
+      }
+      // Friksjon 15: «før du sender, ser du hva som sendes» — samme trinn som spor() fram til sendingen, ingenting sendes eller logges
+      if (req.method === 'POST' && url.pathname === '/api/spor/forhandsvis') {
+        const b = await readBody(req)
+        const mottakerIds = [...new Set([...(Array.isArray(b.mottakere) ? b.mottakere : []), ...(b.mottaker ? [b.mottaker] : [])].map((x) => String(x || '').trim()).filter(Boolean))]
+        if (!mottakerIds.length) return json(res, 400, { error: 'mottaker kreves (se /api/mottakere)' })
+        const saker = Array.isArray(b.saker) ? b.saker.filter((s) => s && s.id) : []
+        try { return json(res, 200, forhåndsvis({ melding: String(b.melding || ''), saker, mottakere: mottakerIds, prosjekt: b.prosjekt ? String(b.prosjekt) : undefined })) }
+        catch (e) { return json(res, e instanceof MotorFeil ? 400 : 500, { error: e.message }) }
+      }
       if (req.method === 'POST' && url.pathname === '/api/spor') {
         const b = await readBody(req)
         if (!b.melding || !String(b.melding).trim()) return json(res, 400, { error: 'melding kreves' })
@@ -962,20 +986,41 @@ http
       }
       // POST /api/fanget/merk {dryRun} — engangs-merkingen fra Innstillinger › Arkiv («Merk det som alt er fanget»), samme regel som `node review.js --fanget`.
       // SSE: start {saker} · tall {tall, perSlag, perKilde, perProsjekt, eksempler} · (ikke dryRun:) skriver {antall} · slutt {nye, filer, dryRun}. Det er Erik som trykker; dry-run først.
-      if (req.method === 'POST' && url.pathname === '/api/fanget/merk') {
+      // Friksjon 15: POST /api/arkiv/merk {hva: drift|fanget|begge, dryRun} — «Merk arkivet (drift, så fanget)» i Innstillinger › Arkivsted. Drift først (review --drift),
+      // så fanget på det som er igjen (review --fanget hopper over drift-saker). SSE: start {saker, hva, dryRun} · tall {hva: 'drift', tall, perSlag, perProsjekt, eksempler} ·
+      // tall {hva: 'fanget', tall, perSlag, perKilde, perProsjekt, eksempler} · (ikke dryRun:) skriver {hva, antall} · slutt {drift: {nye, filer}, fanget: {nye, filer}, nye, filer,
+      // klasser: {før, etter}, dryRun}. I dry-run regnes fanget-tallene som om drift alt var satt. Det er Erik som trykker; dry-run først. /api/fanget/merk = hva: fanget (runde 2c app).
+      if (req.method === 'POST' && (url.pathname === '/api/arkiv/merk' || url.pathname === '/api/fanget/merk')) {
         const b = await readBody(req)
         const dryRun = !!b.dryRun
+        const hva = url.pathname === '/api/fanget/merk' ? 'fanget' : ['drift', 'fanget', 'begge'].includes(b.hva) ? b.hva : 'begge'
         res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
         res.flushHeaders?.()
         const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
         try {
-          const atoms = load()
-          hendelse('start', { saker: atoms.length, dryRun })
-          const { tall, perSlag, perKilde, perProsjekt, nye } = fangetKandidater(atoms)
-          hendelse('tall', { tall, perSlag, perKilde, perProsjekt, eksempler: nye.slice(0, 5).map((a) => ({ id: a.id, name: a.name, project: a.project, slag: slagAvNøkkel(a), source: a.source || null })) })
-          let filer = 0
-          if (!dryRun && nye.length) { hendelse('skriver', { antall: nye.length }); for (const a of nye) a.fanget = true; filer = save(atoms); console.error(`[tua-bro] fanget merk: ${nye.length} saker merket · ${filer} filer skrevet`) }
-          hendelse('slutt', { nye: nye.length, filer, dryRun })
+          let atoms = load()
+          const før = tellKlasser(atoms)
+          hendelse('start', { saker: atoms.length, hva, dryRun })
+          const ut = { drift: { nye: 0, filer: 0 }, fanget: { nye: 0, filer: 0 } }
+          if (hva === 'drift' || hva === 'begge') {
+            const { tall, perSlag, perProsjekt, nye, prosjekter } = driftKandidater(atoms)
+            hendelse('tall', { hva: 'drift', tall, perSlag, perProsjekt, prosjekter, eksempler: nye.slice(0, 5).map((a) => ({ id: a.id, name: a.name, project: a.project, slag: driftSlag(a), source: a.source || null })) })
+            ut.drift.nye = nye.length
+            if (nye.length) {
+              if (dryRun) atoms = atoms.map((a) => (nye.includes(a) ? { ...a, drift: true } : a))          // fanget-tallene under regnes som om drift alt var satt
+              else { hendelse('skriver', { hva: 'drift', antall: nye.length }); for (const a of nye) a.drift = true; ut.drift.filer = save(atoms); console.error(`[tua-bro] drift merk: ${nye.length} saker merket · ${ut.drift.filer} filer skrevet`) }
+            }
+          }
+          if (hva === 'fanget' || hva === 'begge') {
+            const { tall, perSlag, perKilde, perProsjekt, nye } = fangetKandidater(atoms)
+            hendelse('tall', { hva: 'fanget', tall, perSlag, perKilde, perProsjekt, eksempler: nye.slice(0, 5).map((a) => ({ id: a.id, name: a.name, project: a.project, slag: slagAvNøkkel(a), source: a.source || null })) })
+            ut.fanget.nye = nye.length
+            if (nye.length) {
+              if (dryRun) atoms = atoms.map((a) => (nye.includes(a) ? { ...a, fanget: true } : a))
+              else { hendelse('skriver', { hva: 'fanget', antall: nye.length }); for (const a of nye) a.fanget = true; ut.fanget.filer = save(atoms); console.error(`[tua-bro] fanget merk: ${nye.length} saker merket · ${ut.fanget.filer} filer skrevet`) }
+            }
+          }
+          hendelse('slutt', { ...ut, nye: ut.drift.nye + ut.fanget.nye, filer: ut.drift.filer + ut.fanget.filer, klasser: { før, etter: tellKlasser(atoms) }, hva, dryRun })
         } catch (e) { hendelse('feil', { feil: e.message }) }
         return res.end()
       }
