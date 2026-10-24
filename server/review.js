@@ -10,13 +10,45 @@
 //        fil.json = [{ "id": "...", "short": "...", "medium": "..." }, …]
 //        by: 'Claude' (standard) — overskriver aldri et menneskeskrevet nivå (V10)
 //   TUA_REVIEW_BY=menneske node review.js --apply …   merk som menneskeskrevet
+//
+//   node review.js --samtaler --dry-run   friksjon 9 (24.10.2026): viser hvilke samtale-saker som får ny ingress etter regelen «siste vending»
+//                                         («Sist: <siste prompt> → <første setning av svaret> · N vendinger · periode»), skriver ingenting
+//   node review.js --samtaler             skriver S på nytt (by: regel) for de samtalene. Menneskeskrevet S røres aldri (V10); S skrevet av
+//                                         Claude røres bare når den er utdatert (fra en eldre versjon). Lest ut av transkriptet (L) — trenger
+//                                         ikke øktfila eller Desktop-cachen, så det virker også for samtaler kildene er borte for.
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX } from './store.js'
+import { samtaleSFraTranskript } from './import.js'
 
 const args = process.argv.slice(2)
 const atoms = load()
+
+if (args.includes('--samtaler')) {
+  const dryRun = args.includes('--dry-run')
+  const tall = { samtaler: 0, endres: 0, uendret: 0, menneske: 0, annen: 0, uleselig: 0 }
+  const vis = []
+  for (const a of atoms) {
+    if (a.kind !== 'samtale') continue
+    tall.samtaler++
+    const S = samtaleSFraTranskript(a.content, { first: a.createdAt, last: a.capturedAt })
+    if (!S) { tall.uleselig++; continue }
+    const old = a.levels?.S
+    if (old?.by === 'menneske') { tall.menneske++; continue }                       // V10: menneskeskrevet overskrives aldri
+    if (old && old.by !== 'regel' && !isStale(a, 'S')) { tall.annen++; continue }   // Claude-skrevet og gjeldende: la stå
+    if (old?.text === S) { tall.uendret++; continue }
+    tall.endres++
+    if (vis.length < 12) vis.push(`${a.project} / ${a.name}\n    før: ${old?.text || '(mangler)'}\n    nå:  ${S}`)
+    if (!dryRun) { a.levels = { ...(a.levels || {}), S: mkLevel(S, 'regel', a.version || 1) } }
+  }
+  console.log(`${tall.samtaler} samtale-saker · ${tall.endres} får ny S (siste vending) · ${tall.uendret} har den alt · ${tall.menneske} menneskeskrevet (røres ikke) · ${tall.annen} skrevet av Claude og gjeldende (røres ikke) · ${tall.uleselig} uten lesbart transkript${dryRun ? ' · DRY-RUN, ingenting skrevet' : ''}\n`)
+  for (const v of vis) console.log(v)
+  if (tall.endres > vis.length) console.log(`… og ${tall.endres - vis.length} til`)
+  if (!dryRun && tall.endres) { const written = save(atoms); console.log(`\n${tall.endres} ingresser skrevet (by: regel) · ${written} filer skrevet`) }
+  else if (!dryRun) console.log('\nIngenting å skrive.')
+  process.exit(0)
+}
 const index = (() => { try { return filesMode() ? JSON.parse(fs.readFileSync(path.join(FILES_ROOT, '.tua', 'index.json'), 'utf8')) : {} } catch { return {} } })()
 const fileOf = (a) => (filesMode() && index[a.id] ? path.join(FILES_ROOT, index[a.id]) : '')
 const needsOf = (a) => ['S', 'M'].filter((L) => needsLevel(a, L)).map((L) => (a.levels?.[L] ? `${L} utdatert (fra v${a.levels[L].of}, nå v${a.version || 1})` : `${L} mangler`))

@@ -91,9 +91,43 @@ export function firstSentence(t, max = S_MAX) {
 }
 export const promptTitle = (t) => titleOf(firstSentence(t, 80), 'Spørsmål')
 // Et par = én brukermelding og svarene som kom etter den (til neste brukermelding). Leserne leverer pairs = [{prompt, at, answers: [tekst]}].
-export const nyttPar = (prompt, at) => ({ prompt: String(prompt || ''), at: at || null, answers: [] })
-// S etter regel: «Tittel: første brukermelding» innenfor 300 tegn
+export const nyttPar = (prompt, at) => ({ prompt: String(prompt || ''), at: at || null, answers: [], svar: '' })   // svar: siste assistent-tekst i paret, uansett lengde (til S)
+// S etter regel: «Tittel: første brukermelding» innenfor 300 tegn — for dokumenter, artifacts og vedlegg. Samtaler bruker samtaleS (under).
 export const ruleS = (title, firstUser) => clip(flat(title ? `${title}: ${firstUser}` : firstUser) || flat(title), S_MAX)
+// S etter regel for SAMTALER (friksjon 9, bruksdag 1, 24.10.2026): avisen skal fortelle hva som er nytt, og for en samtale er det siste vending —
+// ikke første prompt. «Sist: <siste prompt, kort> → <første setning av svaret> · N vendinger · <første dato>–<siste dato>». Tittelen beholdes.
+// Regelskrevet (by: regel), så ny import erstatter den når samtalen har fått nye vendinger; menneskeskrevet S røres aldri (V10, mergeLevels).
+const renTekst = (t) => flat(String(t || '').replace(/^#+\s*/gm, '').replace(/[*_`>]/g, ''))
+const datoKort = (t) => (t ? new Date(t).toLocaleDateString('no-NO', { day: 'numeric', month: 'numeric', year: 'numeric' }) : '')
+const førsteSetning = (t, max) => { const m = t.match(/^[\s\S]*?[.!?](?=\s|$)/); return m && m[0].length >= 20 && m[0].length <= max ? m[0] : clip(t, max) }   // alltid bare første setning når den finnes
+export function samtaleS({ pairs = [], turns, first, last } = {}) {
+  const sistePar = [...(pairs || [])].reverse().find((p) => flat(p.prompt))
+  const n = turns ?? (pairs || []).length
+  const d1 = datoKort(first), d2 = datoKort(last || first)
+  const periode = d1 && d2 && d1 !== d2 ? (d1.slice(-4) === d2.slice(-4) ? `${d1.slice(0, -4)}–${d2}` : `${d1}–${d2}`) : d2 || d1
+  const hale = [`${n} ${n === 1 ? 'vending' : 'vendinger'}`, periode].filter(Boolean).join(' · ')
+  if (!sistePar) return hale
+  const svar = renTekst(sistePar.svar || sistePar.answers?.at(-1) || '')
+  const plass = S_MAX - hale.length - 3                                     // « · » mellom hode og hale
+  let hode = `Sist: ${clip(renTekst(sistePar.prompt), Math.min(140, plass))}`
+  if (svar && plass - hode.length - 3 >= 40) hode += ` → ${førsteSetning(svar, plass - hode.length - 3)}`
+  return clip(`${hode} · ${hale}`, S_MAX)
+}
+// Samme regel lest ut av en lagret samtale-sak (L er transkriptet «**Bruker:** …» / «**Claude:** …» med hodelinje) — til review.js --samtaler,
+// som skriver S på nytt for samtaler som alt ligger i arkivet uten å trenge øktfila eller Desktop-cachen. null når teksten ikke er et transkript.
+export function samtaleSFraTranskript(content, { first = null, last = null } = {}) {
+  const tekst = String(content || '')
+  const hode = tekst.split(/\n\s*\n/)[1] || ''
+  const datoer = [...hode.matchAll(/(\d{4}-\d{2}-\d{2})/g)].map((m) => Date.parse(m[1])).filter(Boolean)
+  const oppgaver = hode.match(/(\d+) oppgaver/)
+  const pairs = []
+  for (const m of tekst.matchAll(/^\*\*(Bruker|[^*\n]{1,40}):\*\* ([\s\S]*?)(?=\n\n\*\*[^*\n]{1,40}:\*\* |\n\n_\(forkortet|$)/gm)) {
+    if (m[1] === 'Bruker') pairs.push(nyttPar(m[2], null))
+    else if (pairs.length && m[2].trim()) { pairs.at(-1).answers.push(m[2].trim()); pairs.at(-1).svar = m[2].trim() }
+  }
+  if (!pairs.length) return null
+  return samtaleS({ pairs, turns: oppgaver ? Number(oppgaver[1]) : pairs.length, first: datoer[0] || first, last: datoer[1] || datoer[0] || last })
+}
 // Datalinjer: nesten bare tall og skilletegn («10027245·450000 10059885·140000», tabellrader med id/pris). En tittel tas fra
 // første linje med bokstaver, og et svar/dokument som i hovedsak består av datalinjer (≥ 60 %) regnes som en data-dump og
 // blir ikke eget atom — innholdet står uansett i samtalens transkript. Regelen gjelder bare auto-fangst (svar, filer), ikke samtaler.
@@ -168,7 +202,7 @@ export function parseCodeSession(file, { maxChars = 300_000 } = {}) {
       if (t && !/^\[Request interrupted/.test(t)) { s.prompts.push(t); s.pairs.push(nyttPar(t, when)); s.turns++; s.first ??= when; s.last = when || s.last; s.lines.push(`**Bruker:** ${t}`) }
     } else if (o.type === 'assistant') {
       const t = blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n').trim()
-      if (t) { s.lastAssistant = t; s.lines.push(`**Claude:** ${t}`); if (t.length >= MIN_SVAR) { s.answers.push(t); s.pairs.at(-1)?.answers.push(t) } }   // M19: svaret hører til siste prompt
+      if (t) { s.lastAssistant = t; s.lines.push(`**Claude:** ${t}`); const par = s.pairs.at(-1); if (par) par.svar = t; if (t.length >= MIN_SVAR) { s.answers.push(t); par?.answers.push(t) } }   // M19: svaret hører til siste prompt; svar = siste tekst (til S, friksjon 9)
       for (const b of blocks) {
         if (b.type !== 'tool_use' || !b.input?.file_path) continue
         if (b.name === 'Write' && typeof b.input.content === 'string') s.files.set(b.input.file_path, b.input.content)
@@ -274,7 +308,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
       const header = `# ${s.convo}\n\n_${srcLabel} · ${s.turns} oppgaver · ${iso(s.first)}${s.last && iso(s.last) !== iso(s.first) ? ` – ${iso(s.last)}` : ''} · ${proj}${repo ? ` · ${repo}` : ''} · øktfil ${path.basename(file)}_\n\n`
       const { atom, status } = put({
         key: `samtale:${s.id}`, kind: 'samtale', name: s.convo, content: header + s.transcript, project: proj, convo: s.convo, source: srcLabel, by: 'regel',
-        tags: ['samtale', source], links, short: ruleS(s.title, s.firstUser), summary: `${srcLabel}-økt importert fra ${path.basename(file)} (${s.turns} oppgaver).`,
+        tags: ['samtale', source], links, short: samtaleS(s), summary: `${srcLabel}-økt importert fra ${path.basename(file)} (${s.turns} oppgaver).`,   // S = siste vending (friksjon 9)
       }, s.last)
       count(status); perProject[proj] = (perProject[proj] || 0) + 1
       const derived = [{ id: atom.id, version: atom.version || 1, level: 'L' }]
@@ -650,7 +684,8 @@ export function importParsed(data, {
       const { atom, status } = put({
         key: `samtale:${c.id}`, kind: 'samtale', name: c.title, content: header + c.transcript, project: proj, convo: c.title,
         source: c.source, by: 'regel', tags: ['samtale', ...(c.tags || [])], links,
-        short: ruleS(c.title, c.firstUser), summary: c.summary ? clip(c.summary, 200) : `Importert fra ${label}${via ? ` via ${via}` : ''}.`,
+        short: c.pairs?.length ? samtaleS({ pairs: c.pairs, turns: c.pairs.length, first: c.created, last: c.updated }) : ruleS(c.title, c.firstUser),   // S = siste vending (friksjon 9)
+        summary: c.summary ? clip(c.summary, 200) : `Importert fra ${label}${via ? ` via ${via}` : ''}.`,
       }, c.updated, { moveFromDefault: !!c.project })
       count(status); perProject[atom.project] = (perProject[atom.project] || 0) + 1
       // artifacts og vedlegg med tekst → egne atomer, bygget av samtalen (men ikke leveranser)
@@ -736,7 +771,7 @@ export function importParsed(data, {
       f.meldingsfelter ? `- Felter på meldingen: ${f.meldingsfelter.join(', ')}` : null,
       kind === 'claude' ? `- Prosjekt-kobling på samtalene: ${f.prosjektkobling ? `ja (${f.prosjektkobling})` : `nei — samtaler uten prosjekt ligger i «${defaultProject}»`}${f.design ? ` · ${f.design} design-samtaler (har prosjekt)` : ''}${f.prosjekterIFila ? ` · ${f.prosjekterIFila} prosjekter i fila` : ''}${f.prosjekterFraNabo ? ` · ${f.prosjekterFraNabo} prosjekter lest fra projects-*.zip ved siden av` : ''}${f.andreFiler?.length ? ` · ikke brukt: ${f.andreFiler.slice(0, 4).join(', ')}` : ''}` : null, '',
     ] : []),
-    `Hver samtale er ett atom (kind «samtale») med peker tilbake til samtalen; S er laget etter regel (tittel + første melding). M lages med «ny gjennomgang» (\`node tua-plugin/server/review.js\`).`,
+    `Hver samtale er ett atom (kind «samtale») med peker tilbake til samtalen; S er laget etter regel (siste vending: «Sist: … → …», antall og periode). M lages med «ny gjennomgang» (\`node tua-plugin/server/review.js\`).`,
     moveTo ? `Fila er flyttet til ${moveTo}.` : null, 'Alt kan slettes igjen i Finder.',
   ].filter((l) => l !== null).join('\n')
 
