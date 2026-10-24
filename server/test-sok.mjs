@@ -213,7 +213,19 @@ try {
   { const at = load(); const ny = upsert(at, { key: 'notat:etter', name: 'Notat skrevet etter sett alt', project: 'Aas Kapital', source: 'Erik', by: 'menneske', content: lang('# Etter') }).atom; ny.capturedAt = sa.json.at + 5000; ny.createdAt = ny.capturedAt; save(at)
     const at2 = (await hent('/api/atoms')).json
     ok('en sak skrevet etter «sett alt» er ulest; de andre ikke', u(at2.atoms, 'notat:etter') === true && at2.uleste === 1, `uleste ${at2.uleste}`) }
-  ok('POST /api/bruk med ukjent hendelse → 400 med lista (sett er med)', (await post('/api/bruk', { id: pr.id, hendelse: 'tull' })).status === 400 && (await post('/api/bruk', { id: pr.id, hendelse: 'tull' })).json.hendelser.includes('sett'))
+  ok('POST /api/bruk med ukjent hendelse → 400 med lista (sett og fjernet er med)', (await post('/api/bruk', { id: pr.id, hendelse: 'tull' })).status === 400 && (await post('/api/bruk', { id: pr.id, hendelse: 'tull' })).json.hendelser.includes('sett') && (await post('/api/bruk', { id: pr.id, hendelse: 'tull' })).json.hendelser.includes('fjernet'))
+  // ── × i Siden sist (Erik 24.10: «fjerne elementer»): fjernet tar linja ut til noe nytt skjer ──
+  const ssF0 = (await hent('/api/siden-sist?dager=7')).json
+  const ssF0b = ssF0.spørsmål.some((s) => s.id === pr.id) && (await post('/api/bruk', { id: pr.id, hendelse: 'fjernet' })).status === 200 ? (await hent('/api/siden-sist?dager=7')).json : null
+  ok('POST /api/bruk {fjernet} på spørsmålet → hele tråden borte fra /api/siden-sist (spørsmålet, svarene som kom, konklusjonen som venter); de andre står; teller ikke som bruk', !!ssF0b && !ssF0b.spørsmål.some((s) => s.id === pr.id) && !ssF0b.svarKom.some((s) => s.tråd === pr.id) && !ssF0b.konklusjoner.some((k) => k.id === ku.id) && ssF0b.spørsmål.length === ssF0.spørsmål.length - 1 && (brukInfo().get(pr.id)?.antall || 0) === 0 && brukInfo().get(pr.id)?.fjernet > 0, ssF0b ? `${ssF0b.svarKom.length} svar · ${ssF0b.konklusjoner.length} konklusjoner` : 'ikke fjernet')
+  { const at = load(); const p0 = at.find((a) => a.id === pr.id); const nyttSvar = upsert(at, { key: 'svar:spor:9', kind: 'svar', name: 'Svar fra Test (nytt)', project: 'Aas Kapital', convo: p0.convo, source: 'Test', by: 'regel', tags: ['svar'], derivedFrom: [{ id: pr.id, version: 1, level: 'L' }], short: 'Et nytt svar.', content: lang('# Nytt svar') }).atom; nyttSvar.capturedAt = Date.now() + 2000; nyttSvar.createdAt = nyttSvar.capturedAt; p0.ga = [...(p0.ga || []), { id: nyttSvar.id, version: 1 }]; save(at)
+    const ssF1 = (await hent('/api/siden-sist?dager=7')).json
+    ok('et nytt svar i tråden etter «fjernet» → spørsmålet er tilbake i Siden sist (med 3 svar)', ssF1.spørsmål.some((s) => s.id === pr.id && s.tråden.svar.length === 3), ssF1.spørsmål.map((s) => `${s.name} (${s.tråden.svar.length})`).join(' · ')) }
+  const øktF = ssF0.økter.find((ø) => ø.økt === 'aaaa1111'), dagF = ssF0.økterPerDag.find((d) => d.økter.includes('aaaa1111'))
+  const ssF2 = (await post('/api/bruk', { id: øktF.sak, hendelse: 'fjernet' })).status === 200 ? (await hent('/api/siden-sist?dager=7')).json : null
+  const dagF2 = ssF2?.økterPerDag.find((d) => d.dag === dagF.dag)
+  ok('POST /api/bruk {fjernet} på økt-saken → økta er borte, dagen regnet om (én økt færre, eller dagen borte når den var alene); antallØkter følger', !!ssF2 && !ssF2.økter.some((ø) => ø.økt === 'aaaa1111') && (dagF.økter.length === 1 ? !dagF2 : dagF2.antall === dagF.antall - 1 && !dagF2.økter.includes('aaaa1111')) && ssF2.antallØkter === ssF0.antallØkter - 1, `${dagF.antall} → ${dagF2?.antall ?? 'borte'}`)
+  ok('konklusjonen i den fjernede tråden er eldre enn fjerningen og står fortsatt ikke for seg (bare spørsmålet kom tilbake, med «konklusjon venter»); fjernet på den selv svarer 200', !(await hent('/api/siden-sist?dager=7')).json.konklusjoner.some((k) => k.id === ku.id) && (await hent('/api/siden-sist?dager=7')).json.spørsmål.find((s) => s.id === pr.id)?.konklusjon_venter === true && (await post('/api/bruk', { id: ku.id, hendelse: 'fjernet' })).status === 200)
 } finally { bro.kill() }
 
 console.log(`\n${feil ? `${feil} feil` : 'alle grønne'} · testarkiv: ${ROOT}`)
