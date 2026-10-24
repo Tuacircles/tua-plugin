@@ -9,7 +9,7 @@ import { watchFinder } from './bygd/tua/finder.mjs';
 import { skjermerFor, lever, endepunkt, maksNivå as maksNiv_, anslåTokens as ansl_Tokens, ord, del } from './bygd/tua/motor.mjs';
 import { instruksFor, trådFørst as tr_dF_rst, trådLinje as tr_dLinje, skalVise, sidenSist } from './bygd/tua/dora.mjs';
 import { lesInnInnboks } from './bygd/tua/innlesing.mjs';
-import { enumType, stringType, booleanType, numberType, arrayType, objectType } from './bygd/vendor/zod/v3/types.mjs';
+import { enumType, stringType, booleanType, numberType, arrayType, objectType, unionType } from './bygd/vendor/zod/v3/types.mjs';
 
 // server.js — Tua som MCP-server (stdio).
 //
@@ -21,7 +21,7 @@ import { enumType, stringType, booleanType, numberType, arrayType, objectType } 
 //   tua_unlink  — fjern referansen
 //   tua_compose — M10: bygg en leveranse av flere atomer (lest på S/M/L) → nytt atom med bygget_av
 //
-//   tua_share   — runde 3a: «del med <navn>» → delingssak gjennom motoren (S standard, V11), mottakersiden er runde 3b
+//   tua_share   — runde 3a+3b: «del med <navn>» → delingssak + delingslenke til mottakersiden gjennom motoren (S standard, V11); mottakeren er en person (deling.js)
 //
 // M10/V15: hver utlevering (tua_get, tua_compose) logges i .tua/utlevering.jsonl (bare metadata);
 // Vault-merkede atomer (tag «vault») utleveres aldri utover S; fil endret utenfor Tua = ny versjon.
@@ -56,7 +56,7 @@ const INSTRUCTIONS =
   '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt. ' +
   'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen. ' +
   '(7) SIDEN SIST: første gang du bruker Tua i en samtale, kommer en blokk «Siden sist i Tua» (Spør-tråder, konklusjoner, delinger, filer lest inn i appen) — gjengi den i én kort liste før du svarer, så brukeren ser hva som er gjort i Tua. tua_search viser Spør-tråder og konklusjoner for prosjektet øverst. ' +
-  '(8) «DEL MED <navn>»: tua_share lager en delingssak (skjermet gjengivelse, logget) — S som standard, M/L bare når brukeren sier det. Kall først med forhandsvis=true og still ETT spørsmål («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi den kopierbare teksten og lenka videre slik de er.';
+  '(8) «DEL MED <navn>»: tua_share deler med en PERSON (kollega) — lager en delingssak (skjermet gjengivelse, logget) og en lenke til mottakersiden (låste rader på nivået, «Be om hele»); S som standard, M/L bare når brukeren sier det. Kall først med forhandsvis=true og still ETT spørsmål («Anna får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi lenka, nedlastingslenka og den kopierbare teksten videre slik de er.';
 
 const server = new McpServer({ name: 'tua', version: '0.5.8' }, { instructions: INSTRUCTIONS });
 
@@ -559,43 +559,52 @@ server.registerTool(
   },
 );
 
-// ── Runde 3a: «del med …» — delingssak gjennom motoren (mottakersiden er runde 3b) ──────────────────
+// ── Runde 3a + 3b: «del med …» — delingssak og MOTTAKERSIDE gjennom motoren. Mottakeren er en person (primitiv 2, CLAUDE.md §2.1), lenka er tua://del/<token> ──
 server.registerTool(
   'tua_share',
   {
     title: 'Del med en person',
     annotations: WRITE,
     description:
-      'Del én eller flere saker med en person («del med Revisor», «del denne på S med anna@firma.no»). Lager en DELINGSSAK gjennom motoren: ' +
-      'en skjermet gjengivelse av det som deles (plassholdere i stedet for personopplysninger), med Utlevert-linje, lenke tua://sak/<id> og en kopierbar tekst ' +
-      'du gir brukeren. S er standard (V11) — M eller L bare når brukeren sier det; Vault-merkede saker deles bare som S. ' +
-      'Kall FØRST med forhandsvis=true, still ett spørsmål («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»), og kall uten forhandsvis når brukeren sier ja. ' +
-      'Mottakersiden (en lenke mottakeren kan åpne) kommer senere; i dag er delingssaken det som finnes, og brukeren sender den kopierbare teksten selv.',
+      'Del én eller flere saker med en PERSON («del med Anna», «del denne på S med anna@firma.no», «del med Anna og Bjarte»). Går gjennom motoren og lager: ' +
+      'en DELINGSSAK (skjermet gjengivelse — plassholdere i stedet for personopplysninger — med Utlevert-linje) og en DELINGSLENKE til MOTTAKERSIDEN ' +
+      '(http://127.0.0.1:5274/del/<token> og tua://del/<token>): mottakerens navn, hvem som delte og når, sakene som låste rader på nivået de ble delt, ' +
+      '«Be om hele» (e-post tilbake til brukeren) og linja om at ingenting er sendt til noen modell. Siden kan også lastes ned som én HTML-fil (…/del/<token>.html) ' +
+      'som brukeren sender selv når mottakeren ikke er på samme nett. Finnes personen fra før (navn eller e-post), brukes den; et nytt navn blir en ny person (kollega). ' +
+      'S er standard (V11) — M eller L bare når brukeren sier det; Vault-merkede saker deles bare som S. ' +
+      'Kall FØRST med forhandsvis=true, still ett spørsmål («Anna får S av 2 saker, 3 opplysninger skjermes — ok?»), og kall uten forhandsvis når brukeren sier ja. ' +
+      'Gi brukeren lenka, nedlastingslenka og den kopierbare teksten slik de er. Delingen kan trekkes tilbake i Tua-appen (lenka slutter å virke).',
     inputSchema: {
       ids: arrayType(stringType()).min(1).describe('Sak-id-ene som skal deles (fra tua_search/tua_list).'),
-      til: stringType().min(1).describe('Mottakeren som tekst: navn eller e-post («Revisor», «anna@firma.no»).'),
+      til: unionType([stringType().min(1), arrayType(stringType().min(1)).min(1)]).describe('Mottakeren(e): navn, e-post, «Navn <epost>» eller et sirkelnavn — én streng («Anna», «Anna og Bjarte») eller en liste.'),
       level: LevelArg.optional().describe('Nivået som deles: S (standard), M eller L — M/L bare når brukeren sier det.'),
       project: stringType().optional().describe('Prosjektet delingssaken lagres i. Standard: den første sakens prosjekt.'),
       convo: stringType().optional().describe('Samtalen dette skjer i (3–8 ord).'),
-      forhandsvis: booleanType().optional().describe('true = regn ut hva som deles og hva som skjermes, uten å lagre eller logge — til spørsmålet før deling.'),
+      forhandsvis: booleanType().optional().describe('true = regn ut hvem som får hva og hva som skjermes, uten å opprette, lagre eller logge — til spørsmålet før deling.'),
     },
   },
   async ({ ids, til, level = 'S', project, convo, forhandsvis }) => {   // ASCII-navn: MCP-klientene avviser æøå i parameternavn
     const atoms = load();
     let r;
-    try { r = del(atoms, { ids, til, nivå: level, prosjekt: project, klient: CLIENT, convo, forhåndsvis: !!forhandsvis }); }
+    try { r = del(atoms, { ids, til, nivå: level, prosjekt: project, klient: CLIENT, convo, forhåndsvis: !!forhandsvis, base: process.env.TUA_APP_URL || 'http://127.0.0.1:5274' }); }
     catch (e) { return text(`Delingen er ikke laget: ${e.message}`) }
     const linjer = r.linjer.length ? `\n${r.linjer.join('\n')}` : '';
     const notater = r.notater.length ? `\nMerk: ${r.notater.join('; ')}` : '';
+    const nye = r.mottakere.filter((m) => m.ny).map((m) => m.navn);
+    const personer = `Mottaker${r.mottakere.length === 1 ? '' : 'e'}: ${r.mottakere.map((m) => `${m.navn}${m.epost ? ` <${m.epost}>` : ''} (${m.ny ? 'ny' : m.merke})`).join(', ')}${r.sirkler.length ? ` · sirkel: ${r.sirkler.join(', ')}` : ''}`;
     if (r.forhåndsvis) {
-      return text(`Forhåndsvisning — ingenting er lagret eller logget. ${r.setning}${linjer}${notater}\nSaker: ${r.kilder.map((k) => `[${k.id}] ${k.name} (${k.level}, ${k.ord} ord)`).join(' · ')}\n` +
+      return text(`Forhåndsvisning — ingenting er opprettet, lagret eller logget. ${r.setning}${linjer}${notater}\n${personer}${nye.length ? ` — ${nye.join(', ')} legges til som ny${nye.length === 1 ? '' : 'e'} kollega${nye.length === 1 ? '' : 'er'} når delingen lages` : ''}\n` +
+        `Saker: ${r.kilder.map((k) => `[${k.id}] ${k.name} (${k.level}, ${k.ord} ord)`).join(' · ')}\n` +
         `Spør brukeren én gang: «${r.setning.replace(/\.$/, '')} — ok?» Sier hen ja: kall tua_share igjen uten forhåndsvis (samme ids, til og level).`)
     }
-    console.error(`[tua] share → ${r.til} · ${r.nivå} · ${r.kilder.length} saker · ${r.treff} skjermet · ${r.id} (${r.status})`);
+    console.error(`[tua] share → ${r.til} · ${r.nivå} · ${r.kilder.length} saker · ${r.treff} skjermet · ${r.id} (${r.status}) · ${r.lenke}`);
     return text(
-      `Delingssak ${r.status === 'ny' ? 'lagret' : r.status} som atom ${r.id}${r.version > 1 ? ` (v${r.version})` : ''} i ${r.prosjekt}. ${r.setning}${linjer}${notater}` +
-        `\nUtlevert: logget (${r.til} · ${r.nivå} · ${r.kilder.length} ${r.kilder.length === 1 ? 'sak' : 'saker'} · ${r.ord} ord · ca. ${r.tokens.ca} tokens).` +
-        `\nLenke: ${r.lenke} — mottakersiden (lenka mottakeren kan åpne) kommer i runde 3b; i dag åpner den delingssaken i Tua-appen: ${addr(r.id)}` +
+      `Delingssak ${r.status === 'ny' ? 'lagret' : r.status} som atom ${r.id}${r.version > 1 ? ` (v${r.version})` : ''} i ${r.prosjekt}. ${r.setning}${linjer}${notater}\n${personer}` +
+        `\nUtlevert: logget per person (${r.til} · ${r.nivå} · ${r.kilder.length} ${r.kilder.length === 1 ? 'sak' : 'saker'} · ${r.ord} ord · ca. ${r.tokens.ca} tokens).` +
+        `\nMottakersiden (lenka ${r.til} åpner — virker på denne maskinen og på samme nett når Tua-appen kjører): ${r.lenke}` +
+        `\nSom fil (last ned og send selv, e-post eller Teams, når mottakeren ikke er på samme nett): ${r.lenker.html}` +
+        `\nTua-lenke: ${r.lenker.tua} · delingssaken i appen: ${addr(r.id)} · trekk tilbake: «Del …» på saken i appen.` +
+        (r.sirkelForslag ? `\nSirkel: ${r.sirkelForslag.forslag} har fått noe sammen ${r.sirkelForslag.antall} ganger — Tua foreslår en sirkel. Spør brukeren om et navn («Prosjektgruppa»?); navnet settes i Tua-appen under Innstillinger › Mottakere.` : '') +
         `\n\nKopierbar tekst til ${r.til} — gi den til brukeren slik den er (den er skjermet; originalene er ikke med):\n\n---\n\n${r.kopierbar}`,
     )
   },

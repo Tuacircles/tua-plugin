@@ -166,6 +166,11 @@ const sidenSistBlokk = (s) => s ? el('div', { class: 'siden' },
   s.lagret ? el('p', { class: 'why' }, `${s.lagret} ${s.lagret === 1 ? 'sak' : 'saker'} lagret med vilje.`) : null,
 ) : null
 
+// Runde 3b: delingen på en delingssak — mottakerne som personer, lenka til mottakersiden (åpnes i nettleseren), «Kopier lenka», fila, trukket
+const kopierLenke = async (tekst, knapp) => { const før = knapp.textContent; try { await navigator.clipboard.writeText(tekst); knapp.textContent = 'Kopiert ✓' } catch { knapp.textContent = 'Kunne ikke kopiere' } setTimeout(() => { knapp.textContent = før }, 2500) }
+const delingBlokk = (d) => d ? [el('div', { class: 'lbl' }, 'Delt med'), el('div', { class: 'chips' }, ...d.til.map((t) => el('span', { class: 'chip', title: t.epost || '' }, `${t.navn}${t.merke ? ' · ' + t.merke : ''}`)), el('span', { class: 'chip' }, `nivå ${d.nivå}`), d.trukket ? el('span', { class: 'chip warn' }, 'trukket tilbake') : null, d.forespørsler ? el('span', { class: 'chip warn' }, `${d.forespørsler} ba om hele`) : null),
+  d.trukket ? el('p', { class: 'why' }, 'Delingen er trukket tilbake — lenka virker ikke lenger.') : el('div', { class: 'row' }, el('a', { class: 'btn', href: d.http, target: '_blank', rel: 'noopener' }, 'Mottakersiden'), (() => { const b = el('button', { class: 'btn', type: 'button' }, 'Kopier lenka'); b.addEventListener('click', () => kopierLenke(d.http, b)); return b })(), el('a', { class: 'btn', href: d.html, target: '_blank', rel: 'noopener', title: 'Siden som én HTML-fil — send den selv når mottakeren ikke er på samme nett' }, 'Som fil'))] : []
+
 // ── ett atom (V12: S først, M/L på forespørsel, «Åpne i …»)
 function renderAtom(a) {
   const seg = el('div', { class: 'seg', role: 'group', 'aria-label': 'Nivå' },
@@ -188,6 +193,7 @@ function renderAtom(a) {
     el('div', { class: 'body' }, md(a.text)),
     ...chips('Bygget av', a.builtBy?.map((s) => ({ id: s.id, text: `${s.name} (v${s.version}, ${s.level})${s.missing ? ' · slettet' : s.stale ? ' · nå v' + s.now : ''}`, warn: s.stale || s.missing }))),
     ...chips('Synlig for', a.share?.map((s) => ({ text: `${s.project} · ${s.level}` }))),
+    ...delingBlokk(a.deling),
     ...chips('Relaterte', a.related?.map((r) => ({ id: r.id, text: r.name, title: r.how }))),
     a.tags?.length ? el('div', { class: 'chips' }, ...a.tags.map((t) => el('span', { class: 'chip' }, '#' + t))) : null,
     el('div', { class: 'row' },

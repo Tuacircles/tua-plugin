@@ -37,6 +37,7 @@ import { fileURLToPath } from 'node:url'
 import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, LONG_L, FILES_ROOT, filesMode, DATA_DIR, hashOf } from './store.js'
 import { readKey, hasKey, ollamaStatus } from './keychain.js'
 import { OLLAMA_URL, OLLAMA_VERT } from './ollama.js'   // friksjon 12: adressen og standardmodellen (ollamaStatus().modell) bor der
+import { løsMottakere, registrerDeling, skrivMottakere, lagreDeling, hentDeling, delingerFor, trekkTilbake, noterForespørsel, lenkerFor, nyttToken, eier, mottakerside, trukketSide, BASE } from './deling.js'   // runde 3b: personer, sirkler som emerger, delinger med token, mottakersiden
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const TRUST_FILE = path.join(HERE, 'trust-scores.json')
@@ -902,53 +903,100 @@ export function lever(atoms, sak, { nivå = 'L', mottaker = 'claude', tool = 'tu
   return { nivå: eff, ønsket, maks, linje, felt, tekst, got, S, antall, treff: Object.values(antall).reduce((a, b) => a + b, 0), tokens, ord: ord(alt), logget, mottaker: m }
 }
 
-// del(): «del med …» (runde 3a; mottakersiden — lenka som kan åpnes — er runde 3b). Lager en DELINGSSAK gjennom motoren: lese (minimer) → klippe
-// (Vault → S, fail closed, med linje) → skjerme → lagre gjengivelsen → logge. Mottakeren er en person som navn/e-post i tekst (V11: S som standard;
-// M/L bare når brukeren sier det — personer har ingen Trust Score ennå, det er 3b). Delingssaken ER det som deles: en skjermet gjengivelse med
-// «Utlevert»-linje, lenke tua://sak/<id> og kopierbar tekst. Originalene står aldri i den. `forhåndsvis: true` regner ut det samme uten å lagre
-// eller logge — til spørsmålet Claude stiller før deling («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»).
+// del(): «del med …» — runde 3a laget delingssaken; runde 3b (planen videre §4 3b, Erik: kollegaer først) gjør mottakeren til en PERSON og gir delingen en
+// LENKE. Første gang primitiv 2, «mottaker er en fasett» (CLAUDE.md §2.1), finnes i Tua 2.0. Gjennom motoren: lese (minimer) → klippe (Vault → S, fail
+// closed, med linje) → skjerme → minimere → lagre → logge. Ingen kodevei utenom.
+//   til            navn, e-post, «Navn <epost>» eller et sirkelnavn — én streng (også «Anna, Bjarte» / «Anna og Bjarte») eller en liste. Finnes personen i
+//                  .tua/mottakere.json, brukes den; et nytt navn blir en ny person (merke «kollega»). Et sirkelnavn gir medlemmene. (deling.js)
+//   nivå           S som standard (V11) — M/L bare når brukeren valgte det; Vault-merkede saker deles bare som S (V15/V21, fail closed, med linje).
+//   forhåndsvis    regner ut det samme (hvem får hva, hva skjermes) uten å opprette personer, lagre eller logge — til ETT spørsmål før deling.
+//   base           broens adresse (http://127.0.0.1:5274) — lenka på delingssaken og i svaret. tua://del/<token> i tillegg.
+// Lager: (1) delingssaken (kind leveranse, tagg deling) med den skjermede gjengivelsen og lenkene, (2) delingen i .tua/delinger.json (token → radene
+// slik de ble delt, skjermet — mottakersiden tegnes av dem, aldri av originalene), (3) én Utlevert-linje PER PERSON (mottaker = person-id, mottakerNavn,
+// personer[], deling, token, endpoint «deling (lenke)»), (4) personer og mønstre i .tua/mottakere.json — tredje felles deling gir et sirkelforslag.
+// Svaret har lenke (http), lenker {tua, http, html}, token, kopierbar tekst, mottakere (med `ny`) og sirkelforslag — det samme til Claude og appen.
 const slug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'mottaker'
-export function del(atoms, { ids = [], til, nivå = 'S', prosjekt, klient = 'Claude', convo, forhåndsvis = false } = {}) {
-  const mottaker = String(til || '').trim()
-  if (!mottaker) throw new MotorFeil('mottaker kreves («del med <navn eller e-post>»)')
+const navneliste = (n) => (n.length <= 1 ? n[0] || '' : `${n.slice(0, -1).join(', ')} og ${n.at(-1)}`)
+export function del(atoms, { ids = [], til, nivå = 'S', prosjekt, klient = 'Claude', convo, forhåndsvis = false, base, merke = 'kollega' } = {}) {
+  const tilRå = Array.isArray(til) ? til.map((t) => String(t || '').trim()).filter(Boolean) : String(til || '').trim()
+  if (!tilRå || (Array.isArray(tilRå) && !tilRå.length)) throw new MotorFeil('mottaker kreves («del med <navn eller e-post>»)')
   if (!Array.isArray(ids) || !ids.length) throw new MotorFeil('minst én sak-id kreves')
+  const { personer, sirkler: sirkelnavn, m } = løsMottakere(tilRå, { merke, opprett: !forhåndsvis })
+  if (!personer.length) throw new MotorFeil('fant ingen mottaker i «' + (Array.isArray(tilRå) ? tilRå.join(', ') : tilRå) + '»')
+  const mottakerNavn = navneliste(personer.map((p) => p.navn))
   const ønsket = LEVELS.includes(nivå) ? nivå : 'S'
   const { kilder, notater } = minimer(atoms, ids.map((id) => ({ id, nivå: ønsket })))
   if (!kilder.length) throw new MotorFeil(`Ingen av sakene finnes: ${notater.join('; ')}`)
   const linjer = []
   for (const k of kilder) if (k.vault && k.level !== 'S') { k.level = 'S'; k.klippet = true; linjer.push(`«${k.name}» er Vault-merket og deles bare som S (V15, fail closed).`) }
   const sk = skjermerFor(atoms)
-  const deler = kilder.map((k) => {
+  const rader = kilder.map((k) => {
     const a = atoms.find((x) => x.id === k.id)
     const got = levelOf(a, k.level)
     k.tegn = got.text.trim().length; k.ord = ord(got.text)
-    return `## ${sk.skjerm(a.name)}\n_v${a.version || 1} · nivå ${k.level}${got.fallback ? ` (${got.level})` : ''}_\n\n${sk.skjerm(got.text.trim())}`
+    return { id: a.id, version: a.version || 1, level: k.level, fallback: got.fallback ? got.level : null, name: sk.skjerm(a.name), tekst: sk.skjerm(got.text.trim()) }
   })
-  const gjengivelse = deler.join('\n\n')
+  const gjengivelse = rader.map((r) => `## ${r.name}\n_v${r.version} · nivå ${r.level}${r.fallback ? ` (${r.fallback})` : ''}_\n\n${r.tekst}`).join('\n\n')
   const antall = { ...sk.antall }, treff = Object.values(antall).reduce((a, b) => a + b, 0)
   const nivåer = [...new Set(kilder.map((k) => k.level))].join('/')
   const når = new Date()
   const skjermetTekst = treff ? `${treff} opplysning${treff === 1 ? '' : 'er'} skjermet (${Object.entries(antall).map(([t, n]) => `${n} ${t}`).join(', ')})` : 'ingen opplysninger å skjerme'
-  const setning = `${mottaker} får ${nivåer} av ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'}, ${skjermetTekst}.`
+  const setning = `${mottakerNavn} får ${nivåer} av ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'}, ${skjermetTekst}.`
   const tokens = { ca: anslåTokens(gjengivelse, 'claude') }
-  if (forhåndsvis) return { forhåndsvis: true, til: mottaker, nivå: nivåer, kilder, antall, treff, linjer, notater, setning, tokens, ord: ord(gjengivelse) }
+  const mottakere = personer.map(({ id, navn, epost, merke: mk, ny }) => ({ id, navn, epost: epost || null, merke: mk, ny: !!ny }))
+  if (forhåndsvis) return { forhåndsvis: true, til: mottakerNavn, mottakere, sirkler: sirkelnavn, nivå: nivåer, kilder, antall, treff, linjer, notater, setning, tokens, ord: ord(gjengivelse), gjengivelse }
+  // ── lagre: token + deling, delingssaken, Utlevert per person, personer og mønstre. Samme personer, samme saker på samme nivå, delingen ikke trukket → samme
+  // token og samme delingssak (lenka kollegaen alt har, virker fortsatt; radene skrives på nytt om saken har endret seg); ellers et nytt token.
+  const tilNøkkel = personer.map((p) => p.id).sort().join('+')
+  const samme = delingerFor(null).find((d) => !d.trukket && (d.til || []).map((t) => t.id).sort().join('+') === tilNøkkel && (d.rader || []).length === rader.length && d.rader.every((r, i) => r.id === rader[i].id && r.level === rader[i].level))
+  const token = samme?.token || nyttToken()
+  const lenker = lenkerFor(token, base)
   const proj = String(prosjekt || '').trim() || atoms.find((x) => x.id === kilder[0].id)?.project || 'Uten prosjekt'
-  const tittel = `Deling til ${mottaker}: ${kilder.length === 1 ? kilder[0].name : `${kilder.length} saker`}`.slice(0, 90)
-  const hode = `# Deling til ${mottaker}\n\n_Delt med: ${mottaker} · nivå ${nivåer} · ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} · ${skjermetTekst} · utlevert ${fmtTid(når)} fra Claude (${klient})_` +
+  const tittel = `Deling til ${mottakerNavn}: ${kilder.length === 1 ? kilder[0].name : `${kilder.length} saker`}`.slice(0, 90)
+  const hode = `# Deling til ${mottakerNavn}\n\n_Delt med: ${personer.map((p) => (p.epost ? `${p.navn} <${p.epost}>` : p.navn)).join(', ')} · nivå ${nivåer} · ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} · ${skjermetTekst} · utlevert ${fmtTid(når)} fra ${klient}_` +
     (linjer.length ? `\n\n${linjer.map((l) => `> ${l}`).join('\n')}` : '')
-  const content = `${hode}\n\n${gjengivelse}\n\n---\n\n_Gjengivelsen er skjermet: plassholdere som [Person A] står for opplysninger som ikke er delt. Mottakersiden (lenka som kan åpnes) kommer i runde 3b._`
-  const key = `deling:${slug(mottaker)}:${hashOf([...ids].sort().join(',') + ':' + nivåer)}`
-  const { atom, status } = upsert(atoms, { key, kind: 'leveranse', name: tittel, content, project: proj, convo: convo || `Deling til ${mottaker}`, source: 'Tua', by: 'regel', tags: ['deling'],
+  const content = `${hode}\n\n**Lenke til mottakersiden:** ${lenker.http} · ${lenker.tua}\n**Som fil:** ${lenker.html}\n\n${gjengivelse}\n\n---\n\n_Gjengivelsen er skjermet: plassholdere som [Person A] står for opplysninger som ikke er delt. Mottakersiden viser sakene som låste rader på nivået de ble delt, med «Be om hele»._`
+  const key = `deling:${slug(mottakerNavn)}:${token.slice(0, 8)}`
+  const { atom, status } = upsert(atoms, { key, kind: 'leveranse', name: tittel, content, project: proj, convo: convo || `Deling til ${mottakerNavn}`, source: 'Tua', by: 'regel', tags: ['deling'],
     derivedFrom: kilder.map(({ id, version, level }) => ({ id, version, level })),
-    short: `Delt med ${mottaker} på nivå ${nivåer}: ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} (${kilder.map((k) => k.name).join(', ')}), ${skjermetTekst}.`.slice(0, 300),
-    summary: `Deling laget fra Claude (${klient}) ${fmtTid(når)}; mottakersiden er runde 3b.` })
-  const lenke = `tua://sak/${atom.id}`
-  atom.links = [...(atom.links || []).filter((l) => l.href !== lenke), { kind: 'url', href: lenke, label: `Delingen til ${mottaker}` }]
+    short: `Delt med ${mottakerNavn} på nivå ${nivåer}: ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} (${kilder.map((k) => k.name).join(', ')}), ${skjermetTekst}.`.slice(0, 300),
+    summary: `Deling laget fra ${klient} ${fmtTid(når)}; mottakersiden er ${lenker.http}.` })
+  atom.links = [...(atom.links || []).filter((l) => ![lenker.tua, lenker.http].includes(l.href)), { kind: 'url', href: lenker.http, label: `Mottakersiden til ${mottakerNavn}` }, { kind: 'url', href: lenker.tua, label: `Delingen (tua://)` }]
   save(atoms)
-  logDelivery({ tool: 'tua_share', client: klient, mottaker, endpoint: 'deling (lenke — runde 3b)', saker: kilder.map(({ id, version, level }) => ({ id, version, level })),
-    skjermet: antall, ord: ord(gjengivelse), tokens, deling: atom.id, ...(proj ? { context: proj } : {}) })
+  const eierNå = eier()
+  lagreDeling({ token, sak: atom.id, til: mottakere, sirkler: sirkelnavn, nivå: nivåer, rader, opprettet: samme?.opprettet || når.getTime(), oppdatert: når.getTime(), av: eierNå, klient, treff, antall, prosjekt: proj, trukket: null, forespørsler: samme?.forespørsler || [] })
+  for (const p of personer) {
+    logDelivery({ tool: 'tua_share', client: klient, mottaker: p.id, mottakerNavn: p.navn, personer: mottakere.map(({ id, navn }) => ({ id, navn })), endpoint: 'deling (lenke)', token, saker: kilder.map(({ id, version, level }) => ({ id, version, level })),
+      skjermet: antall, ord: ord(gjengivelse), tokens, deling: atom.id, ...(proj ? { context: proj } : {}) })
+  }
+  const sirkelForslag = registrerDeling(m, personer.map((p) => p.id), når.getTime())
+  skrivMottakere(m)
   sk.lær()
-  const kopierbar = `${gjengivelse}\n\n— Delt fra Tua ${fmtTid(når)} · nivå ${nivåer} · ${skjermetTekst} · ${lenke}`
-  return { id: atom.id, version: atom.version || 1, status, til: mottaker, nivå: nivåer, kilder, antall, treff, linjer, notater, setning, lenke, kopierbar, tokens, ord: ord(gjengivelse), prosjekt: atom.project }
+  const kopierbar = `${gjengivelse}\n\n— Delt fra Tua ${fmtTid(når)} · nivå ${nivåer} · ${skjermetTekst}\nMottakersiden: ${lenker.http}`
+  return { id: atom.id, version: atom.version || 1, status, til: mottakerNavn, mottakere, sirkler: sirkelnavn, nivå: nivåer, kilder, antall, treff, linjer, notater, setning, token, lenke: lenker.http, lenker, kopierbar, tokens, ord: ord(gjengivelse), prosjekt: atom.project,
+    sirkelForslag: sirkelForslag ? { id: sirkelForslag.id, forslag: sirkelForslag.forslag, medlemmer: sirkelForslag.medlemmer, antall: sirkelForslag.antall, navn: sirkelForslag.navn || null } : null }
+}
+// trekkDeling(): lenka slutter å virke (410 på mottakersiden); logges i Utlevert som hendelse «trukket» (aldri innhold). Delingssaken står (den er historikk).
+export function trekkDeling(token, { klient = 'app' } = {}) {
+  const d = trekkTilbake(token)
+  logDelivery({ tool: 'tua_share', hendelse: 'trukket', client: klient, mottaker: d.til?.[0]?.id || null, mottakerNavn: navneliste((d.til || []).map((p) => p.navn)), personer: d.til || [], endpoint: 'deling (lenke)', token, saker: (d.rader || []).map(({ id, version, level }) => ({ id, version, level })), skjermet: {}, ord: 0, tokens: { ca: 0 }, deling: d.sak, ...(d.prosjekt ? { context: d.prosjekt } : {}) })
+  return d
+}
+// beOmHele(): mottakeren ba om hele (fra mottakersiden) — noteres på delingen og logges i Utlevert som hendelse «forespørsel» med sakene det gjelder. Ingenting sendes.
+export function beOmHele(token, { saker = [] } = {}) {
+  const d = hentDeling(token)
+  if (!d) throw new MotorFeil('fant ikke delingen')
+  if (d.trukket) throw new MotorFeil('delingen er trukket tilbake')
+  const f = noterForespørsel(token, { saker })
+  const rader = (d.rader || []).filter((r) => !f.saker.length || f.saker.includes(r.id))
+  logDelivery({ tool: 'tua_share', hendelse: 'forespørsel', client: 'mottakersiden', mottaker: d.til?.[0]?.id || null, mottakerNavn: navneliste((d.til || []).map((p) => p.navn)), personer: d.til || [], endpoint: 'deling (lenke)', token, saker: rader.map(({ id, version, level }) => ({ id, version, level, ønsket: 'L' })), skjermet: {}, ord: 0, tokens: { ca: 0 }, deling: d.sak, ...(d.prosjekt ? { context: d.prosjekt } : {}) })
+  return { ...f, deling: d.sak, til: d.til, rader: rader.map(({ id, name, level }) => ({ id, name, level })) }
+}
+// Mottakersiden for et token: { kode, html } — 404 ukjent, 410 trukket, 200 siden (frittstående = /del/<token>.html til nedlasting). Kalles bare av broen.
+export function mottakersideFor(token, { base, frittstående = false } = {}) {
+  const d = hentDeling(token)
+  if (!d) return { kode: 404, html: trukketSide(null), deling: null }
+  if (d.trukket) return { kode: 410, html: trukketSide(d), deling: d }
+  return { kode: 200, html: mottakerside(d, { base: base || BASE(), frittstående }), deling: d }
 }
 const fmtTid = (d) => d.toLocaleString('no-NO', { dateStyle: 'short', timeStyle: 'short' })
