@@ -78,7 +78,8 @@ const hent = async (p, init) => { const r = await fetch(`http://127.0.0.1:${PORT
 const post = async (p, body) => hent(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 try {
   const side = await hent('/oppslag')
-  ok('GET /oppslag → app-fila (Oppslag er en rute i appen)', side.status === 200 && /text\/html/.test(side.type) && side.tekst.includes('app-test'))
+  ok('GET /oppslag → app-fila (runde 2a: ruta finnes ikke i appen lenger — router.jsx sender til / med #sak/<id> i behold)', side.status === 200 && /text\/html/.test(side.type) && side.tekst.includes('app-test'))
+  ok('GET /spor → app-fila (runde 2b: Spør er ikke et sted — feltet bor i saken og øverst i avisen)', (await hent('/spor')).tekst.includes('app-test'))
   const at = JSON.parse((await hent('/api/atoms')).tekst)
   ok('GET /api/atoms: status per sak (svar = utkast, sak = endelig, satt status vinner)', at.atoms.find((a) => a.id === r.svar)?.status === 'utkast' && at.atoms.find((a) => a.id === a1.id)?.status === 'endelig' && at.atoms.find((a) => a.id === a2.id)?.status === 'utkast')
   const s = JSON.parse((await hent('/api/search?q=lageret')).tekst)

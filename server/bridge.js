@@ -3,7 +3,7 @@
 // appen (ferdigbygd fra tua2-sandbox/dist) og er broen til det EKTE arkivet
 // (mappa ~/Dropbox/Tua, samme som MCP-serveren bruker).
 //
-//   GET  /  /spor  /kart  /oppslag  /innboks  /innstillinger → appen (dist/index.html, skive 3: én app med klient-ruting; /forside = /)
+//   GET  /  /spor  /oppslag  /innboks  /innstillinger → appen (dist/index.html, skive 3: én app med klient-ruting; siden runde 2 (arb. 32) sender appen /spor, /oppslag, /forside og /innboks til / — ett sted)
 //   GET  /sandkasse            → demoene (dist/sandkasse.html)
 //   GET  /assets/*  /fonter/*  → bygde filer og de lokale fontene
 //   GET  /api/atoms?offset&limit → { atoms, total, file }   (hvert atom har `links` ferdig utregnet + `file`,
@@ -408,6 +408,7 @@ function serveStatic(res, pathname) {
   res.writeHead(200, { 'Content-Type': MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream', 'Cache-Control': rel.startsWith('/assets/') ? 'max-age=31536000, immutable' : 'no-cache' })
   fs.createReadStream(abs).pipe(res)
 }
+const mtimeAv = (f) => { try { return Math.round(fs.statSync(f).mtimeMs) } catch { return null } }
 const num = (v, d) => { if (v == null || v === '') return d; const n = Number(v); return Number.isFinite(n) && n >= 0 ? n : d }
 
 http
@@ -445,7 +446,7 @@ http
         // Runde 1 (arb. 32 §6): tråd = prompt-id for Spørs biprodukter (svar, Forskjeller, konklusjon — og prompten selv), så avisen, Oppslag og søket viser dem som én;
         // utlevert = antall sendinger saken har vært med i (forsidens hovedsak = mest arbeidet med siste døgn). Bare tellinger.
         const trådAv = tråder(all).av, sendinger = deliveryCounts()
-        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0 }))
+        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0, mtime: mtimeAv(fileOf(a)) }))   // mtime (runde 2a): visningen Mapper sorterer som Finder — nyeste fil øverst
         return json(res, 200, { atoms, total: all.length, offset, file: ARKIV() })
       }
       if (req.method === 'GET' && url.pathname === '/api/search') {
@@ -838,7 +839,7 @@ http
   })
   .listen(PORT, '127.0.0.1', () => {
     const built = fs.existsSync(path.join(DIST, APP_FIL))
-    console.error(`[tua-bro] appen: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} (forsiden · /spor · /oppslag · /innboks · /innstillinger · /sandkasse; POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
+    console.error(`[tua-bro] appen: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} (avisen · /innstillinger · /sandkasse — /spor, /oppslag og /innboks sendes til / av appen siden runde 2; POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
     const log = (m) => console.error(`[tua-bro] ${m}`)
     if (process.env.TUA_BRIDGE_VAKTER !== '0') { watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log }) }     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
   })

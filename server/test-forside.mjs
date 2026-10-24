@@ -11,6 +11,8 @@
 // mappa + filnavn, «X.pdf/.docx», uten id; avvist når stien ikke står i teksten, ligger utenfor hjemmemappa eller ikke finnes.
 // Runde 1 (arb. 32 §6, 24.10.2026): reglene i tua2-sandbox/src/regler.js (hovedsak, ekte samtaler, tråder, maskert visning), store.tråder/deliveryCounts,
 // brukbarTittel (PDF-tittel fra filnavn når metadata er teknisk), og POST /api/innboks/les som SSE med fremdrift.
+// Runde 2a+2b (planen videre §1 og §3): ett sted — regler.normaliserAdresse/lesHash (/oppslag, /spor, /innboks → /, #atom → #sak), sidenSist, mapper/filnavn, radFor, runder, kortS;
+// broen svarer med app-fila for de gamle rutene og gir mtime på /api/atoms (Mapper sorterer som Finder).
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
 
@@ -150,6 +152,38 @@ fs.writeFileSync(øktfil, [linje('user', P1, 0), linje('assistant', A1, 1), linj
   ok('tittelFor: teknisk metadata-tittel → filnavnet uten endelse', tittelFor({ tittel: brukbarTittel('pdf.html'), navn: 'Leieavtale Storgata 12.pdf' }) === 'Leieavtale Storgata 12' && tittelFor({ tittel: 'Referat', navn: 'x.pdf' }) === 'Referat')
 }
 
+// ── Runde 2a+2b (arb. 32, planen videre §1 og §3, 24.10.2026): ett sted — adressene, Siden sist, Mapper, raden for #sak/<id>, rundene i en tråd ─
+{
+  ok('regler.normaliserAdresse: /oppslag, /spor og /forside sendes til / med hashen i behold', ['/oppslag', '/spor/', '/forside'].every((p) => { const n = regler.normaliserAdresse(p, '#sak/a_1'); return n.sti === '/' && n.hash === '#sak/a_1' && n.endret }))
+  ok('regler.normaliserAdresse: #atom/<id> (kortet i Claude) blir #sak/<id>; /innboks blir / med #innboks; / med #sak er uendret', regler.normaliserAdresse('/', '#atom/a_1').hash === '#sak/a_1' && regler.normaliserAdresse('/oppslag', '#atom/a_1').hash === '#sak/a_1' && regler.normaliserAdresse('/innboks').hash === '#innboks' && regler.normaliserAdresse('/', '#sak/a_1').endret === false && regler.normaliserAdresse('/innstillinger', '#utlevert').sti === '/innstillinger')
+  ok('regler.lesHash: sak, innboks, samtale, ingenting', regler.lesHash('#sak/a_1').sak === 'a_1' && regler.lesHash('#sak/a%201').sak === 'a 1' && regler.lesHash('#innboks').innboks === true && regler.lesHash('#samtale/Budsjett').samtale === 'Budsjett' && Object.keys(regler.lesHash('')).length === 0)
+  const T0 = Date.parse('2026-10-24T12:00:00+02:00'), T = (h) => T0 - h * 36e5
+  const liste = [
+    { id: 'p', kind: 'prompt', convo: 'Hva nå?', capturedAt: T(3), tråd: 'p', project: 'A', content: 'Hva nå?' },
+    { id: 's1', kind: 'svar', convo: 'Hva nå?', capturedAt: T(2), tråd: 'p', project: 'A', status: 'utkast', tags: ['svar'] },
+    { id: 's2', kind: 'svar', convo: 'Hva nå?', capturedAt: T(1.5), tråd: 'p', project: 'A', status: 'utkast', tags: ['svar'] },
+    { id: 'f', kind: 'svar', convo: 'Hva nå?', capturedAt: T(1.2), tråd: 'p', project: 'A', status: 'utkast', tags: ['svar', 'forskjeller'] },
+    { id: 'k', kind: 'konklusjon', convo: 'Hva nå?', capturedAt: T(1), tråd: 'p', project: 'A', status: 'utkast' },
+    { id: 'p2', kind: 'prompt', convo: 'Hva nå?', capturedAt: T(0.5), tråd: 'p2', project: 'A', content: 'Og så?' },
+    { id: 's3', kind: 'svar', convo: 'Hva nå?', capturedAt: T(0.4), tråd: 'p2', project: 'A', status: 'endelig', tags: ['svar'] },
+    { id: 'd', kind: 'capture', capturedAt: T(30), project: 'B', file: '/x/B/Notat om noe.md', mtime: T(0.2) },
+    { id: 'e', kind: 'capture', capturedAt: T(10), project: 'B', file: '/x/B/Eldre.md', mtime: T(40) },
+    { id: 'gammel', kind: 'svar', capturedAt: T(60), tråd: 'q', project: 'B', status: 'utkast', tags: ['svar'] },
+  ]
+  const ss = regler.sidenSist(liste, { sist: T(24), innboks: 2 })
+  ok('regler.sidenSist: svar etter forrige besøk (ikke Forskjeller, ikke eldre), konklusjoner som er utkast, filer i Innboks', ss.svar.map((a) => a.id).join() === 's3,s2,s1' && ss.konklusjoner.map((a) => a.id).join() === 'k' && ss.innboks === 2 && ss.noe === true)
+  ok('regler.sidenSist: ingenting → noe = false', regler.sidenSist([{ id: 'x', kind: 'capture', capturedAt: T(1) }], { sist: T(24), innboks: 0 }).noe === false)
+  const m = regler.mapper(liste)
+  ok('regler.mapper: prosjektene som mapper (sortert på navn), sakene som filer under, nyeste øverst etter mtime (ellers capturedAt), prompter med, ingen tråder', m.map((x) => x.navn).join() === 'A,B' && m[1].saker.map((a) => a.id).join() === 'd,e,gammel' && m[0].saker.length === 7 && m[0].saker[0].id === 's3')
+  ok('regler.filnavn: fila slik den heter i mappa', regler.filnavn(liste[7]) === 'Notat om noe.md' && regler.filnavn({ name: 'Uten fil' }) === 'Uten fil.md')
+  const rader = regler.slåSammenTråder(liste.filter((a) => a.kind !== 'prompt').sort((x, y) => y.capturedAt - x.capturedAt), liste)
+  ok('regler.radFor: #sak/<id> finner raden selv, eller tråd-oppføringen som har prompten, et svar, Forskjeller eller konklusjonen', regler.radFor(rader, 'd')?.id === 'd' && regler.radFor(rader, 'p')?.id === 'k' && regler.radFor(rader, 's1')?.id === 'k' && regler.radFor(rader, 'f')?.id === 'k' && regler.radFor(rader, 'p2')?.id === 's3' && regler.radFor(rader, 'finnes-ikke') === null && regler.radFor(rader, null) === null)
+  const r = regler.runder(liste, 'Hva nå?')
+  ok('regler.runder: samtalen som runder, eldste først — hver prompt med svarene (uten Forskjeller), Forskjeller og konklusjonen', r.length === 2 && r[0].prompt.id === 'p' && r[0].svar.map((a) => a.id).join() === 's1,s2' && r[0].forskjeller?.id === 'f' && r[0].konklusjon?.id === 'k' && r[1].prompt.id === 'p2' && r[1].svar.length === 1 && r[1].forskjeller === null && r[1].konklusjon === null && regler.runder(liste, '').length === 0)
+  ok('regler.kortS: første setning innen ~170 tegn, ellers klippet på ord med …', regler.kortS('Kort.') === 'Kort.' && regler.kortS('Første setning er lang nok til å telle som en ingress i seg selv, med tall og alt. Andre setning som ikke skal med fordi den er for lang til kortet.', 120) === 'Første setning er lang nok til å telle som en ingress i seg selv, med tall og alt.' && regler.kortS('x'.repeat(100) + ' ' + 'y'.repeat(100)).endsWith(' …'))
+  ok('regler.sakAdresse: /#sak/<id> (kodet)', regler.sakAdresse('a 1') === '/#sak/a%201')
+}
+
 // ── 4) broen: /innboks, /api/atoms-feltene, /api/innboks og /api/innboks/antall ─
 const PORT = 5298
 const DIST = path.join(DATA, 'dist')
@@ -165,11 +199,13 @@ ok('broen startet mot testarkivet', broLogg.includes(ROOT), broLogg.split('\n')[
 const hent = async (p, init) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, init); return { status: r.status, type: r.headers.get('content-type') || '', tekst: await r.text() } }
 try {
   const side = await hent('/innboks')
-  ok('GET /innboks → app-fila (Innboks er en rute i appen, friksjon 5)', side.status === 200 && /text\/html/.test(side.type) && side.tekst.includes('app-test'))
+  ok('GET /innboks → app-fila (appen sender videre til / med #innboks — Innboks er en linje, ikke et sted, runde 2a)', side.status === 200 && /text\/html/.test(side.type) && side.tekst.includes('app-test'))
+  for (const rute of ['/oppslag', '/spor', '/forside']) ok(`GET ${rute} → app-fila (ruta finnes ikke lenger i appen; router.jsx sender til / med hashen i behold — gamle lenker virker)`, (await hent(rute)).tekst.includes('app-test'))
   const at = JSON.parse((await hent('/api/atoms')).tekst)
   const s = at.atoms.find((a) => a.key === `samtale:${SID}`)
   ok('GET /api/atoms: feltene lista trenger — id, name, project, kind, capturedAt, convo, tags, levels.S, ord, tegn, max, vault, status, source', !!s && ['id', 'name', 'project', 'kind', 'capturedAt', 'convo', 'tags', 'levels', 'ord', 'tegn', 'max', 'vault', 'status', 'source'].every((f) => s[f] !== undefined) && s.kind === 'samtale' && typeof s.levels.S.text === 'string' && typeof s.ord.S === 'number', s ? Object.keys(s).join(',') : 'mangler')
   ok('GET /api/atoms: nyeste først (lista og avisen sorterer selv, men svaret er alt sortert)', at.atoms.every((a, i) => i === 0 || at.atoms[i - 1].capturedAt >= a.capturedAt))
+  ok('runde 2a: GET /api/atoms gir det Mapper trenger — project, file (stien i arkivet) og mtime (filas tid, et tall) på hver sak', at.atoms.every((a) => typeof a.project === 'string' && typeof a.file === 'string' && a.file.startsWith(ROOT) && typeof a.mtime === 'number' && a.mtime > 0), JSON.stringify({ file: s?.file, mtime: s?.mtime }))
   const ib = JSON.parse((await hent('/api/innboks')).tekst)
   ok('GET /api/innboks: teller dokumentet som venter (notat.txt), Tuas egne saker og skjulte filer teller ikke', ib.antall === 1 && ib.dokumenter[0].navn === 'notat.txt' && !!ib.dokumenter[0].label, JSON.stringify({ antall: ib.antall, dok: ib.dokumenter.map((d) => d.navn) }))
   const an = JSON.parse((await hent('/api/innboks/antall')).tekst)

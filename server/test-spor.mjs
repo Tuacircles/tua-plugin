@@ -146,6 +146,13 @@ try {
   ok('det som kom er lagret som svar merket avbrutt (tagg, navn, ingress), kortere enn hele ekkoet', avb?.tags.includes('avbrutt') && avb.name.startsWith('Avbrutt svar') && /Avbrutt svar/.test(avb.levels?.S?.text || '') && avb.content.length < lang.length && avb.project === 'Energima', `${avb?.content.length} tegn`)
   ok('Utlevert-linja for det avbrutte svaret har avbrutt: true', UTLEVERT().find((u) => u.svar === stF.svar)?.avbrutt === true)
   ok('POST /api/spor/stopp med ukjent kjøring → 404', (await post('/api/spor/stopp', { kjøring: 'finnes-ikke' })).status === 404)
+  // runde 2b (arb. 32, planen videre §3): neste spørsmål i samme felt lagres i samme samtale — `samtale` i POST /api/spor setter convo på prompt og svar;
+  // SSE-rekkefølgen er uendret (skjermet → del… → ferdig), og /api/sak gir convo så saken kan lære hvilken samtale den spør videre i
+  const r2 = await sse({ melding: 'Og hva med fristen?', saker: [{ id: a1.id, nivå: 'S' }], mottaker: 'test', prosjekt: 'Energima', samtale: 'Hva mener ' + PERSON + '?' })
+  const r2n = r2.hendelser.map((h) => h[0]), f2 = r2.hendelser.at(-1)[1]
+  const allS = load(), pr2 = allS.find((a) => a.id === f2.prompt), sv2 = allS.find((a) => a.id === f2.svar)
+  ok('runde 2b: POST /api/spor med samtale → ny prompt-sak og svar i SAMME samtale som forrige runde (tråden vokser), SSE uendret', r2n[0] === 'skjermet' && r2n.at(-1) === 'ferdig' && pr2?.convo === 'Hva mener ' + PERSON + '?' && sv2?.convo === pr2.convo && pr2.id !== pr.id && allS.filter((a) => a.kind === 'prompt' && a.convo === pr2.convo).length === 2, `${pr2?.convo} · ${r2n.join(' ')}`)
+  ok('runde 2b: GET /api/sak gir convo (samtalen) og project — det feltet i saken trenger etter første sending', (await get(`/api/sak?id=${encodeURIComponent(f2.prompt)}`)).json.convo === pr2.convo)
   // GET /api/sak
   const sak = await get(`/api/sak?id=${encodeURIComponent(a1.id)}`)
   ok('GET /api/sak: teksten per nivå (S = ingressen, L = alt), ord/tegn, prosjekt, kind', sak.status === 200 && sak.json.nivåer.S.tekst === 'Notat om anken; fristen er 14 dager.' && sak.json.nivåer.L.tekst.includes(PERSON) && sak.json.nivåer.M.fallback && sak.json.ord.L > sak.json.ord.S && sak.json.project === 'Energima' && sak.json.kind === 'capture', JSON.stringify({ S: sak.json.nivåer?.S, fallbackM: sak.json.nivåer?.M?.fallback }))
