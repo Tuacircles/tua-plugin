@@ -20,6 +20,10 @@ import 'node:path';
 // (hvilken versjon av hvert kildeatom, lest på hvilket nivå), `gjengivelser` = [{format, path, sha256, at}]
 // (html/pdf/artifact rendret fra denne markdown-kilden — fila er en gjengivelse, atomet er sannheten).
 //
+// Runde 3c (24.10.2026, én skriver): frontmatter-nøkler denne koden IKKE kjenner, leses inn i `ekstra` og skrives tilbake uendret — en eldre prosess
+// (gammel plugin-cache, hook fra forrige versjon) kan ikke lenger stryke et felt den ikke har hørt om (hendelsen 24.10: 1 035 filer uten drift/fanget).
+// `S_dato`/`M_dato` (ISO) sier når nivået ble skrevet — Ny gjennomgang (AI3) merker med modell og dato.
+//
 // Quick Look viser toppen (= S). Parse og serialize er inverse av hverandre.
 
 
@@ -27,6 +31,8 @@ const M_PLACEHOLDER = '_(ikke laget ennå)_';
 const H_WHY = '## Hvorfor';
 const H_M = '## Sammendrag (M)';
 const H_L = '## Innhold (L)';
+// nøklene parse() forstår; alt annet i frontmatter er `ekstra` (runde 3c)
+const KJENTE_NØKLER = new Set(['tua_id', 'prosjekt', 'samtale', 'kilde', 'dato', 'versjon', 'key', 'kind', 'status', 'fanget', 'drift', 'beholdt', 'tagger', 'synlig_i', 'lenker', 'bygget_av', 'ga', 'gjengivelser', 'nivaa', 'S_av', 'S_versjon', 'S_dato', 'M_av', 'M_versjon', 'M_dato', 'tittel']);
 
 const isoLocal = (ms) => {
   const d = new Date(ms);
@@ -69,9 +75,11 @@ function serialize(atom) {
     ...(atom.ga?.length ? { ga: atom.ga } : {}),                  // M20b (skive 6, V16): svarene en prompt-sak ga — [{id, version}], én per mottaker
     ...(atom.renders?.length ? { gjengivelser: atom.renders } : {}),
     ...(atom.share && Object.keys(atom.share).length ? { nivaa: atom.share } : {}),
-    ...(atom.levels?.S ? { S_av: atom.levels.S.by || '', S_versjon: atom.levels.S.of ?? null } : {}),
-    ...(atom.levels?.M ? { M_av: atom.levels.M.by || '', M_versjon: atom.levels.M.of ?? null } : {}),
+    ...(atom.levels?.S ? { S_av: atom.levels.S.by || '', S_versjon: atom.levels.S.of ?? null, ...(atom.levels.S.at ? { S_dato: atom.levels.S.at } : {}) } : {}),
+    ...(atom.levels?.M ? { M_av: atom.levels.M.by || '', M_versjon: atom.levels.M.of ?? null, ...(atom.levels.M.at ? { M_dato: atom.levels.M.at } : {}) } : {}),
   };
+  // runde 3c: ukjente nøkler (fra en nyere Tua, eller skrevet av noen andre) følger med uendret — etter de kjente, så Quick Look-toppen er lik
+  for (const [k, v] of Object.entries(atom.ekstra || {})) if (!(k in fm) && !KJENTE_NØKLER.has(k)) fm[k] = v;
   const fmLines = Object.entries(fm).map(([k, v]) => `${k}: ${JSON.stringify(v)}`);
   return [
     '---', ...fmLines, '---',
@@ -152,9 +160,11 @@ function parse(text, { fallbackId } = {}) {
   if (Array.isArray(fm.ga) && fm.ga.length) atom.ga = fm.ga.filter((d) => d && d.id);
   if (Array.isArray(fm.gjengivelser) && fm.gjengivelser.length) atom.renders = fm.gjengivelser.filter((r) => r && (r.path || r.url));
   const levels = {};
-  if (fm.S_av !== undefined && ingress) levels.S = { text: ingress, by: fm.S_av, of: fm.S_versjon ?? null };
-  if (mText) levels.M = { text: mText, by: fm.M_av || '', of: fm.M_versjon ?? null };
+  if (fm.S_av !== undefined && ingress) levels.S = { text: ingress, by: fm.S_av, of: fm.S_versjon ?? null, ...(typeof fm.S_dato === 'string' && fm.S_dato ? { at: fm.S_dato } : {}) };
+  if (mText) levels.M = { text: mText, by: fm.M_av || '', of: fm.M_versjon ?? null, ...(typeof fm.M_dato === 'string' && fm.M_dato ? { at: fm.M_dato } : {}) };
   if (Object.keys(levels).length) atom.levels = levels;
+  const ekstra = Object.fromEntries(Object.entries(fm).filter(([k]) => !KJENTE_NØKLER.has(k)));   // runde 3c: det vi ikke kjenner, bevares
+  if (Object.keys(ekstra).length) atom.ekstra = ekstra;
   return atom
 }
 

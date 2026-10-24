@@ -146,8 +146,11 @@ import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetK
 import { klasseAv, tellKlasser, vekt, sistRørt, trådSamlet, brukInfo, deliveryInfo, logBruk, BRUK_HENDELSER, claudeØkter } from './store.js'   // runde 2d (03-avisen §2–§5): klasser, vekt, tråden samlet, bruk-loggen, Claude-øktene
 import { ulestAv, ulestFra, logSettAlt, settAltSist, fjernetAv } from './store.js'   // friksjon 16: ulest fra bruk-loggen og siste «sett alt»; fjernet (× i Siden sist)
 import { projectAliases } from './store.js'   // runde 2d (app), friksjon 14: filer i prosjektmappa som ikke er saker, og aliasene til prosjekt-treffet i søket
+import { flytt as ryddFlytt, giNyttNavn, tømPapirkurv, ryddeforslag, sisteSave } from './store.js'   // runde 3c: rydding på saken, papirkurv, Tua foreslår — én skriver i lageret
+import { gjennomgang, planFor, NIVÅER_GJENNOMGANG } from './gjennomgang.js'   // runde 3c: Ny gjennomgang (AI3) — S/M på nytt med valgt modell, aldri menneskeskrevet
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
+const sakSvar = (a) => ({ ...a, links: linksFor(a), file: fileOf(a), status: statusOf(a), klasse: klasseAv(a) })   // runde 3c: én form på saken tilbake fra rydde-rutene
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
 const countMd = (dir, depth = 2) => {   // hvor mange atomer (.md) ligger i en mappe — for «hva ville skjedd» ved bytte av arkivsted
   let n = 0
@@ -1079,6 +1082,104 @@ http
         const dagerUt = økter.dager.map((d) => { const ø = økterUt.filter((x) => d.økter.includes(x.økt)); return { ...d, økter: d.økter.filter((id) => igjen.has(id)), antall: ø.length, filer: ø.reduce((n, x) => n + (x.filer || 0), 0), beholdt: ø.reduce((n, x) => n + (x.beholdt || 0), 0), uleste: ø.filter((x) => x.ulest).length } }).filter((d) => d.økter.length > 0)
         const uleste = spørsmål.filter((s) => s.ulest).length + svarKom.filter((s) => s.ulest).length + konklusjoner.filter((s) => s.ulest).length + økterUt.filter((ø) => ø.ulest).length
         return json(res, 200, { dager, spørsmål, svarKom, konklusjoner, innboks: { antall: dok.length, dokumenter: dok.map((d) => d.navn) }, økter: økterUt, økterPerDag: dagerUt, antallØkter: økterUt.length, uleste, sett_alt: settAltSist() || null })
+      }
+      // ── Runde 3c (M25, 03-avisen §2, plan videre §4 3c, 24.10.2026): rydding PÅ SAKEN, papirkurv, Tua foreslår, Ny gjennomgang. Egen blokk; alt gjennom lageret (store.js) og
+      //    gjennomgang.js. Lageret har nå ÉN skriver: save() skriver bare det denne prosessen endret, og fletter treveis mot en fil en annen prosess har skrevet siden (aldri tekst).
+      //   POST /api/rydd/flytt {id, prosjekt}       → { atom, før, flyttet }      saken til et annet prosjekt — lageret flytter fila (V9, samme som Finder). Gyldig prosjektnavn kreves.
+      //   POST /api/rydd/navn {id, navn}            → { atom, før, fil, kollisjon } tittel = filnavn (V9); ved kollisjon i mappa får fila id-suffiks. Lageret omdøper fila.
+      //   POST /api/rydd/kast {id}                  → { kastet }                   fila til <arkiv>/.tua/papirkurv/<prosjekt>/ — aldri slett. Angre: POST /api/rydd/angre {id} → { atom }.
+      //   POST /api/rydd/slaa-sammen {id, inn_i}    → { atom, kastet }             innholdet legges nederst i inn_i som NY versjon med kildepeker (bygget_av); kilden → papirkurv.
+      //   GET  /api/rydd/forslag                    → { forslag: [{slag: duplikat|tittel|tom, grunn, project, saker: [rad], behold, kast}], antall, perSlag, perProsjekt, tekst }
+      //                                               Tua FORESLÅR, utfører aldri — Siden sist viser «3 duplikater i Oppgjør Skado — se» med Slå sammen / Kast per forslag.
+      //   GET  /api/papirkurv/tall                  → { antall }  ·  POST /api/papirkurv/toem {} → { antall, fjernet, bevart, versjoner }  hver fil legges først i .tua/versions/<id>/ («papirkurv»).
+      //   GET  /api/gjennomgang/plan?id=|prosjekt=&niva=S|M|begge → { plan, tall, nivå, modell, av, lokalt }  hva som ville skje (menneskeskrevet hoppes over, korte saker trenger ikke M)
+      //   POST /api/gjennomgang {id | ids | prosjekt, niva, skriver?: auto|ollama|test|regel|claude, dryRun?} → SSE start {saker, skrives, S, M, menneske, modell, av, lokalt} ·
+      //        sak {i, antall, id, name, nivåer} · skrevet {…, av, modell, S, M_tegn, utlevert} · hoppet {id, grunn} · feil {id, feil} · slutt {skrevet, hoppet, feilet, filer, modell, av}
+      //        Standard skriver er lokal (Ollama, standardmodellen fra Innstillinger); Claude bare når skriver: 'claude' er sendt (går gjennom motoren med Utlevert). Kortet (3a) kan kalle den samme ruta.
+      if (req.method === 'POST' && url.pathname === '/api/rydd/flytt') {
+        const b = await readBody(req)
+        if (!b.id || !b.prosjekt) return json(res, 400, { error: 'id og prosjekt kreves' })
+        let p
+        try { p = prosjektNavn(b.prosjekt) } catch (e) { return json(res, 400, { error: e.message }) }
+        const atoms = load()
+        if (!atoms.some((x) => x.id === b.id)) return json(res, 404, { error: `fant ikke sak ${b.id}` })
+        const r = ryddFlytt(atoms, b.id, p)
+        if (r.flyttet) save(atoms)
+        console.error(`[tua-bro] rydd flytt «${r.atom.name}»: ${r.før} → ${r.atom.project}`)
+        return json(res, 200, { atom: sakSvar(r.atom), før: r.før, flyttet: r.flyttet })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rydd/navn') {
+        const b = await readBody(req)
+        if (!b.id || !String(b.navn || '').trim()) return json(res, 400, { error: 'id og navn kreves' })
+        const atoms = load()
+        if (!atoms.some((x) => x.id === b.id)) return json(res, 404, { error: `fant ikke sak ${b.id}` })
+        let r
+        try { r = giNyttNavn(atoms, b.id, b.navn) } catch (e) { return json(res, 400, { error: e.message }) }
+        if (r.endret) save(atoms)
+        console.error(`[tua-bro] rydd navn «${r.før}» → «${r.atom.name}» (${path.basename(fileOf(r.atom))})`)
+        return json(res, 200, { atom: sakSvar(r.atom), før: r.før, fil: path.basename(fileOf(r.atom) || r.fil), kollisjon: !!r.kollisjon })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rydd/kast') {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves' })
+        const atoms = load()
+        let post
+        try { post = fangetKast(atoms, b.id, { grunn: 'lagt i papirkurven fra saken' }) } catch (e) { return json(res, /fant ikke/.test(e.message) ? 404 : 400, { error: e.message }) }
+        console.error(`[tua-bro] rydd kast «${post.name}» → .tua/papirkurv/${post.project}`)
+        return json(res, 200, { kastet: { ...post, kurv: undefined } })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/rydd/angre') {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves' })
+        let r
+        try { r = fangetAngre(b.id) } catch (e) { return json(res, /ligger ikke/.test(e.message) ? 404 : 400, { error: e.message }) }
+        console.error(`[tua-bro] papirkurv angre «${r.atom.name}» → ${r.rel}`)
+        return json(res, 200, { atom: sakSvar(r.atom) })
+      }
+      if (req.method === 'POST' && ['/api/rydd/slaa-sammen', '/api/rydd/slå-sammen', '/api/rydd/sl%C3%A5-sammen'].includes(url.pathname)) {
+        const b = await readBody(req)
+        if (!b.id || !b.inn_i) return json(res, 400, { error: 'id og inn_i kreves' })
+        const atoms = load()
+        let r
+        try { r = fangetSlåSammen(atoms, b.id, b.inn_i) } catch (e) { return json(res, /fant ikke/.test(e.message) ? 404 : 400, { error: e.message }) }
+        save(atoms)
+        console.error(`[tua-bro] rydd slå sammen «${r.kastet.name}» → «${r.atom.name}» (v${r.atom.version})`)
+        return json(res, 200, { atom: sakSvar(r.atom), kastet: { ...r.kastet, kurv: undefined } })
+      }
+      if (req.method === 'GET' && url.pathname === '/api/rydd/forslag') return json(res, 200, ryddeforslag(load()))
+      if (req.method === 'GET' && url.pathname === '/api/papirkurv/tall') return json(res, 200, { antall: fangetPapirkurv().length })
+      if (req.method === 'POST' && ['/api/papirkurv/toem', '/api/papirkurv/tøm', '/api/papirkurv/t%C3%B8m'].includes(url.pathname)) {
+        let r
+        try { r = tømPapirkurv() } catch (e) { return json(res, 400, { error: e.message }) }
+        console.error(`[tua-bro] papirkurv tømt: ${r.fjernet} filer fjernet, ${r.bevart} lagt i .tua/versions`)
+        return json(res, 200, r)
+      }
+      if (req.method === 'GET' && url.pathname === '/api/gjennomgang/plan') {
+        const id = url.searchParams.get('id') || null, prosjekt = url.searchParams.get('prosjekt') || null
+        const niva = url.searchParams.get('niva') || url.searchParams.get('nivå') || 'M'
+        if (!id && !prosjekt) return json(res, 400, { error: 'id eller prosjekt kreves' })
+        if (!NIVÅER_GJENNOMGANG.includes(niva)) return json(res, 400, { error: `niva må være ${NIVÅER_GJENNOMGANG.join(', ')}` })
+        const r = planFor(load(), { id, prosjekt, nivå: niva })
+        const ms = await mottakere()
+        const std = ms.find((m) => m.local && m.aktiv) || null
+        return json(res, 200, { ...r, modell: std?.modell || null, av: std ? `${std.label.split(' (')[0]} · ${std.modell}` : 'regel', lokalt: !!std, mottakere: ms.filter((m) => m.aktiv && !m.test).map((m) => ({ id: m.id, label: m.label, modell: m.modell, local: !!m.local })) })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/gjennomgang') {
+        const b = await readBody(req)
+        if (!b.id && !b.prosjekt && !(Array.isArray(b.ids) && b.ids.length)) return json(res, 400, { error: 'id, ids eller prosjekt kreves' })
+        const niva = b.niva || b.nivå || 'M'
+        if (!NIVÅER_GJENNOMGANG.includes(niva)) return json(res, 400, { error: `niva må være ${NIVÅER_GJENNOMGANG.join(', ')}` })
+        const skriver = ['auto', 'ollama', 'test', 'regel', 'claude'].includes(b.skriver) ? b.skriver : 'auto'
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        const ctl = new AbortController()
+        req.on('close', () => ctl.abort())
+        try {
+          const r = await gjennomgang({ id: b.id || null, ids: b.ids || null, prosjekt: b.prosjekt || null, nivå: niva, skriver, dryRun: !!b.dryRun, klient: 'app', signal: ctl.signal, på: hendelse })
+          console.error(`[tua-bro] gjennomgang (${niva}, ${r.av}): ${r.skrevet} skrevet · ${r.hoppet} hoppet · ${r.feilet} feilet · ${r.filer} filer${b.dryRun ? ' · DRY-RUN' : ''}`)
+        } catch (e) { hendelse('feil', { feil: e.message }) }
+        return res.end()
       }
       // ── Runde 2d (app) — friksjon 14 (Erik 24.10.2026): søk på prosjekt gir prosjektet og filene som hører til; Mapper viser også filer som ikke er saker. Egen blokk. ──
       //   GET  /api/mappe                 → { prosjekter: [{navn, alias: [navn…], saker, filer, sist}] }  prosjektene som mapper, med aliasene fra .tua/project-aliases.json

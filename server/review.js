@@ -29,10 +29,17 @@
 //                                         Menneskeskrevet (S/M av menneske, eller kilde som ikke er en maskin) merkes aldri; drift: false (Behold) røres aldri. Skriver ingenting.
 //   node review.js --drift                setter flagget. Begge viser tall per klasse (arbeid · spor · drift · tråd) før og etter, og per prosjekt. Angres per sak med POST /api/behold {id}.
 //   Rekkefølge for Erik: --drift --dry-run → --drift → --fanget --dry-run → --fanget (drift først, så det som er byggeøkter ikke havner i Fanget-bøtta).
+//   Runde 3c (24.10.2026): regelen strammet — `dok:`-saker i Tuas egne prosjekter (byggeøktenes overleveringsnotater og arbeidsstykker om Tua) og «Økt: …»-saker uten
+//   hook-nøkkel regnes som drift der (slag «dokument» og «økt-tittel» i tallene); «Økt: …» uten nøkkel i andre prosjekter er fangst. Samme regel bak knappen
+//   «Merk arkivet» i Innstillinger › Arkivsted (POST /api/arkiv/merk) — det er Erik som trykker. Skrivingen går gjennom saveAll (én skriver: bare det som er
+//   endret skrives, og en fil en annen prosess har endret siden lesing flettes treveis, aldri overskrives).
+//
+//   node review.js --rydd                 runde 3c: Tuas ryddeforslag (store.ryddeforslag) — duplikater (identisk innhold · samme ingress · samme tittel i samme prosjekt),
+//                                         «---»-titler og tomme saker. Viser bare; utføres i appen (Slå sammen / Kast per forslag) eller med --rydd --kast-tomme.
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { load, save, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, fangetKandidater, slagAvNøkkel, driftKandidater, erDriftEtterRegel, driftProsjekter, driftSlag, tellKlasser, klasseAv, KLASSER } from './store.js'
+import { load, save, saveAll, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, fangetKandidater, slagAvNøkkel, driftKandidater, erDriftEtterRegel, driftProsjekter, driftSlag, tellKlasser, klasseAv, KLASSER } from './store.js'
 import { samtaleSFraTranskript } from './import.js'
 
 const args = process.argv.slice(2)
@@ -57,7 +64,7 @@ if (args.includes('--drift')) {
   console.log(`Klasser før: ${før}\nKlasser etter: ${etter}\n`)
   for (const v of vis) console.log(v)
   if (tall.nye > vis.length) console.log(`  … og ${tall.nye - vis.length} til`)
-  if (!dryRun && tall.nye) { const written = save(atoms); console.log(`\n${tall.nye} saker merket drift · ${written} filer skrevet. Angre per sak: POST /api/behold {id} (saken blir arbeid, og regelen rører den aldri igjen).`) }
+  if (!dryRun && tall.nye) { const written = saveAll(atoms); console.log(`\n${tall.nye} saker merket drift · ${written} filer skrevet. Angre per sak: POST /api/behold {id} (saken blir arbeid, og regelen rører den aldri igjen).`) }
   else if (!dryRun) console.log('\nIngenting å skrive.')
   process.exit(0)
 }
@@ -77,8 +84,20 @@ if (args.includes('--fanget')) {
   console.log(`Per prosjekt etter: ${perProsjektKlasse(atoms).slice(0, 12).map(([p, t]) => `${p} (arbeid ${t.arbeid}, spor ${t.spor}, drift ${t.drift}, tråd ${t.tråd})`).join(' · ')}\n`)
   for (const v of vis) console.log(v)
   if (tall.nye > vis.length) console.log(`  … og ${tall.nye - vis.length} til`)
-  if (!dryRun && tall.nye) { const written = save(atoms); console.log(`\n${tall.nye} saker merket fanget · ${written} filer skrevet. Angre per sak: Behold i appen (POST /api/fanget/behold {id}).`) }
+  if (!dryRun && tall.nye) { const written = saveAll(atoms); console.log(`\n${tall.nye} saker merket fanget · ${written} filer skrevet. Angre per sak: Behold i appen (POST /api/fanget/behold {id}).`) }
   else if (!dryRun) console.log('\nIngenting å skrive.')
+  process.exit(0)
+}
+
+if (args.includes('--rydd')) {
+  const { ryddeforslag, kast } = await import('./store.js')
+  const r = ryddeforslag(atoms)
+  console.log(`${atoms.length} saker · ${r.antall} ryddeforslag${r.tekst ? ` — ${r.tekst}` : ''}`)
+  console.log(`Per slag: ${linjeAv(r.perSlag)}\nPer prosjekt: ${linjeAv(r.perProsjekt)}\n`)
+  for (const f of r.forslag.slice(0, 30)) console.log(`  [${f.slag}] ${f.project}: ${f.saker.map((x) => `«${x.name}» v${x.version} (${x.tegn} tegn)`).join(' · ')} — ${f.grunn}${f.behold ? ` · behold ${f.behold}` : ''}`)
+  if (r.antall > 30) console.log(`  … og ${r.antall - 30} til`)
+  if (args.includes('--kast-tomme')) { const tomme = r.forslag.filter((f) => f.slag === 'tom'); for (const f of tomme) for (const id of f.kast) kast(atoms, id, { grunn: 'tom sak (review --rydd --kast-tomme)' }); console.log(`\n${tomme.length} tomme saker lagt i papirkurven (angre: POST /api/fanget/angre {id})`) }
+  else console.log('\nIngenting skrevet — forslagene utføres i appen (Siden sist › Tua foreslår), eller --rydd --kast-tomme legger de tomme i papirkurven.')
   process.exit(0)
 }
 
@@ -102,7 +121,7 @@ if (args.includes('--samtaler')) {
   console.log(`${tall.samtaler} samtale-saker · ${tall.endres} får ny S (siste vending) · ${tall.uendret} har den alt · ${tall.menneske} menneskeskrevet (røres ikke) · ${tall.annen} skrevet av Claude og gjeldende (røres ikke) · ${tall.uleselig} uten lesbart transkript${dryRun ? ' · DRY-RUN, ingenting skrevet' : ''}\n`)
   for (const v of vis) console.log(v)
   if (tall.endres > vis.length) console.log(`… og ${tall.endres - vis.length} til`)
-  if (!dryRun && tall.endres) { const written = save(atoms); console.log(`\n${tall.endres} ingresser skrevet (by: regel) · ${written} filer skrevet`) }
+  if (!dryRun && tall.endres) { const written = saveAll(atoms); console.log(`\n${tall.endres} ingresser skrevet (by: regel) · ${written} filer skrevet`) }
   else if (!dryRun) console.log('\nIngenting å skrive.')
   process.exit(0)
 }

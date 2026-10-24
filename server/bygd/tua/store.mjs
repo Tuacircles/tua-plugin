@@ -5,7 +5,7 @@ import path__default from 'node:path';
 import crypto__default from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { parse, fileNameFor, safeName, serialize } from './files.mjs';
+import { parse, serialize, fileNameFor, safeName } from './files.mjs';
 import { HOME, cloudBases, IS_MAC } from './platform.mjs';
 
 // store.js — Tua-arkivet. Alternativ A: MAPPA ER SANNHETEN.
@@ -134,6 +134,7 @@ const readWritten = () => { try { return JSON.parse(fs__default.readFileSync(WRI
 function load() {
   if (!filesMode()) return loadCache()
   const atoms = [];
+  const spor = nyttSpor(atoms);                                  // runde 3c: hva denne lista leste — save() skriver bare det som er endret siden
   const written = readWritten();
   const index = readIndex();
   const seenIds = new Map();                                     // id → rel; to filer med samme tua_id (kopi i Finder, gammel feil) → den indeksen peker på vinner
@@ -141,6 +142,8 @@ function load() {
     try {
       const text = fs__default.readFileSync(abs, 'utf8');
       const a = parse(text, { fallbackId: stableId(rel) });
+      const løs = !(text.startsWith('---\n') && /(^|\n)tua_id:/.test(text.slice(4, 2200)));   // en vanlig .md sluppet i mappa (Finder) — ennå ikke Tuas: adopteres ved neste save() (frontmatter skrives inn)
+      if (løs) { try { const mt = fs__default.statSync(abs).mtimeMs; a.capturedAt = a.createdAt = mt; } catch {} }   // runde 3c: datoen er filas, ikke «nå» — ellers ble saken ny ved hver lesing
       const dup = seenIds.get(a.id);
       if (dup !== undefined) {
         if (index[a.id] !== rel) continue                        // denne er kopien — hopp over, slett aldri
@@ -153,8 +156,11 @@ function load() {
       // V15 regel 1: fila er endret av noen andre enn Tua siden sist skriving → NY versjon, aldri merge.
       // Versjonen telles opp her (i minnet); neste save() fester den og bevarer den redigerte teksten i .tua/versions.
       const w = written[a.id];
-      if (w && w.sha !== sha256(text)) { a.version = Math.max(a.version || 1, w.version || 1) + 1; a.editedOutside = true; }
+      const sha = sha256(text);
+      if (w && w.sha !== sha) { a.version = Math.max(a.version || 1, w.version || 1) + 1; a.editedOutside = true; }
       atoms.push(a);
+      spor.lest.set(a.id, { sha, md: serialize(a), rel });        // grunnlaget: fila slik den lå, og saken slik vi leste den
+      if (a.editedOutside || løs) spor.dirty.add(a.id);            // V15 regel 1: den nye versjonen skal festes ved neste save(); en løs fil adopteres (som før)
     } catch { /* ulesbar fil — hopp over, slett aldri */ }
   }
   // Mappa er sannheten — også for sletting (V9/V12: «rydding skjer i Finder»). Det gamle sikkerhetsnettet som la inn igjen
@@ -341,14 +347,14 @@ function compose(atoms, { ids, level = 'M', name, intro, context }) {
 // (Quick Look skal vise toppen = S), aldri slettet. Første fangst av v<n> vinner;
 // en annen tilstand med samme versjonsnummer får tidsstempel i navnet.
 const VERSIONS_DIR = () => tuaFile('versions');
-function keepVersion(id, oldText) {
+function keepVersion(id, oldText, { merk = '' } = {}) {
   const n = (oldText.match(/^versjon:\s*(\d+)/m) || [])[1] || '0';
   const dir = path__default.join(VERSIONS_DIR(), id);
   fs__default.mkdirSync(dir, { recursive: true });
-  let p = path__default.join(dir, `v${n}.md`);
+  let p = path__default.join(dir, merk ? `v${n}-${merk}-${Date.now()}.md` : `v${n}.md`);   // runde 3c: «konflikt» = vår tekst da disk vant (aldri tap)
   if (fs__default.existsSync(p)) {
     if (fs__default.readFileSync(p, 'utf8') === oldText) return
-    p = path__default.join(dir, `v${n}-${Date.now()}.md`);
+    p = path__default.join(dir, `v${n}-${merk ? merk + '-' : ''}${Date.now()}.md`);
   }
   fs__default.writeFileSync(p, oldText);
 }
@@ -393,8 +399,8 @@ function setFinderTags(file, tags) {
   return spawnSync('xattr', ['-wx', 'com.apple.metadata:_kMDItemUserTags', py.stdout.trim(), file], { encoding: 'utf8' }).status === 0
 }
 
-// M12: én skriver om gangen. Flere prosesser (Desktop-server, Code-server, bro, sync) kan
-// kalle save() samtidig; låsen (.tua/.lock, atomisk mkdir) serialiserer dem. Gammel lås
+// M12: én skriver om gangen. Flere prosesser (Desktop-server, Code-server, bro, sync, hook) kan
+// kalle save() samtidig; låsen (.tua/.lock, atomisk mkdir) serialiserer dem og gjelder HELE save (indeks, written.json, filene). Gammel lås
 // (> 15 s, en prosess som døde) fjernes. Venter maks 3 s, så skrives det uansett (aldri tap).
 const LOCK = () => tuaFile('.lock');
 function acquireLock() {
@@ -408,20 +414,63 @@ function acquireLock() {
 }
 const releaseLock = () => { try { fs__default.rmSync(LOCK(), { recursive: true, force: true }); } catch {} };
 
-// Skriver bare det som endret seg. Flytter fila hvis navnet/prosjektet endret seg.
-// Sletter aldri. Returnerer antall skrevne filer.
-function save(atoms) {
+// ── Runde 3c (24.10.2026, V8-svakheten): ÉN SKRIVER — dirty-sporing, treveis fletting, delt written.json ──────────────────────────
+// Før: save() skrev hver sak hvis serialiseringen avvek fra disk — en prosess med gammelt minne (hook fra forrige plugin-versjon, en bro som lastet
+// for en time siden) skrev HELE arkivet tilbake og strøk det andre hadde skrevet (hendelsen 24.10: 1 035 filer uten drift/fanget).
+// Nå: load() husker, på selve lista (WeakMap), fila sin sha og saken slik den ble lest. save(atoms) skriver bare det DENNE prosessen har endret —
+// serialiseringen avviker fra det som ble lest, saken er ny, eller markDirty(atoms, id) er kalt. saveAll(atoms) tar alle (review/merking; også
+// normalisering av filer som avviker fra disk). En liste som ikke kommer fra load() (tester, tom liste) behandles som før (alle).
+// Før hver skriving leses fila igjen under låsen. Er den endret av en annen prosess siden vi leste (sha ≠ det vi leste), flettes TREVEIS mot det vi leste:
+//   · felter (flagg, status, kind, tagger, synlighet, lenker, …) vi endret og den andre ikke rørte, blir med; samme felt endret av begge → disk vinner
+//   · kroppen (tittel, L, S/M, versjon) flettes ALDRI (V15): har bare vi endret den, blir vår med; har begge → disk vinner, og vår serialisering legges
+//     i .tua/versions/<id>/v<n>-konflikt-<tid>.md. Ingenting går tapt.
+// written.json er delt på id for alle Tua-prosesser: bare id-ene vi faktisk skrev oppdateres (før: alle), så en annen prosess' fil regnes aldri som
+// «redigert utenfra» i load() fordi vi overskrev sha-en dens med vår gamle. Resultatet står i sisteSave {skrevet, hoppet, flettet, konflikter}.
+const SPOR = new WeakMap();
+const sporFor = (atoms) => (Array.isArray(atoms) ? SPOR.get(atoms) || null : null);
+function nyttSpor(atoms) { const s = { lest: new Map(), dirty: new Set() }; SPOR.set(atoms, s); return s }
+function markDirty(atoms, id) { const s = sporFor(atoms); if (s && id) s.dirty.add(String(id)); return !!s }
+function erDirty(atoms, a) { const s = sporFor(atoms); if (!s || !a) return true; const l = s.lest.get(a.id); return s.dirty.has(a.id) || !l || serialize(a) !== l.md }
+const FELT_FLETT = ['drift', 'fanget', 'beholdt', 'status', 'kind', 'tags', 'refs', 'share', 'links', 'key', 'renders', 'ga', 'derivedFrom', 'ekstra'];
+const KROPP = ['name', 'content', 'summary', 'convo', 'source', 'levels', 'version', 'capturedAt', 'size'];
+const jsonAv = (x) => JSON.stringify(x ?? null);
+// Treveis: mem (vårt minne), base (slik vi leste fila), disk (slik fila ligger nå, skrevet av noen andre). Returnerer { atom, konflikt, felter }.
+function flettTreveis(mem, base, disk) {
+  const ut = { ...disk, id: mem.id, project: mem.project };
+  const felter = [];
+  for (const f of FELT_FLETT) if (jsonAv(mem[f]) !== jsonAv(base[f]) && jsonAv(disk[f]) === jsonAv(base[f])) { if (mem[f] === undefined) delete ut[f]; else ut[f] = mem[f]; felter.push(f); }
+  const memK = KROPP.some((f) => jsonAv(mem[f]) !== jsonAv(base[f])), diskK = KROPP.some((f) => jsonAv(disk[f]) !== jsonAv(base[f]));
+  let konflikt = false;
+  if (memK && !diskK) { for (const f of KROPP) { if (mem[f] === undefined) delete ut[f]; else ut[f] = mem[f]; } delete ut.editedOutside; }
+  else if (memK && diskK) konflikt = true;                   // disk vinner kroppen; vår legges som konflikt-versjon av kalleren
+  return { atom: ut, konflikt, felter }
+}
+const overta = (a, ut) => { for (const k of Object.keys(a)) delete a[k]; Object.assign(a, ut); return a };
+
+// Skriver bare det som er endret (se over). Flytter fila hvis navnet/prosjektet endret seg. Sletter aldri. Returnerer antall skrevne filer.
+function save(atoms, { alle = false } = {}) {
   if (!filesMode()) { writeCache(atoms); return 0 }
   fs__default.mkdirSync(path__default.dirname(LOCK()), { recursive: true });
   const locked = acquireLock();
-  try { return saveUnlocked(atoms) } finally { if (locked) releaseLock(); }
+  try { return saveUnlocked(atoms, { alle }) } finally { if (locked) releaseLock(); }
 }
-function saveUnlocked(atoms) {
+function saveUnlocked(atoms, { alle = false } = {}) {
   const index = readIndex();
   const wr = readWritten();
+  const spor = sporFor(atoms);
+  const full = alle || !spor;
   const used = new Set();
-  let written = 0;
+  const stat = { skrevet: 0, hoppet: 0, flettet: [], konflikter: [], indeksert: 0 };
+  // 1) sakene som ikke skal skrives holder filnavnet sitt, så ingen ny fil tar det — og en fil sluppet i mappa (Finder) får plass i indeksen uten å skrives
+  const kandidater = [];
   for (const a of atoms) {
+    if (full || erDirty(atoms, a)) { kandidater.push(a); continue }
+    const rel = spor.lest.get(a.id)?.rel || index[a.id] || path__default.join(a.project || 'Uten prosjekt', fileNameFor(a));
+    used.add(rel.toLowerCase());
+    if (index[a.id] !== rel) { index[a.id] = rel; stat.indeksert++; }
+    stat.hoppet++;
+  }
+  for (const a of kandidater) {
     const dir = a.project || 'Uten prosjekt';
     const plain = path__default.join(dir, fileNameFor(a)), suffixed = path__default.join(dir, safeName(a.name, 80) + ` (${String(a.id).slice(-6)}).md`);
     // M17: stabil ved navnekollisjon — det navnet atomet HADDE (plain eller med id-suffiks) beholdes så lenge det er ledig.
@@ -438,33 +487,44 @@ function saveUnlocked(atoms) {
       const prevAbs = path__default.join(FILES_ROOT, prev);
       if (fs__default.existsSync(prevAbs) && !fs__default.existsSync(abs)) fs__default.renameSync(prevAbs, abs);
     }
-    delete a.editedOutside;                              // festes nå: versjonen er talt opp, teksten under bevares
-    if (a.renders?.length) exportRenders(a);              // M11: html/pdf-kopi ved siden av atomet i arkivet
     let before = null;
     try { before = fs__default.readFileSync(abs, 'utf8'); } catch {}
-    // 24.10.2026 (etter at en eldre plugin-versjon strøk `drift`/`fanget` fra 1 035 filer): flagg og status som står i fila på disk,
-    // men mangler i minnet, beholdes. Fila er sannheten (V9); en prosess som ikke kjenner et felt skal ikke kunne slette det.
-    if (before !== null) {
+    const lest = spor?.lest.get(a.id);
+    if (before !== null && lest && sha256(before) !== lest.sha) {
+      // runde 3c: en annen prosess skrev fila etter at vi leste den → flett treveis mot det vi leste; teksten flettes aldri
+      let r = null;
+      try { r = flettTreveis(a, parse(lest.md, { fallbackId: a.id }), parse(before, { fallbackId: a.id })); } catch {}
+      if (r) {
+        if (r.konflikt) { keepVersion(a.id, serialize(a), { merk: 'konflikt' }); stat.konflikter.push(a.id); } else stat.flettet.push(a.id);
+        overta(a, r.atom);
+      }
+    } else if (before !== null) {
+      // 24.10.2026 (etter at en eldre plugin-versjon strøk `drift`/`fanget` fra 1 035 filer): flagg og status som står i fila på disk,
+      // men mangler i minnet, beholdes. Fila er sannheten (V9); en prosess som ikke kjenner et felt skal ikke kunne slette det.
       try {
         const påDisk = parse(before, { fallbackId: a.id });
         for (const felt of ['drift', 'fanget', 'beholdt', 'status']) if (a[felt] === undefined && påDisk[felt] !== undefined) a[felt] = påDisk[felt];
         if ((!a.kind || a.kind === 'capture') && påDisk.kind && påDisk.kind !== 'capture' && !KINDS_GAMLE.has(påDisk.kind)) a.kind = påDisk.kind;
+        if (!a.ekstra && påDisk.ekstra) a.ekstra = påDisk.ekstra;                 // runde 3c: nøkler vi ikke kjenner, følger med
       } catch {}
     }
+    delete a.editedOutside;                              // festes nå: versjonen er talt opp, teksten under bevares
+    if (a.renders?.length) exportRenders(a);              // M11: html/pdf-kopi ved siden av atomet i arkivet
     const md = serialize(a);
     if (before !== md) {
       if (before !== null) keepVersion(a.id, before);   // historikk: forrige versjon bevares som egen fil
       fs__default.writeFileSync(abs, md);
       setFinderTags(abs, [...new Set([...(a.tags || []), a.project])]);
-      written++;
+      stat.skrevet++;
     }
     index[a.id] = rel;
-    wr[a.id] = { sha: sha256(md), version: a.version || 1 };
+    wr[a.id] = { sha: sha256(md), version: a.version || 1 };           // bare det vi skrev — aldri andres id-er
+    if (spor) { spor.lest.set(a.id, { sha: sha256(md), md, rel }); spor.dirty.delete(a.id); }
   }
   writeIndex(index);
   fs__default.writeFileSync(WRITTEN(), JSON.stringify(wr, null, 2) + '\n');
   writeCache(atoms);
-  return written
+  return stat.skrevet
 }
 const hasExternalEdits = (atoms) => atoms.some((a) => a.editedOutside);
 
@@ -596,6 +656,7 @@ function upsert(atoms, { key, ...data }) {
     const a = makeAtom(data);
     if (key) { a.key = key; a.version = 1; }
     atoms.push(a);
+    markDirty(atoms, a.id);
     return { atom: a, status: 'ny' }
   }
   const old = atoms[i];
@@ -630,6 +691,7 @@ function upsert(atoms, { key, ...data }) {
   if (bodySame) {
     if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old });
+    markDirty(atoms, old.id);
     return { atom: atoms[i], status: 'nivåer' }
   }
   const a = {
@@ -645,6 +707,7 @@ function upsert(atoms, { key, ...data }) {
     version,
   };
   atoms[i] = attach(a);
+  markDirty(atoms, a.id);
   return { atom: a, status: 'oppdatert' }
 }
 

@@ -147,12 +147,14 @@ const stableId = (rel) => 'f_' + crypto.createHash('sha1').update(rel).digest('h
 export const sha8 = (s) => { let h = 0x811c9dc5; const t = String(s || ''); for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 } return h.toString(16).padStart(8, '0') }
 export const hashOf = (s) => sha8(String(s || '').replace(/\s+/g, ' ').trim())   // whitespace flatet: samme prompt med annen linjedeling er samme prompt
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex')
+export const sha256Tekst = sha256   // runde 3c: tester og broen sammenligner med written.json
 export const sha256File = (p) => { try { return sha256(fs.readFileSync(p)) } catch { return null } }
 const readWritten = () => { try { return JSON.parse(fs.readFileSync(WRITTEN(), 'utf8')) } catch { return {} } }
 
 export function load() {
   if (!filesMode()) return loadCache()
   const atoms = []
+  const spor = nyttSpor(atoms)                                  // runde 3c: hva denne lista leste — save() skriver bare det som er endret siden
   const written = readWritten()
   const index = readIndex()
   const seenIds = new Map()                                     // id → rel; to filer med samme tua_id (kopi i Finder, gammel feil) → den indeksen peker på vinner
@@ -160,6 +162,8 @@ export function load() {
     try {
       const text = fs.readFileSync(abs, 'utf8')
       const a = parse(text, { fallbackId: stableId(rel) })
+      const løs = !(text.startsWith('---\n') && /(^|\n)tua_id:/.test(text.slice(4, 2200)))   // en vanlig .md sluppet i mappa (Finder) — ennå ikke Tuas: adopteres ved neste save() (frontmatter skrives inn)
+      if (løs) { try { const mt = fs.statSync(abs).mtimeMs; a.capturedAt = a.createdAt = mt } catch {} }   // runde 3c: datoen er filas, ikke «nå» — ellers ble saken ny ved hver lesing
       const dup = seenIds.get(a.id)
       if (dup !== undefined) {
         if (index[a.id] !== rel) continue                        // denne er kopien — hopp over, slett aldri
@@ -172,8 +176,11 @@ export function load() {
       // V15 regel 1: fila er endret av noen andre enn Tua siden sist skriving → NY versjon, aldri merge.
       // Versjonen telles opp her (i minnet); neste save() fester den og bevarer den redigerte teksten i .tua/versions.
       const w = written[a.id]
-      if (w && w.sha !== sha256(text)) { a.version = Math.max(a.version || 1, w.version || 1) + 1; a.editedOutside = true }
+      const sha = sha256(text)
+      if (w && w.sha !== sha) { a.version = Math.max(a.version || 1, w.version || 1) + 1; a.editedOutside = true }
       atoms.push(a)
+      spor.lest.set(a.id, { sha, md: serialize(a), rel })        // grunnlaget: fila slik den lå, og saken slik vi leste den
+      if (a.editedOutside || løs) spor.dirty.add(a.id)            // V15 regel 1: den nye versjonen skal festes ved neste save(); en løs fil adopteres (som før)
     } catch { /* ulesbar fil — hopp over, slett aldri */ }
   }
   // Mappa er sannheten — også for sletting (V9/V12: «rydding skjer i Finder»). Det gamle sikkerhetsnettet som la inn igjen
@@ -381,14 +388,14 @@ export function compose(atoms, { ids, level = 'M', name, intro, context }) {
 // (Quick Look skal vise toppen = S), aldri slettet. Første fangst av v<n> vinner;
 // en annen tilstand med samme versjonsnummer får tidsstempel i navnet.
 const VERSIONS_DIR = () => tuaFile('versions')
-function keepVersion(id, oldText) {
+function keepVersion(id, oldText, { merk = '' } = {}) {
   const n = (oldText.match(/^versjon:\s*(\d+)/m) || [])[1] || '0'
   const dir = path.join(VERSIONS_DIR(), id)
   fs.mkdirSync(dir, { recursive: true })
-  let p = path.join(dir, `v${n}.md`)
+  let p = path.join(dir, merk ? `v${n}-${merk}-${Date.now()}.md` : `v${n}.md`)   // runde 3c: «konflikt» = vår tekst da disk vant (aldri tap)
   if (fs.existsSync(p)) {
     if (fs.readFileSync(p, 'utf8') === oldText) return
-    p = path.join(dir, `v${n}-${Date.now()}.md`)
+    p = path.join(dir, `v${n}-${merk ? merk + '-' : ''}${Date.now()}.md`)
   }
   fs.writeFileSync(p, oldText)
 }
@@ -433,8 +440,8 @@ function setFinderTags(file, tags) {
   return spawnSync('xattr', ['-wx', 'com.apple.metadata:_kMDItemUserTags', py.stdout.trim(), file], { encoding: 'utf8' }).status === 0
 }
 
-// M12: én skriver om gangen. Flere prosesser (Desktop-server, Code-server, bro, sync) kan
-// kalle save() samtidig; låsen (.tua/.lock, atomisk mkdir) serialiserer dem. Gammel lås
+// M12: én skriver om gangen. Flere prosesser (Desktop-server, Code-server, bro, sync, hook) kan
+// kalle save() samtidig; låsen (.tua/.lock, atomisk mkdir) serialiserer dem og gjelder HELE save (indeks, written.json, filene). Gammel lås
 // (> 15 s, en prosess som døde) fjernes. Venter maks 3 s, så skrives det uansett (aldri tap).
 const LOCK = () => tuaFile('.lock')
 function acquireLock() {
@@ -448,20 +455,67 @@ function acquireLock() {
 }
 const releaseLock = () => { try { fs.rmSync(LOCK(), { recursive: true, force: true }) } catch {} }
 
-// Skriver bare det som endret seg. Flytter fila hvis navnet/prosjektet endret seg.
-// Sletter aldri. Returnerer antall skrevne filer.
-export function save(atoms) {
+// ── Runde 3c (24.10.2026, V8-svakheten): ÉN SKRIVER — dirty-sporing, treveis fletting, delt written.json ──────────────────────────
+// Før: save() skrev hver sak hvis serialiseringen avvek fra disk — en prosess med gammelt minne (hook fra forrige plugin-versjon, en bro som lastet
+// for en time siden) skrev HELE arkivet tilbake og strøk det andre hadde skrevet (hendelsen 24.10: 1 035 filer uten drift/fanget).
+// Nå: load() husker, på selve lista (WeakMap), fila sin sha og saken slik den ble lest. save(atoms) skriver bare det DENNE prosessen har endret —
+// serialiseringen avviker fra det som ble lest, saken er ny, eller markDirty(atoms, id) er kalt. saveAll(atoms) tar alle (review/merking; også
+// normalisering av filer som avviker fra disk). En liste som ikke kommer fra load() (tester, tom liste) behandles som før (alle).
+// Før hver skriving leses fila igjen under låsen. Er den endret av en annen prosess siden vi leste (sha ≠ det vi leste), flettes TREVEIS mot det vi leste:
+//   · felter (flagg, status, kind, tagger, synlighet, lenker, …) vi endret og den andre ikke rørte, blir med; samme felt endret av begge → disk vinner
+//   · kroppen (tittel, L, S/M, versjon) flettes ALDRI (V15): har bare vi endret den, blir vår med; har begge → disk vinner, og vår serialisering legges
+//     i .tua/versions/<id>/v<n>-konflikt-<tid>.md. Ingenting går tapt.
+// written.json er delt på id for alle Tua-prosesser: bare id-ene vi faktisk skrev oppdateres (før: alle), så en annen prosess' fil regnes aldri som
+// «redigert utenfra» i load() fordi vi overskrev sha-en dens med vår gamle. Resultatet står i sisteSave {skrevet, hoppet, flettet, konflikter}.
+const SPOR = new WeakMap()
+const sporFor = (atoms) => (Array.isArray(atoms) ? SPOR.get(atoms) || null : null)
+function nyttSpor(atoms) { const s = { lest: new Map(), dirty: new Set() }; SPOR.set(atoms, s); return s }
+export function markDirty(atoms, id) { const s = sporFor(atoms); if (s && id) s.dirty.add(String(id)); return !!s }
+export function erDirty(atoms, a) { const s = sporFor(atoms); if (!s || !a) return true; const l = s.lest.get(a.id); return s.dirty.has(a.id) || !l || serialize(a) !== l.md }
+export const dirtyIds = (atoms) => atoms.filter((a) => erDirty(atoms, a)).map((a) => a.id)
+export const harSpor = (atoms) => !!sporFor(atoms)
+export let sisteSave = { skrevet: 0, hoppet: 0, flettet: [], konflikter: [], indeksert: 0 }
+const FELT_FLETT = ['drift', 'fanget', 'beholdt', 'status', 'kind', 'tags', 'refs', 'share', 'links', 'key', 'renders', 'ga', 'derivedFrom', 'ekstra']
+const KROPP = ['name', 'content', 'summary', 'convo', 'source', 'levels', 'version', 'capturedAt', 'size']
+const jsonAv = (x) => JSON.stringify(x ?? null)
+// Treveis: mem (vårt minne), base (slik vi leste fila), disk (slik fila ligger nå, skrevet av noen andre). Returnerer { atom, konflikt, felter }.
+export function flettTreveis(mem, base, disk) {
+  const ut = { ...disk, id: mem.id, project: mem.project }
+  const felter = []
+  for (const f of FELT_FLETT) if (jsonAv(mem[f]) !== jsonAv(base[f]) && jsonAv(disk[f]) === jsonAv(base[f])) { if (mem[f] === undefined) delete ut[f]; else ut[f] = mem[f]; felter.push(f) }
+  const memK = KROPP.some((f) => jsonAv(mem[f]) !== jsonAv(base[f])), diskK = KROPP.some((f) => jsonAv(disk[f]) !== jsonAv(base[f]))
+  let konflikt = false
+  if (memK && !diskK) { for (const f of KROPP) { if (mem[f] === undefined) delete ut[f]; else ut[f] = mem[f] }; delete ut.editedOutside }
+  else if (memK && diskK) konflikt = true                   // disk vinner kroppen; vår legges som konflikt-versjon av kalleren
+  return { atom: ut, konflikt, felter }
+}
+const overta = (a, ut) => { for (const k of Object.keys(a)) delete a[k]; Object.assign(a, ut); return a }
+
+// Skriver bare det som er endret (se over). Flytter fila hvis navnet/prosjektet endret seg. Sletter aldri. Returnerer antall skrevne filer.
+export function save(atoms, { alle = false } = {}) {
   if (!filesMode()) { writeCache(atoms); return 0 }
   fs.mkdirSync(path.dirname(LOCK()), { recursive: true })
   const locked = acquireLock()
-  try { return saveUnlocked(atoms) } finally { if (locked) releaseLock() }
+  try { return saveUnlocked(atoms, { alle }) } finally { if (locked) releaseLock() }
 }
-function saveUnlocked(atoms) {
+export const saveAll = (atoms) => save(atoms, { alle: true })
+function saveUnlocked(atoms, { alle = false } = {}) {
   const index = readIndex()
   const wr = readWritten()
+  const spor = sporFor(atoms)
+  const full = alle || !spor
   const used = new Set()
-  let written = 0
+  const stat = { skrevet: 0, hoppet: 0, flettet: [], konflikter: [], indeksert: 0 }
+  // 1) sakene som ikke skal skrives holder filnavnet sitt, så ingen ny fil tar det — og en fil sluppet i mappa (Finder) får plass i indeksen uten å skrives
+  const kandidater = []
   for (const a of atoms) {
+    if (full || erDirty(atoms, a)) { kandidater.push(a); continue }
+    const rel = spor.lest.get(a.id)?.rel || index[a.id] || path.join(a.project || 'Uten prosjekt', fileNameFor(a))
+    used.add(rel.toLowerCase())
+    if (index[a.id] !== rel) { index[a.id] = rel; stat.indeksert++ }
+    stat.hoppet++
+  }
+  for (const a of kandidater) {
     const dir = a.project || 'Uten prosjekt'
     const plain = path.join(dir, fileNameFor(a)), suffixed = path.join(dir, safeName(a.name, 80) + ` (${String(a.id).slice(-6)}).md`)
     // M17: stabil ved navnekollisjon — det navnet atomet HADDE (plain eller med id-suffiks) beholdes så lenge det er ledig.
@@ -478,33 +532,45 @@ function saveUnlocked(atoms) {
       const prevAbs = path.join(FILES_ROOT, prev)
       if (fs.existsSync(prevAbs) && !fs.existsSync(abs)) fs.renameSync(prevAbs, abs)
     }
-    delete a.editedOutside                              // festes nå: versjonen er talt opp, teksten under bevares
-    if (a.renders?.length) exportRenders(a)              // M11: html/pdf-kopi ved siden av atomet i arkivet
     let before = null
     try { before = fs.readFileSync(abs, 'utf8') } catch {}
-    // 24.10.2026 (etter at en eldre plugin-versjon strøk `drift`/`fanget` fra 1 035 filer): flagg og status som står i fila på disk,
-    // men mangler i minnet, beholdes. Fila er sannheten (V9); en prosess som ikke kjenner et felt skal ikke kunne slette det.
-    if (before !== null) {
+    const lest = spor?.lest.get(a.id)
+    if (before !== null && lest && sha256(before) !== lest.sha) {
+      // runde 3c: en annen prosess skrev fila etter at vi leste den → flett treveis mot det vi leste; teksten flettes aldri
+      let r = null
+      try { r = flettTreveis(a, parse(lest.md, { fallbackId: a.id }), parse(before, { fallbackId: a.id })) } catch {}
+      if (r) {
+        if (r.konflikt) { keepVersion(a.id, serialize(a), { merk: 'konflikt' }); stat.konflikter.push(a.id) } else stat.flettet.push(a.id)
+        overta(a, r.atom)
+      }
+    } else if (before !== null) {
+      // 24.10.2026 (etter at en eldre plugin-versjon strøk `drift`/`fanget` fra 1 035 filer): flagg og status som står i fila på disk,
+      // men mangler i minnet, beholdes. Fila er sannheten (V9); en prosess som ikke kjenner et felt skal ikke kunne slette det.
       try {
         const påDisk = parse(before, { fallbackId: a.id })
         for (const felt of ['drift', 'fanget', 'beholdt', 'status']) if (a[felt] === undefined && påDisk[felt] !== undefined) a[felt] = påDisk[felt]
         if ((!a.kind || a.kind === 'capture') && påDisk.kind && påDisk.kind !== 'capture' && !KINDS_GAMLE.has(påDisk.kind)) a.kind = påDisk.kind
+        if (!a.ekstra && påDisk.ekstra) a.ekstra = påDisk.ekstra                 // runde 3c: nøkler vi ikke kjenner, følger med
       } catch {}
     }
+    delete a.editedOutside                              // festes nå: versjonen er talt opp, teksten under bevares
+    if (a.renders?.length) exportRenders(a)              // M11: html/pdf-kopi ved siden av atomet i arkivet
     const md = serialize(a)
     if (before !== md) {
       if (before !== null) keepVersion(a.id, before)   // historikk: forrige versjon bevares som egen fil
       fs.writeFileSync(abs, md)
       setFinderTags(abs, [...new Set([...(a.tags || []), a.project])])
-      written++
+      stat.skrevet++
     }
     index[a.id] = rel
-    wr[a.id] = { sha: sha256(md), version: a.version || 1 }
+    wr[a.id] = { sha: sha256(md), version: a.version || 1 }           // bare det vi skrev — aldri andres id-er
+    if (spor) { spor.lest.set(a.id, { sha: sha256(md), md, rel }); spor.dirty.delete(a.id) }
   }
   writeIndex(index)
   fs.writeFileSync(WRITTEN(), JSON.stringify(wr, null, 2) + '\n')
   writeCache(atoms)
-  return written
+  sisteSave = stat
+  return stat.skrevet
 }
 export const hasExternalEdits = (atoms) => atoms.some((a) => a.editedOutside)
 
@@ -636,6 +702,7 @@ export function upsert(atoms, { key, ...data }) {
     const a = makeAtom(data)
     if (key) { a.key = key; a.version = 1 }
     atoms.push(a)
+    markDirty(atoms, a.id)
     return { atom: a, status: 'ny' }
   }
   const old = atoms[i]
@@ -670,6 +737,7 @@ export function upsert(atoms, { key, ...data }) {
   if (bodySame) {
     if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old })
+    markDirty(atoms, old.id)
     return { atom: atoms[i], status: 'nivåer' }
   }
   const a = {
@@ -685,6 +753,7 @@ export function upsert(atoms, { key, ...data }) {
     version,
   }
   atoms[i] = attach(a)
+  markDirty(atoms, a.id)
   return { atom: a, status: 'oppdatert' }
 }
 
@@ -856,9 +925,10 @@ export function ensureArchive() {
 //   kast(…)       fila flyttes til <arkiv>/.tua/papirkurv/<prosjekt>/ med indeks — aldri slett; angre(…) flytter den tilbake
 // Regelen for engangs-merkingen av det som alt ligger i arkivet (review.js --fanget): nøkkelen sier hvor saken kom fra.
 export const FANGET_NØKLER = /^(svar|okt|samtale):|^prompt:(?!spor:)/      // svar:<økt8>:… og prompt:<økt8>:… (hook/import), okt:<økt> (hook), samtale:<id> (import); prompt:spor: er Spør
+export const harFangetNøkkel = (a) => !!a && ((!!a.key && FANGET_NØKLER.test(a.key)) || erØktUtenNøkkel(a))   // runde 3c: «Økt: …» uten okt:-nøkkel er også fangst
 export function erFangetEtterRegel(a, { utlevert = 0 } = {}) {
   if (a?.fanget === false) return false                                                   // løftet inn med Behold — brukerens valg, regelen rører den aldri igjen
-  if (!a?.key || !FANGET_NØKLER.test(a.key)) return false
+  if (!harFangetNøkkel(a)) return false
   if (erMenneskeskrevet(a)) return false                                                  // noen har skrevet på den, eller et menneske er kilden — da er den med vilje (V10)
   if ((a.refs || []).length || a.status) return false                                     // gjort synlig i et annet prosjekt eller låst/satt status: arbeidet med
   if (utlevert > 0) return false                                                          // har vært med i en sending — brukeren har brukt den
@@ -866,7 +936,7 @@ export function erFangetEtterRegel(a, { utlevert = 0 } = {}) {
 }
 // Runde 2c (app): engangs-merkingen som én funksjon — review.js --fanget og POST /api/fanget/merk (Innstillinger › Arkiv) bruker den samme.
 // Teller, fordeler per slag/kilde/prosjekt og peker på sakene som ville fått flagget; skriver ingenting selv (kalleren setter a.fanget = true og save()).
-export const slagAvNøkkel = (a) => { const k = String(a?.key || ''); return k.startsWith('okt:') ? 'økt' : k.startsWith('samtale:') ? 'samtale' : k.startsWith('prompt:') ? 'prompt' : k.startsWith('svar:') ? 'svar' : a?.kind || 'capture' }
+export const slagAvNøkkel = (a) => { const k = String(a?.key || ''); return k.startsWith('okt:') ? 'økt' : k.startsWith('samtale:') ? 'samtale' : k.startsWith('prompt:') ? 'prompt' : k.startsWith('svar:') ? 'svar' : erØktUtenNøkkel(a) ? 'økt' : a?.kind || 'capture' }
 export function fangetKandidater(atoms, { sendinger = deliveryCounts() } = {}) {
   const tell = (m, k) => { m[k] = (m[k] || 0) + 1 }
   const tall = { saker: atoms.length, altFanget: 0, kandidater: 0, nye: 0, holdt: { menneske: 0, synlig: 0, status: 0, utlevert: 0 } }
@@ -874,7 +944,7 @@ export function fangetKandidater(atoms, { sendinger = deliveryCounts() } = {}) {
   for (const a of atoms) {
     if (a.fanget) { tall.altFanget++; continue }
     if (a.drift === true) continue                                                        // runde 2d: drift er alt utenfor avisen — byggeøkter hører ikke i Fanget-bøtta (kjør review --drift først)
-    if (!a.key || !FANGET_NØKLER.test(a.key)) continue
+    if (!harFangetNøkkel(a)) continue
     tall.kandidater++
     const utlevert = sendinger.get(a.id) || 0
     if (!erFangetEtterRegel(a, { utlevert })) {
@@ -924,7 +994,7 @@ export function slåSammen(atoms, fraId, innIId) {
 }
 // Kast: fila til <arkiv>/.tua/papirkurv/<prosjekt>/<filnavn>, ut av indeksen og av `atoms` (i minnet — kalleren lagrer resten med save()).
 // Aldri slett: indeksen (papirkurv/index.json) husker hvor fila lå, så angre() kan legge den tilbake. Uten arkivmappe (cache-modus) finnes ingen papirkurv.
-export function kast(atoms, id, { grunn = 'kastet fra Fanget', innI = null } = {}) {
+export function kast(atoms, id, { grunn = 'kastet', innI = null } = {}) {
   if (!filesMode()) throw new Error('papirkurven finnes bare når arkivmappa er valgt')
   const i = atoms.findIndex((x) => x.id === id)
   if (i < 0) throw new Error(`fant ikke sak ${id}`)
@@ -974,6 +1044,82 @@ export function angre(id) {
   } finally { if (locked) releaseLock() }
 }
 
+// ── Runde 3c (M25, 03-avisen §2, plan videre §4 3c, 24.10.2026): rydding PÅ SAKEN — flytt, nytt navn, papirkurv (tøm), forslag ──────────────
+// Alt gjennom lageret: fila flyttes/omdøpes av save() (indeks og written.json følger), aldri rå filflytting her. Finder-flytt virker som før (V9: mappa vinner).
+// flytt(atoms, id, prosjekt)      saken til et annet prosjekt — det samme som å dra fila i Finder. save() flytter fila.
+// giNyttNavn(atoms, id, navn)     tittelen = filnavnet (V9); ved kollisjon i mappa får fila id-suffiks (regelen i save()). Fila omdøpes av save().
+// tømPapirkurv()                  fjerner filene i <arkiv>/.tua/papirkurv/ — men FØRST legges hver som siste versjon i .tua/versions/<id>/ («papirkurv»), så ingenting er borte for godt (M25: aldri slett).
+// ryddeforslag(atoms)             Tua FORESLÅR, utfører aldri: duplikater (identisk innhold · samme ingress · samme tittel i samme prosjekt), «---»-titler og tomme saker.
+export function flytt(atoms, id, prosjekt) {
+  const a = atoms.find((x) => x.id === id)
+  if (!a) throw new Error(`fant ikke sak ${id}`)
+  const p = projectAlias(String(prosjekt || '').trim())
+  if (!p) throw new Error('prosjekt kreves')
+  if (p.startsWith('.') || /[\/\\]/.test(p)) throw new Error(`«${prosjekt}» er ikke et gyldig prosjektnavn`)
+  const før = a.project
+  if (før.toLowerCase() === p.toLowerCase()) return { atom: a, før, flyttet: false }
+  a.project = p
+  markDirty(atoms, a.id)
+  return { atom: a, før, flyttet: true }
+}
+export function giNyttNavn(atoms, id, navn) {
+  const a = atoms.find((x) => x.id === id)
+  if (!a) throw new Error(`fant ikke sak ${id}`)
+  const n = String(navn || '').replace(/\s+/g, ' ').trim()
+  if (!n) throw new Error('navn kreves')
+  if (n.length > 200) throw new Error('navnet er for langt (maks 200 tegn)')
+  const før = a.name
+  if (før === n) return { atom: a, før, endret: false, fil: fileNameFor(a) }
+  a.name = n
+  markDirty(atoms, a.id)
+  const kollisjon = atoms.some((x) => x.id !== a.id && x.project.toLowerCase() === a.project.toLowerCase() && fileNameFor(x).toLowerCase() === fileNameFor(a).toLowerCase())
+  return { atom: a, før, endret: true, fil: kollisjon ? safeName(n, 80) + ` (${String(a.id).slice(-6)}).md` : fileNameFor(a), kollisjon }
+}
+export function tømPapirkurv() {
+  if (!filesMode()) throw new Error('papirkurven finnes bare når arkivmappa er valgt')
+  fs.mkdirSync(path.dirname(LOCK()), { recursive: true })
+  const locked = acquireLock()
+  try {
+    const kurv = readKurv()
+    let fjernet = 0, bevart = 0
+    for (const e of kurv) {
+      const p = path.join(FILES_ROOT, e.kurv)
+      try { const tekst = fs.readFileSync(p, 'utf8'); keepVersion(e.id, tekst, { merk: 'papirkurv' }); bevart++ } catch {}
+      try { fs.rmSync(p, { force: true }); fjernet++ } catch {}
+      try { fs.rmdirSync(path.dirname(p)) } catch {}
+    }
+    writeKurv([])
+    return { antall: kurv.length, fjernet, bevart, versjoner: path.relative(FILES_ROOT, VERSIONS_DIR()) }
+  } finally { if (locked) releaseLock() }
+}
+// Forslag. Konservativt: tittel-duplikater bare for arbeid-saker med en tittel som sier noe (≥ 12 tegn, ikke «vedlegg», «fil», «Uten tittel»); ingress-duplikater
+// når S er ≥ 60 tegn og lik; identisk innhold uansett. Drift holdes utenfor (loggen rydder seg ikke). I hvert forslag er `behold` den nyeste/største, `kast` resten.
+const GENERISK_TITTEL = /^(vedlegg|fil|uten tittel|dokument|notat|svar|økt|samtale|untitled|document|<!doctype html>|·!doctype html·)\b/i
+const norm = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim()
+export const erStrekTittel = (a) => /^[-—–_]{2,}\s*$/.test(String(a?.name || '').trim()) || /^[-—–]{2,}\s/.test(String(a?.name || '').trim())
+export const erTomSak = (a) => !String(a?.content || '').trim() && !a?.levels?.S?.text && !a?.summary
+export function ryddeforslag(atoms, { maksPerSlag = 200 } = {}) {
+  const forslag = []
+  const velg = (liste) => [...liste].sort((x, y) => (y.version || 1) - (x.version || 1) || (y.content || '').length - (x.content || '').length || (y.capturedAt || 0) - (x.capturedAt || 0))
+  const rad = (a) => ({ id: a.id, name: a.name, project: a.project, kind: a.kind || 'capture', version: a.version || 1, capturedAt: a.capturedAt, tegn: (a.content || '').length, klasse: klasseAv(a), S: levelOf(a, 'S').text.slice(0, 200) })
+  const grupper = (nøkkel, filter, grunn) => {
+    const m = new Map()
+    for (const a of atoms) { if (a.drift === true || !filter(a)) continue; const k = nøkkel(a); if (!k) continue; const g = m.get(k) || []; g.push(a); m.set(k, g) }
+    for (const g of m.values()) if (g.length > 1 && !g.some((a) => forslag.some((f) => f.saker.some((s) => s.id === a.id)))) { const [b, ...k] = velg(g); forslag.push({ slag: 'duplikat', grunn, project: b.project, saker: g.map(rad), behold: b.id, kast: k.map((x) => x.id) }) }
+  }
+  grupper((a) => `${a.project.toLowerCase()}\n${sha256(norm(a.content))}`, (a) => String(a.content || '').trim().length >= 40, 'identisk innhold')
+  grupper((a) => { const S = a.levels?.S?.text; return S && norm(S).length >= 60 ? `${a.project.toLowerCase()}\n${norm(S)}` : '' }, (a) => a.kind !== 'prompt', 'samme ingress')
+  grupper((a) => { const n = norm(a.name); return n.length >= 12 && !GENERISK_TITTEL.test(n) ? `${a.project.toLowerCase()}\n${n}` : '' }, (a) => klasseAv(a) === 'arbeid' && a.kind !== 'samtale' && a.kind !== 'prompt', 'samme tittel')
+  for (const a of atoms) if (a.drift !== true && erStrekTittel(a)) forslag.push({ slag: 'tittel', grunn: 'tittelen er bare streker', project: a.project, saker: [rad(a)], behold: null, kast: [] })
+  for (const a of atoms) if (a.drift !== true && erTomSak(a)) forslag.push({ slag: 'tom', grunn: 'saken er tom', project: a.project, saker: [rad(a)], behold: null, kast: [a.id] })
+  const perSlag = {}, perProsjekt = {}
+  for (const f of forslag) { perSlag[f.slag] = (perSlag[f.slag] || 0) + 1; perProsjekt[f.project] = (perProsjekt[f.project] || 0) + 1 }
+  const topp = Object.entries(perProsjekt).sort((x, y) => y[1] - x[1])[0]
+  const dup = perSlag.duplikat || 0
+  const tekst = !forslag.length ? '' : [dup ? `${dup} ${dup === 1 ? 'duplikat' : 'duplikater'}${topp && perProsjekt[topp[0]] === dup && Object.keys(perProsjekt).length === 1 ? ` i ${topp[0]}` : topp ? ` (flest i ${topp[0]})` : ''}` : '', perSlag.tittel ? `${perSlag.tittel} ${perSlag.tittel === 1 ? 'tittel' : 'titler'} som bare er streker` : '', perSlag.tom ? `${perSlag.tom} ${perSlag.tom === 1 ? 'tom sak' : 'tomme saker'}` : ''].filter(Boolean).join(' · ')
+  return { forslag: forslag.slice(0, maksPerSlag * 3), antall: forslag.length, perSlag, perProsjekt, tekst }
+}
+
 // ── Runde 2d (arbeidsstykke 32 del 3, 03-avisen §2–§5, Erik 24.10.2026: ja til A–E): klassene, drift, vekt, tråden samlet, Claude-økta ──
 // «Avisen viser det som er laget med vilje og er ferdig nok til å leses; alt annet finnes, men venter på å bli spurt etter.»
 // Fire klasser, avledet ved lesing (ingen ny nøkkel i fila utover flaggene fanget/drift/beholdt):
@@ -1004,6 +1150,11 @@ export const erMenneskeskrevet = (a) => !!a && (a.levels?.S?.by === 'menneske' |
 // PDF-dokumenterte arbeidsstykker (dok:…) er arbeid, ikke drift. En sak med drift: false (Behold) eller noe menneskeskrevet merkes aldri.
 export const DRIFT_NØKLER = /^(commit-logg|manifest|status|lenker|beslutningslogg|import:|helsesjekk:)/
 export const BYGGEØKT_NØKLER = /^(okt|samtale|svar):|^prompt:(?!spor:)/
+// Runde 3c (03-avisen, restene; STATUS 24.10 kveld): to klasser strammes. (1) `dok:`-saker (dokumenter speilet av sync) i Tuas EGNE prosjekter er byggeøktenes
+// overleveringsnotater og arbeidsstykker om Tua selv — drift der, arbeid i alle andre prosjekter (en PDF speilet fra Skigaarden-repoet er arbeid). (2) En sak med
+// tittel «Økt: …» fra en maskinkilde UTEN hook-nøkkel (okt:) er en økt-rapport som kom inn på en annen vei (eldre hook, kopi) — drift i Tuas prosjekter, fanget ellers.
+export const DOK_NØKKEL = /^dok:/
+export const erØktUtenNøkkel = (a) => !!a && /^Økt:\s/.test(String(a.name || '')) && !/^okt:/.test(String(a.key || '')) && !erMenneskeskrevet(a)
 export const erTuaRepo = (root) => !!root && fs.existsSync(path.join(String(root), 'tua-plugin', 'server', 'store.js'))
 export const DRIFT_PROSJEKT = 'Tua'
 export function driftProsjekter() {
@@ -1012,16 +1163,20 @@ export function driftProsjekter() {
   return ut
 }
 export const erDriftProsjekt = (project, set = driftProsjekter()) => set.has(String(project || '').toLowerCase())
+// Har saken en nøkkel (eller tittel) drift-regelen kjenner? Uten unntakene (menneskeskrevet, drift: false) — de ligger i erDriftEtterRegel.
+export const harDriftNøkkel = (a, prosjekter = driftProsjekter()) => {
+  const key = String(a?.key || '')
+  if (DRIFT_NØKLER.test(key)) return true
+  if (!erDriftProsjekt(a?.project, prosjekter)) return false
+  return BYGGEØKT_NØKLER.test(key) || DOK_NØKKEL.test(key) || erØktUtenNøkkel(a)
+}
 export function erDriftEtterRegel(a, { prosjekter = driftProsjekter() } = {}) {
   if (!a || a.drift === false) return false
   if (erMenneskeskrevet(a)) return false
-  const key = String(a.key || '')
-  if (DRIFT_NØKLER.test(key)) return true
-  if (BYGGEØKT_NØKLER.test(key) && erDriftProsjekt(a.project, prosjekter)) return true
-  return false
+  return harDriftNøkkel(a, prosjekter)
 }
-// Hvorfor en sak er drift — til dry-run-tallene: sync · import · helsesjekk · byggeøkt
-export const driftSlag = (a) => { const k = String(a?.key || ''); return k.startsWith('import:') ? 'import' : k.startsWith('helsesjekk:') ? 'helsesjekk' : DRIFT_NØKLER.test(k) ? 'sync' : BYGGEØKT_NØKLER.test(k) ? 'byggeøkt' : 'annet' }
+// Hvorfor en sak er drift — til dry-run-tallene: sync · import · helsesjekk · byggeøkt · dokument (runde 3c) · økt-tittel (runde 3c)
+export const driftSlag = (a) => { const k = String(a?.key || ''); return k.startsWith('import:') ? 'import' : k.startsWith('helsesjekk:') ? 'helsesjekk' : DRIFT_NØKLER.test(k) ? 'sync' : BYGGEØKT_NØKLER.test(k) ? 'byggeøkt' : DOK_NØKKEL.test(k) ? 'dokument' : erØktUtenNøkkel(a) ? 'økt-tittel' : 'annet' }
 // Friksjon 15: drift-merkingen som én funksjon — review.js --drift og POST /api/arkiv/merk (Innstillinger › Arkivsted) bruker den samme, som fangetKandidater.
 // Teller, fordeler per slag/prosjekt og peker på sakene som ville fått `drift: true`; skriver ingenting selv (kalleren setter a.drift = true og save()).
 export function driftKandidater(atoms, { prosjekter = driftProsjekter() } = {}) {
@@ -1030,8 +1185,7 @@ export function driftKandidater(atoms, { prosjekter = driftProsjekter() } = {}) 
   const perSlag = {}, perProsjekt = {}, nye = []
   for (const a of atoms) {
     if (a.drift === true) { tall.altDrift++; continue }
-    const key = String(a.key || '')
-    if (!(DRIFT_NØKLER.test(key) || (BYGGEØKT_NØKLER.test(key) && erDriftProsjekt(a.project, prosjekter)))) continue
+    if (!harDriftNøkkel(a, prosjekter)) continue
     tall.kandidater++
     if (!erDriftEtterRegel(a, { prosjekter })) { if (a.drift === false) tall.holdt.behold++; else if (erMenneskeskrevet(a)) tall.holdt.menneske++; continue }
     tall.nye++; tell(perSlag, driftSlag(a)); tell(perProsjekt, a.project); nye.push(a)
