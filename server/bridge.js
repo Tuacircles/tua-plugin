@@ -119,7 +119,7 @@ import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, s
 import { spor, mottakere, trustScores, Blokkert, ord, forskjeller, konklusjon, rettKonklusjon, svarFor } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks
 import { inboxPending, inboxShareFiles } from './import.js'
-import { projects as prosjektRegister, INBOX_DIR } from './store.js'
+import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
@@ -372,7 +372,7 @@ function openTarget(a, target, href) {
 
 // Statisk: appen og sandkassen fra dist/. Ingen stier utenfor dist (realpath-sjekk).
 // Skive 3: appen er én fil (index.html) med klient-ruting — alle app-rutene får samme fil, og appen leser stien selv (router.jsx).
-export const APP_RUTER = ['/', '/forside', '/spor', '/kart', '/oppslag', '/innstillinger', '/start', '/innboks']   // /start: onboardingen (skive 8), kan åpnes igjen fra Innstillinger · /innboks: Innboks som egen side (friksjon 5)
+export const APP_RUTER = ['/', '/forside', '/spor', '/oppslag', '/innstillinger', '/start', '/innboks']   // /start: onboardingen (skive 8), kan åpnes igjen fra Innstillinger · /innboks: Innboks som egen side (friksjon 5) · /kart er borte (runde 1, arb. 32 §6) — Demo 8 bare under /sandkasse
 const APP_FIL = 'index.html'
 function serveStatic(res, pathname) {
   const rel = APP_RUTER.includes(pathname) ? '/' + APP_FIL : pathname === '/sandkasse' ? '/sandkasse.html' : pathname
@@ -421,13 +421,16 @@ http
         const offset = num(url.searchParams.get('offset'), 0), limit = num(url.searchParams.get('limit'), all.length)
         // lenker regnes ut ved lesing, lagres ikke her. ord/tegn per nivå, max og vault (skive 3): det forsiden sender med til Spør om en sak —
         // samme tall som /api/search gir, fra lageret (levelOf), så anslaget i Spør er det samme uansett hvor saken ble valgt. max er L: eget arkiv (V11).
-        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a) }))
+        // Runde 1 (arb. 32 §6): tråd = prompt-id for Spørs biprodukter (svar, Forskjeller, konklusjon — og prompten selv), så avisen, Oppslag og søket viser dem som én;
+        // utlevert = antall sendinger saken har vært med i (forsidens hovedsak = mest arbeidet med siste døgn). Bare tellinger.
+        const trådAv = tråder(all).av, sendinger = deliveryCounts()
+        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0 }))
         return json(res, 200, { atoms, total: all.length, offset, file: ARKIV() })
       }
       if (req.method === 'GET' && url.pathname === '/api/search') {
         const q = url.searchParams.get('q') || ''
         const kind = url.searchParams.get('kind') || undefined
-        const alleAtomer = load(), byId = new Map(alleAtomer.map((a) => [a.id, a]))
+        const alleAtomer = load(), byId = new Map(alleAtomer.map((a) => [a.id, a])), trådAv = tråder(alleAtomer).av
         const hits = search(alleAtomer, q, {
           context: url.searchParams.get('context') || undefined, project: url.searchParams.get('project') || undefined, kind,
           limit: num(url.searchParams.get('limit'), 50), offset: num(url.searchParams.get('offset'), 0),
@@ -436,7 +439,7 @@ http
           q, total: hits.total, offset: num(url.searchParams.get('offset'), 0), ...(kind ? { kind } : {}),
           // ord per nivå kommer fra lageret (levelOf) — Spør-skjermen (skive 2) regner ikke selv, så ordantallet er det samme som motoren sender.
           // Skive 8: prompt-treff bærer hele teksten (tekst), svarene (ga) og modellene de gikk til — forslagene i Spør fyller feltet med ett klikk.
-          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), status: statusOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet,
+          hits: hits.map(({ atom: a, S, max, score, snippet }) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: S.text, sLevel: S.level, max, vault: isVault(a), status: statusOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), score, snippet, tråd: trådAv.get(a.id) || null, tags: a.tags || [],
             ...(a.kind === 'prompt' ? { tekst: a.content, ga: a.ga || [], modeller: modellerFor(byId, a) } : {}) })),
         })
       }
@@ -453,7 +456,12 @@ http
         return json(res, 200, { atom: { ...atom, links: linksFor(atom), file: fileOf(atom) }, status })
       }
       if (req.method === 'POST' && url.pathname === '/api/open') {
-        const { id, target, href } = await readBody(req)
+        const { id, target, href, mappe } = await readBody(req)
+        if (mappe) {   // runde 1 (arb. 32 §6): stier vises ikke i klartekst — «Vis i Finder» på arkivmappa og Innboks i stedet. Fast liste, aldri en sti fra klienten.
+          const sti = mappe === 'arkiv' ? FILES_ROOT : mappe === 'innboks' ? INBOX_DIR : null
+          if (!sti || !fs.existsSync(sti)) return json(res, 404, { error: `mappa «${mappe}» finnes ikke` })
+          try { const r = await run('reveal', sti); console.error(`[tua-bro] open ${FILE_MANAGER} ${mappe}${DRYRUN ? ' (dryrun)' : ''}`); return json(res, 200, r) } catch (e) { return json(res, 403, { error: e.message }) }
+        }
         if (!id || !target) return json(res, 400, { error: 'id og target kreves' })
         const a = load().find((x) => x.id === id)
         if (!a) return json(res, 404, { error: `fant ikke atom ${id}` })
@@ -780,6 +788,26 @@ http
         const dok = innboksDokumenter()
         return json(res, 200, { antall: dok.length, dokumenter: dok.map((d) => d.navn) })
       }
+      // ── Runde 1 — lette og rydde (arbeidsstykke 32 §6, 24.10.2026) ──
+      // GET /api/bro → { passord, arkiv } — appen viser «logg ut» bare når passord er satt. Aldri nøkler, aldri stier til klienten utenom arkivets navn.
+      if (req.method === 'GET' && url.pathname === '/api/bro') return json(res, 200, { passord: passwordSet(), arkiv: path.basename(ARKIV() || '') })
+      // POST /api/innboks/les {prosjekt} → SSE med fremdrift mens Innboks leses inn: start {antall, prosjekt} · leser/lest/skriver {fil, …} per fil (fra innlesing.js) ·
+      // sak {fil, id, name, project, …} når én er ferdig · feil {fil, feil} · slutt {filer, lest, feilet, prosjekt, filer: [...]}. Samme arbeid som /api/innboks/kjør (som står), bare synlig underveis.
+      if (req.method === 'POST' && url.pathname === '/api/innboks/les') {
+        const b = await readBody(req)
+        let prosjekt = STANDARD_PROSJEKT
+        try { if (b.prosjekt) prosjekt = prosjektNavn(b.prosjekt) } catch (e) { return json(res, 400, { error: e.message }) }
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        const ctl = new AbortController(); req.on('close', () => ctl.abort())
+        try {
+          const r = await lesInnInnboks({ prosjekt, dryRun: !!b.dryRun, skriver: b.skriver || undefined, klient: 'app', signal: ctl.signal, log: (m) => console.error(`[tua-bro] ${m}`),
+            på: (ev, d) => { if (ev === 'ferdig') hendelse('sak', { fil: d.fil, id: d.id, name: d.name, project: d.project, S_av: d.S_av, sider: d.sider, ord: d.ord, status: d.status }); else if (ev !== 'slutt') hendelse(ev, d) } })
+          hendelse('slutt', { ...r.tall, prosjekt: r.prosjekt, dryRun: r.dryRun, filer: r.filer.map(({ sti, ...f }) => f) })
+        } catch (e) { hendelse('feil', { feil: e.message }) }
+        return res.end()
+      }
       return json(res, 404, { error: 'ukjent rute' })
     } catch (e) {
       return json(res, 500, { error: String(e?.message || e) })
@@ -787,7 +815,7 @@ http
   })
   .listen(PORT, '127.0.0.1', () => {
     const built = fs.existsSync(path.join(DIST, APP_FIL))
-    console.error(`[tua-bro] appen: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} (forsiden · /spor · /oppslag · /innboks · /kart · /innstillinger · /sandkasse; POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
+    console.error(`[tua-bro] appen: http://127.0.0.1:${PORT}/${built ? '' : ' (ikke bygget — npm run kart)'} (forsiden · /spor · /oppslag · /innboks · /innstillinger · /sandkasse; POST /api/spor, mottakere: /api/mottakere) · arkiv: ${ARKIV()} · ${passwordSet() ? 'passord: på (logg inn på /logg-inn)' : 'passord: AV — sett med «node bridge.js --sett-passord»'} · dev-origin: ${ORIGIN}${DRYRUN ? ' · DRYRUN' : ''}`)
     const log = (m) => console.error(`[tua-bro] ${m}`)
     if (process.env.TUA_BRIDGE_VAKTER !== '0') { watchInbox({ log }); watchDesktop({ log, delayMs: 8000 }); watchFinder({ log }) }     // M17: samme vakter som MCP-serveren; fil-låsen i save() holder dem fra hverandre
   })

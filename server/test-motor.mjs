@@ -6,7 +6,7 @@
 // Sjekker: skjerming (fødselsnummer gyldig/ugyldig, e-post, telefon, org.nr bare i formatet, adresse, beløp, navn fra arkivlista,
 // stoppliste), fail closed (Vault-tagg, Trust under terskel), Utlevert-linje uten originaler, prompt- og svar-sak med bygget_av,
 // og SSE-rekkefølgen i broen (skjermet → del… → ferdig, og blokkert) med mottaker «test» som ekkoer.
-// Skive 3: broen serverer app-fila (index.html) for rutene / /spor /kart /oppslag /innstillinger, /api/atoms har ord/tegn/max/vault,
+// Skive 3: broen serverer app-fila (index.html) for rutene / /spor /oppslag /innstillinger (/kart er borte siden runde 1 av arb. 32), /api/atoms har ord/tegn/max/vault,
 // og med passord satt svarer /api/* 401 med login: '/logg-inn' mens sidene omdirigeres til /logg-inn?next=… (innlogging ende til ende).
 // Keychain-prefikset settes til et navn som ikke finnes, så Claude-mottakeren er aldri «klar» her — uansett hva som ligger i Keychain.
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
@@ -196,11 +196,12 @@ try {
   ok('POST /api/spor uten mottaker → 400', d.error?.includes('mottaker'))
   // Skive 3: én app med ruter — broen gir index.html for hver app-rute (appen leser stien selv), sandkasse.html for /sandkasse, 404 ellers.
   const hent = async (p, init) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { redirect: 'manual', ...init }); return { status: r.status, type: r.headers.get('content-type') || '', location: r.headers.get('location'), cookie: r.headers.get('set-cookie'), tekst: await r.text() } }
-  for (const rute of ['/', '/forside', '/spor', '/kart', '/oppslag', '/innstillinger']) {
+  for (const rute of ['/', '/forside', '/spor', '/oppslag', '/innstillinger', '/innboks']) {
     const r = await hent(rute)
     ok(`GET ${rute} → app-fila (index.html, text/html)`, r.status === 200 && /text\/html/.test(r.type) && r.tekst.includes('app-test'), `${r.status} ${r.type}`)
   }
   ok('GET /sandkasse → sandkasse.html (demoene, egen side)', (await hent('/sandkasse')).tekst.includes('sandkasse-test'))
+  ok('GET /kart → 404 (ruta er borte siden runde 1 av arbeidsstykke 32; Demo 8 bare under /sandkasse)', (await hent('/kart')).status === 404)
   ok('GET /assets/app.js → bygd fil, ikke app-fila', (await hent('/assets/app.js')).tekst.includes('js-test'))
   ok('GET /finnes-ikke → 404 (ingen stille fallback til appen for ukjente stier)', (await hent('/finnes-ikke')).status === 404)
   ok('GET /../bridge.js → ikke utenfor dist', (await hent('/%2e%2e/bridge.js')).status === 404)

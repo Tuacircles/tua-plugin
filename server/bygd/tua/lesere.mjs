@@ -52,6 +52,20 @@ function dekod(buf) {
   return utf.includes('�') ? buf.toString('latin1') : utf
 }
 const normaliser = (t) => String(t || '').replace(/\r\n?/g, '\n').replace(/ /g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+// Runde 1 (arbeidsstykke 32 §6): en metadata-tittel brukes bare når den ser ut som en tittel — ikke et filnavn («pdf.html», «rapport_v2.docx»),
+// ikke et verktøynavn («Microsoft Word», «Untitled», «Document1»), ikke en sti, ikke bare tall og tegn, ikke kortere enn tre bokstaver.
+// Ellers null, så innlesing.tittelFor faller tilbake til filnavnet uten endelse (det er det Erik kjenner igjen).
+function brukbarTittel(t) {
+  const s = typeof t === 'string' ? t.replace(/\s+/g, ' ').trim() : '';
+  if (!s || s.length < 3) return null
+  if (/[\/\\]/.test(s)) return null                                                   // en sti
+  if (/\.(pdf|docx?|pptx?|xlsx?|indd|ai|md|txt|html?|rtf|odt|pages|key)$/i.test(s)) return null   // et filnavn
+  if (/^[\w.-]+\.[a-z0-9]{2,5}$/i.test(s)) return null                                  // noe.endelse
+  if (/^(untitled|unknown|microsoft word|word|document\d*|dokument\d*|presentation\d*|slide ?\d*|title|titel|tittel|pdf|html|new document|untitled document|dokument uten navn|uten navn|layout ?\d*|print|utskrift|scan(ned)?\d*|skann(et)?\d*|img_?\d*|image\d*)$/i.test(s)) return null
+  if (!/\p{L}{2}/u.test(s)) return null                                                  // bare tall og tegn
+  if ((s.match(/\p{L}/gu) || []).length < 3) return null
+  return s
+}
 const førsteOverskrift = (md) => (String(md || '').match(/^#{1,3}\s+(.+?)\s*#*\s*$/m) || [])[1]?.trim() || null;
 
 function lesTekst(buf) { const tekst = normaliser(dekod(buf)); return { tekst, meta: { verktøy: 'tekst', linjer: tekst ? tekst.split('\n').length : 0 } } }
@@ -89,9 +103,9 @@ function htmlTilTekst(html) {
   h = h.replace(/<\/(tr)\b[^>]*>/gi, '\n').replace(/<\/(td|th)\b[^>]*>/gi, ' | ').replace(/<br\s*\/?>/gi, '\n');
   h = h.replace(/<[^>]+>/g, '');
   const tekst = normaliser(dekodEntiteter(h).split('\n').map((l) => l.replace(/[ \t]+/g, ' ').trim()).join('\n'));
-  return { tekst, tittel: tittel ? dekodEntiteter(tittel).replace(/\s+/g, ' ').trim() : null }
+  return { tekst, tittel: brukbarTittel(tittel ? dekodEntiteter(tittel) : null) }
 }
-function lesHtml(buf) { const { tekst, tittel } = htmlTilTekst(dekod(buf)); return { tekst, meta: { verktøy: 'html', ...(tittel ? { tittel } : {}) } } }
+function lesHtml(buf) { const { tekst, tittel } = htmlTilTekst(dekod(buf)); const t = tittel || førsteOverskrift(tekst); return { tekst, meta: { verktøy: 'html', ...(t ? { tittel: t } : {}) } } }   // runde 1: uten brukbar <title> → første overskrift
 
 // ── zip (til docx) ──────────────────────────────────────────────────────────
 // En liten zip-leser uten pakke og uten shell: sentralkatalogen bakfra, så hver fil. Metode 0 (lagret) og 8 (deflate). Ingen zip64 — et
@@ -198,7 +212,7 @@ async function pdfTilTekst(buf, { navn = 'fila' } = {}) {
     if (ord(tekst) < 3) throw new LeseFeil(`Fant ingen tekst i «${navn}» (${doc.numPages} ${doc.numPages === 1 ? 'side' : 'sider'}) — PDF-en har ikke tekstlag, trolig en skanning. OCR kommer i en senere skive; til da: åpne den i Forhåndsvisning og eksporter med tekst, eller legg inn teksten som .txt.`, 'ingen-tekst', { sider: doc.numPages })
     let info = {};
     try { info = (await doc.getMetadata())?.info || {}; } catch {}
-    const tittel = typeof info.Title === 'string' && info.Title.trim() && !/\.(pdf|docx?|pptx?|indd|ai|md|txt)$/i.test(info.Title.trim()) && !/^(untitled|microsoft word|document\d*)$/i.test(info.Title.trim()) ? info.Title.trim() : null;
+    const tittel = brukbarTittel(info.Title);
     return { tekst, sider: doc.numPages, verktøy: `pdfjs-dist ${lib.version}`, ...(tittel ? { tittel } : {}) }
   } finally { try { await oppgave.destroy(); } catch {} }
 }

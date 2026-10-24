@@ -319,6 +319,43 @@ export function deliveries(id, limit = 10) {
       .filter((e) => e && (!id || e.id === id || (Array.isArray(e.saker) && e.saker.some((s) => s && s.id === id)))).slice(-limit)
   } catch { return [] }
 }
+// Runde 1 (arbeidsstykke 32 §6, 24.10.2026): hvor mange sendinger hver sak har vært med i — én lesing av loggen for hele arkivet (til /api/atoms,
+// så forsiden kan velge hovedsak etter «mest arbeidet med»). Bare tellinger, aldri innhold.
+export function deliveryCounts() {
+  const m = new Map()
+  try {
+    for (const l of fs.readFileSync(DELIVERY(), 'utf8').split('\n')) {
+      if (!l) continue
+      let e; try { e = JSON.parse(l) } catch { continue }
+      const ider = Array.isArray(e.saker) ? e.saker.map((s) => s && s.id).filter(Boolean) : e.id ? [e.id] : []
+      for (const id of new Set(ider)) m.set(id, (m.get(id) || 0) + 1)
+    }
+  } catch {}
+  return m
+}
+// Runde 1: Spørs biprodukter som ÉN tråd. Ett spørsmål til to modeller gir fem saker (prompt, to svar, Forskjeller, konklusjon); i avisen, Oppslag,
+// søket og «Legg til fra arkivet» skal de stå som én. tråder(atoms) → { av: Map<id, promptId>, per: Map<promptId, {prompt, svar, forskjeller, konklusjon}> }.
+//   svar/konklusjon: derivedFrom peker på prompten (eller prompten har dem i ga) · Forskjeller: kind svar med taggen forskjeller, derivedFrom peker på svarene.
+// Prompten selv får tråd = egen id. Saker uten prompt får ingen tråd.
+export function tråder(atoms) {
+  const av = new Map(), per = new Map()
+  const prompter = atoms.filter((a) => a.kind === 'prompt')
+  const erForskjeller = (a) => a.kind === 'svar' && (a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller')
+  for (const p of prompter) { per.set(p.id, { prompt: p.id, svar: [], forskjeller: [], konklusjon: null }); av.set(p.id, p.id) }
+  const promptAv = (a) => (a.derivedFrom || []).map((d) => d.id).find((id) => per.has(id)) || prompter.find((p) => (p.ga || []).some((g) => g.id === a.id))?.id || null
+  for (const a of atoms) {
+    if (a.kind === 'prompt' || erForskjeller(a)) continue
+    if (a.kind !== 'svar' && a.kind !== 'konklusjon') continue
+    const pid = promptAv(a); if (!pid) continue
+    av.set(a.id, pid); const t = per.get(pid)
+    if (a.kind === 'konklusjon') t.konklusjon = a.id; else t.svar.push(a.id)
+  }
+  for (const a of atoms.filter(erForskjeller)) {
+    const pid = (a.derivedFrom || []).map((d) => av.get(d.id)).find(Boolean) || promptAv(a); if (!pid) continue
+    av.set(a.id, pid); per.get(pid).forskjeller.push(a.id)
+  }
+  return { av, per }
+}
 // Sett sammen en leveranse av atomer lest på ett nivå. Vault-atomer går alltid inn som S.
 export function compose(atoms, { ids, level = 'M', name, intro, context }) {
   const parts = [], derivedFrom = [], notes = []

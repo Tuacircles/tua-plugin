@@ -635,7 +635,8 @@ export async function forskjeller(svar, { melding = '', prosjekt, klient = 'app'
   const sendes = `${SYSTEM}${JSON_KRAV}\n\n${byggMelding(oppgave, kontekst)}`
   const tokensCa = anslåTokens(sendes, v.m.id)
   på('vurderer', { steg: 'forskjeller', mottaker: v.m.id, modell: v.modell, tokens: { ca: tokensCa } })
-  const r = await v.m.send({ system: SYSTEM, melding: oppgave, kontekst, json: true, oppgave: 'forskjeller' }, { signal })
+  let tegn = 0   // runde 1 (arb. 32 §6): fremdrift mens Forskjeller vurderes — hver bit fra modellen gir event vurderer-del {steg, tegn} (ikke teksten: den er JSON med plassholdere)
+  const r = await v.m.send({ system: SYSTEM, melding: oppgave, kontekst, json: true, oppgave: 'forskjeller' }, { signal, onDel: (t) => { tegn += String(t || '').length; på('vurderer-del', { steg: 'forskjeller', tegn }) } })
   const tolket = tolkForskjeller(r.tekst, svar.map((s, i) => ({ ...s, bokstav: bokstaver[i] })))
   for (const k of ['enig', 'uenig', 'unikt']) tolket[k] = tolket[k].map((p) => ({ ...p, tekst: avskjerm(p.tekst, sk.kobling) }))
   if (tolket.rå) tolket.rå = avskjerm(tolket.rå, sk.kobling)

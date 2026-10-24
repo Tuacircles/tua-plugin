@@ -125,6 +125,16 @@ try {
   // «Vis i Finder» via broen (dryrun): bare sakens egen fil
   const op = await post('/api/open', { id: a1.id, target: 'finder' })
   ok('POST /api/open finder (dryrun): bare sakens egen fil, ingen shell', op.status === 200 && JSON.parse(op.tekst).dryrun === true, op.tekst.slice(0, 100))
+  // ── runde 1 (arb. 32 §6) ──
+  const sø = JSON.parse((await hent(`/api/search?q=${encodeURIComponent(PERSON.split(' ')[0])}&limit=20`)).tekst)
+  const svarTreff = sø.hits.find((h) => h.id === r.svar)
+  ok('runde 1: GET /api/search gir tråd (= prompt-id) på svaret og tags per treff — så Spør viser biproduktene som én tråd', !!svarTreff && svarTreff.tråd === r.prompt && Array.isArray(svarTreff.tags) && sø.hits.find((h) => h.id === a1.id)?.tråd === null, JSON.stringify({ tråd: svarTreff?.tråd, prompt: r.prompt }))
+  const atRunde = JSON.parse((await hent('/api/atoms')).tekst).atoms
+  ok('runde 1: GET /api/atoms har tråd på prompt, svar (samme id) og utlevert-teller (a1 og a2 var med i én sending)', atRunde.find((a) => a.id === r.prompt)?.tråd === r.prompt && atRunde.find((a) => a.id === r.svar)?.tråd === r.prompt && atRunde.find((a) => a.id === a1.id)?.utlevert === 1 && atRunde.find((a) => a.id === a3.id)?.utlevert === 0 && atRunde.find((a) => a.id === a3.id)?.tråd === null)
+  ok('runde 1: GET /api/bro → { passord: false } uten passord (appen viser ikke «logg ut»)', JSON.parse((await hent('/api/bro')).tekst).passord === false)
+  ok('runde 1: /kart er ikke lenger en rute i appen (404) — Demo 8 bare under /sandkasse', (await hent('/kart')).status === 404 && (await hent('/oppslag')).status === 200)
+  const mp = await post('/api/open', { mappe: 'arkiv' })
+  ok('runde 1: POST /api/open {mappe: arkiv} viser arkivmappa i Finder (dryrun) — ingen sti fra klienten, ukjent mappe → 404', mp.status === 200 && JSON.parse(mp.tekst).dryrun === true && (await post('/api/open', { mappe: '../etc' })).status === 404, mp.tekst.slice(0, 80))
 } finally { bro.kill() }
 
 console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT}`)

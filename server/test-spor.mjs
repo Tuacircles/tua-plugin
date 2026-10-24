@@ -128,6 +128,9 @@ try {
   const mn = m.hendelser.map((h) => h[0])
   const ferdige = m.hendelser.filter((h) => h[0] === 'ferdig').map((h) => h[1])
   ok('to mottakere valgt: skjermet → del/ferdig ×2 → vurderer → forskjeller → konklusjon → slutt', mn[0] === 'skjermet' && ferdige.length === 2 && mn.includes('forskjeller') && mn.includes('konklusjon') && mn.at(-1) === 'slutt', [...new Set(mn)].join(' '))
+  // runde 1 (arb. 32 §6): fremdrift mens Forskjeller vurderes — vurderer-del {steg, tegn} mellom vurderer og forskjeller, tegn stiger, aldri tekst
+  const vd = m.hendelser.filter((h) => h[0] === 'vurderer-del').map((h) => h[1])
+  ok('runde 1: vurderer-del strømmer mens Forskjeller vurderes (etter vurderer, før forskjeller), tegn stiger, uten tekst', vd.length > 0 && vd.every((d) => d.steg === 'forskjeller' && typeof d.tegn === 'number' && !('tekst' in d)) && vd.every((d, i) => i === 0 || d.tegn >= vd[i - 1].tegn) && mn.indexOf('vurderer') < mn.indexOf('vurderer-del') && mn.lastIndexOf('vurderer-del') < mn.indexOf('forskjeller'), `${vd.length} biter · ${vd.at(-1)?.tegn} tegn`)
   const all3 = load()
   ok('to svar-saker, forskjeller-saken og konklusjonen ligger alle i det valgte prosjektet', ferdige.every((x) => all3.find((a) => a.id === x.svar)?.project === 'Nytt prosjekt') && all3.find((a) => a.id === m.hendelser.find((h) => h[0] === 'forskjeller')[1].sak)?.project === 'Nytt prosjekt' && all3.find((a) => a.id === m.hendelser.find((h) => h[0] === 'konklusjon')[1].id)?.project === 'Nytt prosjekt')
   ok('GET /api/prosjekter: ingen dublett av prosjektet nå som det har saker', (await get('/api/prosjekter')).json.prosjekter.filter((p) => p === 'Nytt prosjekt').length === 1)
