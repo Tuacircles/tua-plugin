@@ -10,6 +10,8 @@
 // sakFiler (gjengivelser relativt til prosjektmappa). Broen: GET /api/mappe (prosjektene med alias og antall filer), GET /api/mappe?prosjekt (filene som ikke er saker —
 // nyeste først, aldri .md, aldri skjulte, aldri utenfor arkivroten, gjengivelse → sak), POST /api/mappe/aapne (bare filer i mappa; dryrun), /api/search med drift=,
 // /api/siden-sist med et åpent spørsmål. Testarkivet: saker i tre prosjekter, en åpen Spør-tråd, en låst konklusjon, et beholdt svar, fangede, drift, filer i mappa, alias.
+// Friksjon 16 + 17 (24.10.2026): regler.søkeTre (prosjekt → samtaler → filer; ett prosjekt vs flere; samtaler og filer på dato siste først; filer i mappa som treffer på navn;
+// «ta med»), regler.velgTre, regler.sidenSistTall; broen: `ulest` på /api/atoms og /api/siden-sist ut fra bruk.jsonl (sett/åpnet/lest_M) og POST /api/sett-alt, spor/drift aldri uleste.
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
 
@@ -23,7 +25,7 @@ const ROOT = process.env.TUA_FILES_ROOT, DATA = process.env.TUA_DATA_DIR, HJEM =
 if (!ROOT || !DATA || !HJEM || ROOT.includes('Dropbox') || ROOT.includes('iCloud')) { console.error('Sett TUA_FILES_ROOT, TUA_DATA_DIR og TUA_HOME til tomme testmapper først (aldri det ekte arkivet).'); process.exit(2) }
 for (const d of [ROOT, DATA, HJEM, path.join(ROOT, 'Innboks')]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }) }
 
-const { load, save, upsert, setStatus, FILES_ROOT, projectAliases, klasseAv: klasseStore } = await import('./store.js')
+const { load, save, upsert, setStatus, FILES_ROOT, projectAliases, klasseAv: klasseStore, ulestAv, logBruk, brukInfo, settAltSist, tråder } = await import('./store.js')
 const regler = await import(pathToFileURL(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', 'regler.js')).href)
 
 let feil = 0
@@ -43,6 +45,10 @@ const gammel = put({ key: 'notat:gammel', name: 'Gammelt notat om taket', projec
 put({ key: 'dok:portefolje', name: 'Porteføljegjennomgang Q3', project: 'Aas Kapital', convo: 'Porteføljegjennomgang Q3', source: 'Claude Desktop', tags: ['dokument'], short: 'Porteføljen steg 4,1 % i Q3.', content: lang('# Portefølje') }, T(50))
 put({ key: 'notat:energima', name: 'Møte om anken', project: 'Aas Kapital', convo: 'Energima anke — neste steg', source: 'Erik', by: 'menneske', short: 'Anken sendes innen fristen.', content: lang('# Anken') }, T(10))
 put({ key: 'notat:tinden', name: 'Reiseregningsrutine', project: 'Tinden Regnskap', source: 'Claude Desktop', short: 'Ny rutine for reiseregninger.', content: lang('# Reiseregninger') }, T(80))
+// friksjon 17: «storgata» treffer to prosjekter (Fjellstua Eiendom: samtalen «Leieforhandling Storgata 12» + Tinden: et notat); én PDF i Tinden-mappa treffer bare på filnavnet
+put({ key: 'notat:tinden-storgata', name: 'Fremleie i Storgata 12 — regnskapsføring', project: 'Tinden Regnskap', source: 'Erik', by: 'menneske', short: 'Fremleien i Storgata 12 bokføres som egen avdeling.', content: lang('# Fremleie Storgata') }, T(12))
+put({ key: 'notat:tinden-2', name: 'Møte med revisor', project: 'Tinden Regnskap', convo: 'Revisorbrev 2025', source: 'Erik', by: 'menneske', short: 'Revisor vil ha reiseregningene.', content: lang('# Revisor') }, T(60))
+put({ key: 'dok:tinden-3', name: 'Revisorbrev 2025 (lest fra PDF)', project: 'Tinden Regnskap', convo: 'Revisorbrev 2025', source: 'Innboks', tags: ['dokument'], short: 'Svak internkontroll på reiseregninger.', content: lang('# Revisorbrev') }, T(61))
 // fanget (spor) og en samtale
 put({ key: 'okt:aaaa1111', kind: 'samtale', name: 'Økt: leieavtalen', project: 'Fjellstua Eiendom', convo: 'Økt: leieavtalen', source: 'Claude Code', fanget: true, tags: ['samtale', 'økt'], by: 'regel', short: 'Sist: x → y · 3 vendinger', content: lang('# Økt') }, T(2))
 put({ key: 'svar:aaaa1111:deadbeef', kind: 'svar', name: 'Svar: tre alternativer', project: 'Fjellstua Eiendom', convo: 'Økt: leieavtalen', source: 'Claude Code', fanget: true, tags: ['svar'], by: 'regel', short: 'Tre alternativer for Storgata 12.', content: lang('# Tre alternativer') }, T(2))
@@ -78,6 +84,8 @@ fs.writeFileSync(path.join(FE, '.DS_Store'), 'x')
 fs.writeFileSync(path.join(FE, 'løst-notat.md'), '# Et løst notat\n\nUten frontmatter.'); fs.utimesSync(path.join(FE, 'løst-notat.md'), new Date(NÅ - 20 * DAG), new Date(NÅ - 20 * DAG))   // et løst .md i mappa er en sak for lageret (dato = fila)
 fs.utimesSync(path.join(FE, 'Leieavtale-signert.docx'), new Date(NÅ - 10 * DAG), new Date(NÅ - 10 * DAG))
 fs.utimesSync(path.join(FE, 'Plantegning.png'), new Date(NÅ + 60000), new Date(NÅ + 60000))
+const TR = path.join(FILES_ROOT, 'Tinden Regnskap'); fs.mkdirSync(TR, { recursive: true })
+fs.writeFileSync(path.join(TR, 'Reiseregninger 2026.pdf'), '%PDF-1.4 ' + 'r'.repeat(5000)); fs.utimesSync(path.join(TR, 'Reiseregninger 2026.pdf'), new Date(NÅ - 2 * DAG), new Date(NÅ - 2 * DAG))
 const utenforRot = path.join(path.dirname(ROOT), 'utenfor.pdf'); fs.writeFileSync(utenforRot, '%PDF')
 try { fs.symlinkSync(utenforRot, path.join(FE, 'lenke-ut.pdf')) } catch {}
 fs.writeFileSync(path.join(FILES_ROOT, '.tua', 'project-aliases.json'), JSON.stringify({ Fjellstua: 'Fjellstua Eiendom', Energima: 'Aas Kapital', _: 'kommentar' }))
@@ -121,6 +129,38 @@ ok('projectAliases: aliasene uten «_»', JSON.stringify(projectAliases()) === J
   ok('regler.sakFiler: gjengivelsene på saken med sti relativt til prosjektmappa (kan åpnes via broen)', sf.length === 2 && sf[0].format === 'PDF' && sf[0].sti === 'Forhandlingsstrategi leieavtale Storgata 12.pdf' && sf[1].format === 'HTML' && regler.sakFiler({ renders: [{ format: 'pdf', path: '/et/annet/sted/x.pdf' }], file: d2.file, project: 'Fjellstua Eiendom' })[0].sti === null)
 }
 
+// ── 2b) friksjon 17: søket som tre — prosjekt → samtaler → filer ────────────────
+{
+  const rå = load().filter((a) => a.key), trådAv = tråder(rå).av
+  const alle = rå.map((a) => ({ ...a, tråd: trådAv.get(a.id) || null }))   // som /api/atoms: tråd = prompt-id på Spørs biprodukter, så treet slår dem sammen
+  const byKey = (k) => alle.find((a) => a.key === k)
+  const prosjekterInfo = [{ navn: 'Fjellstua Eiendom', alias: ['Fjellstua'], sist: T(1) }, { navn: 'Aas Kapital', alias: ['Energima'], sist: T(3) }, { navn: 'Tinden Regnskap', alias: [], sist: T(12) }, { navn: 'Tua_tua', alias: [], sist: T(0.3) }, { navn: 'Tua', alias: [], sist: T(0.2) }]
+  const samtalerAv = regler.samtalerPerProsjekt(alle)
+  const filer = { 'Fjellstua Eiendom': [{ sti: 'Forhandlingsstrategi leieavtale Storgata 12.pdf', format: 'pdf', mtime: NÅ, bytes: 40009 }, { sti: 'Vedlegg/Takst Fjellveien 3.pdf', format: 'pdf', mtime: NÅ - DAG, bytes: 120009 }, { sti: 'Plantegning.png', format: 'bilde', mtime: NÅ + 60000, bytes: 3000 }], 'Tinden Regnskap': [{ sti: 'Reiseregninger 2026.pdf', format: 'pdf', mtime: NÅ - 2 * DAG, bytes: 5009 }] }
+  const treffAv = (ord) => new Set(alle.filter((a) => (a.name + ' ' + (a.levels?.S?.text || '') + ' ' + (a.content || '')).toLowerCase().includes(ord)).map((a) => a.id))
+  const tre = (tekst, ekstra = {}) => regler.søkeTre(tekst, { treff: treffAv(tekst.toLowerCase()), alle, prosjekter: regler.prosjektTreff(tekst, { prosjekter: prosjekterInfo, samtaler: samtalerAv }), filer, ...ekstra })
+  const sg = tre('storgata')
+  ok('søkeTre: «storgata» treffer TO prosjekter (Fjellstua via samtalen, Tinden via et notat) — ingen drift, ingen fangede', sg.length === 2 && sg.map((p) => p.navn).join() === 'Fjellstua Eiendom,Tinden Regnskap' && sg[0].via === 'samtale' && sg[1].via === 'saker' && !sg.some((p) => p.navn.startsWith('Tua')), sg.map((p) => `${p.navn} (${p.via})`).join(' · '))
+  ok('velgTre: flere prosjekter → null til brukeren velger; valget må finnes; ett prosjekt → det ene', regler.velgTre(sg, null) === null && regler.velgTre(sg, 'Tinden Regnskap') === 'Tinden Regnskap' && regler.velgTre(sg, 'Finnes ikke') === null && regler.velgTre([sg[0]], null) === 'Fjellstua Eiendom' && regler.velgTre([], null) === null)
+  const fe = sg[0]
+  ok('søkeTre: under Fjellstua — samtalen «Leieforhandling Storgata 12» (én sak, men samtalenavnet traff) med dokumentet; filene: strategi-PDF-en (navnet treffer) og styrenotatet (ingressen nevner Storgata); ikke «Takst» eller «Plantegning»', fe.samtaler.length === 1 && fe.samtaler[0].navn === 'Leieforhandling Storgata 12' && fe.samtaler[0].via === 'navn' && fe.samtaler[0].saker.some((a) => a.key === 'dok:strategi') && fe.filer.some((f) => f.slag === 'fil' && f.fil.sti.endsWith('Storgata 12.pdf')) && fe.filer.some((f) => f.slag === 'sak' && f.sak.key === 'notat:styre') && !fe.filer.some((f) => f.slag === 'sak' && f.sak.key === 'dok:strategi') && !fe.filer.some((f) => f.slag === 'fil' && /Takst|Plantegning/.test(f.fil.sti)) && fe.antallSamtaler === 1, `${fe.samtaler.map((s) => s.navn).join()} · ${fe.filer.map((f) => f.slag === 'fil' ? f.fil.sti : f.sak.name).join(' · ')}`)
+  const ti = sg[1]
+  ok('søkeTre: under Tinden — ingen samtale, notatet om fremleie som fil (sak utenfor samtalene); PDF-en «Reiseregninger» ikke (navnet treffer ikke «storgata»)', ti.samtaler.length === 0 && ti.filer.length === 1 && ti.filer[0].slag === 'sak' && ti.filer[0].sak.key === 'notat:tinden-storgata', ti.filer.map((f) => f.slag === 'fil' ? f.fil.sti : f.sak.name).join(' · '))
+  const rr = tre('reiseregning')
+  ok('søkeTre: «reiseregning» → Tinden alene (notatet, revisor-samtalen med to saker, og PDF-en i mappa som treffer bare på filnavnet)', rr.length === 1 && rr[0].navn === 'Tinden Regnskap' && rr[0].samtaler.length === 1 && rr[0].samtaler[0].navn === 'Revisorbrev 2025' && rr[0].samtaler[0].saker.length >= 1 && rr[0].filer.some((f) => f.slag === 'fil' && f.fil.sti === 'Reiseregninger 2026.pdf') && rr[0].filer.some((f) => f.slag === 'sak' && f.sak.key === 'notat:tinden'), rr[0] ? `${rr[0].samtaler.map((s) => `${s.navn} (${s.saker.length})`).join()} · ${rr[0].filer.map((f) => f.slag === 'fil' ? f.fil.sti : f.sak.name).join(' · ')}` : 'ingen')
+  const fj = tre('fjellstua')
+  ok('søkeTre: «fjellstua» treffer prosjektet på navn → ALT i prosjektet: samtalene (ekte: logg eller flere saker) og filene (saker utenfor samtalene + alle filer i mappa), ingen tråder som egne rader, ingen fangede', fj.length === 1 && fj[0].via === 'navn' && fj[0].samtaler.length === 1 && fj[0].samtaler[0].navn === 'Hva er fristen for å si opp leieavtalen?' && fj[0].samtaler[0].saker.length === 1 && fj[0].samtaler[0].saker[0].key === 'konklusjon:spor:2' && !fj[0].samtaler.some((s) => s.navn === 'Økt: leieavtalen') && fj[0].filer.filter((f) => f.slag === 'fil').length === 3 && fj[0].filer.some((f) => f.slag === 'sak' && f.sak.key === 'notat:kort') && fj[0].filer.some((f) => f.slag === 'sak' && f.sak.key === 'dok:strategi') && !fj[0].filer.some((f) => f.slag === 'sak' && (f.sak.kind === 'prompt' || f.sak.fanget)) && !fj[0].filer.some((f) => f.slag === 'sak' && f.sak.key === 'konklusjon:spor:2'), `${fj[0]?.samtaler.map((s) => `${s.navn} (${s.saker.length})`).join()} · ${fj[0]?.filer.length} filer`)
+  const datoer = (l, tid) => l.every((x, i) => i === 0 || tid(l[i - 1]) >= tid(x))
+  ok('søkeTre: samtalene og filene på dato, siste først; prosjektene navn/alias først, så nyeste', datoer(fj[0].samtaler, (s) => s.sist) && datoer(fj[0].filer, (f) => f.slag === 'fil' ? f.fil.mtime : f.sak.capturedAt) && fj[0].filer[0].slag === 'fil' && fj[0].filer[0].fil.sti === 'Plantegning.png' && tre('tua').map((p) => p.rang).every((r, i, l) => i === 0 || l[i - 1] <= r))
+  ok('søkeTre: «tua» treffer Tua og Tua_tua på navn, men uten «ta med» er det tomt under dem (bare drift der); med «ta med» kommer drift-sakene; tom tekst → tomt tre', tre('tua').every((p) => p.navn.startsWith('Tua') && p.antallFiler === 0 && p.antallSamtaler === 0) && tre('tua', { med: true }).some((p) => p.navn === 'Tua_tua' && p.filer.some((f) => f.sak?.drift)) && regler.søkeTre('', { alle }).length === 0, tre('tua', { med: true }).map((p) => `${p.navn} (${p.antallFiler})`).join())
+  // friksjon 16: tallene i overskriften
+  const t = regler.sidenSistTall({ linjer: [{ ulest: true }, { ulest: false }, { ulest: true }], saker: [{ ulest: true, klasse: 'arbeid' }, { ulest: true, klasse: 'spor' }], spørsmål: 1, konklusjoner: 1, innboks: 0 })
+  ok('sidenSistTall: «3 nye · 2 venter» — nye = uleste linjer + uleste arbeid-saker (ikke spor); venter = spørsmål + konklusjoner + Innboks; ingenting → tom tekst', t.nye === 3 && t.venter === 2 && t.tekst === '3 nye · 2 venter' && regler.sidenSistTall({}).tekst === '' && regler.sidenSistTall({ linjer: [{ ulest: true }] }).tekst === '1 ny', t.tekst)
+  // friksjon 16 i lageret: ulestAv
+  const b = { lest: 0 }
+  ok('store.ulestAv: nyere enn «fra» og ikke lest → ulest; lest etter skrevet → lest; ny versjon etter lesing → ulest igjen; spor og drift aldri', ulestAv({ capturedAt: NÅ, kind: 'capture' }, { bruk: b, fra: NÅ - DAG }) === true && ulestAv({ capturedAt: NÅ - 2 * DAG }, { bruk: b, fra: NÅ - DAG }) === false && ulestAv({ capturedAt: NÅ - 1000 }, { bruk: { lest: NÅ }, fra: 0 }) === false && ulestAv({ capturedAt: NÅ }, { bruk: { lest: NÅ - 1000 }, fra: 0 }) === true && ulestAv({ capturedAt: NÅ, fanget: true }, { fra: 0 }) === false && ulestAv({ capturedAt: NÅ, drift: true }, { fra: 0 }) === false)
+}
+
 // ── 3) broen ────────────────────────────────────────────────────────────────
 const PORT = 5304
 const DIST = path.join(DATA, 'dist')
@@ -158,6 +198,22 @@ try {
   ok('/api/siden-sist: det åpne spørsmålet står i arbeid med 2 svar og konklusjon som venter; den låste tråden og det beholdte svarets tråd gjør det ikke', ss.spørsmål.some((s) => s.id === pr.id && s.tråden.svar.length === 2 && s.konklusjon_venter) && !ss.spørsmål.some((s) => s.id === pr2.id || s.id === pr3.id), ss.spørsmål.map((s) => s.name).join(' · '))
   ok('/api/siden-sist: Claude-øktene — én linje per økt med saker, tekst per dag; byggeøkta er merket drift', ss.økter.some((ø) => ø.økt === 'aaaa1111' && ø.saker.length === 2 && !ø.drift) && ss.økter.some((ø) => ø.økt === 'bbbb2222' && ø.drift) && ss.økterPerDag[0].tekst.startsWith('I Claude '))
   ok('POST /api/bruk {lest_M} fra appen teller', (await post('/api/bruk', { id: strat.id, hendelse: 'lest_M' })).status === 200)
+  // ── friksjon 16: ulest fra bruk.jsonl og «sett alt» ──
+  const at0 = (await hent('/api/atoms')).json, ss0 = (await hent('/api/siden-sist?dager=7')).json
+  const u = (liste, key) => liste.find((a) => a.key === key)?.ulest
+  ok('/api/atoms: nye arbeid-saker (siste sju dager) er uleste; den som fikk lest_M er lest; det gamle notatet er ikke nytt; fangede og drift aldri uleste; `uleste` teller arbeid', u(at0.atoms, 'notat:kort') === true && u(at0.atoms, 'dok:strategi') === false && u(at0.atoms, 'notat:gammel') === false && u(at0.atoms, 'svar:aaaa1111:deadbeef') === false && u(at0.atoms, 'commit-logg') === false && at0.uleste > 0 && at0.uleste === at0.atoms.filter((a) => a.ulest && a.klasse === 'arbeid').length && at0.sett_alt === null, `uleste ${at0.uleste}`)
+  ok('/api/siden-sist: spørsmålet i arbeid er ulest (tråden er ny), konklusjonen som venter er ulest; øktene har `sak` og `ulest`; `uleste` teller linjene', ss0.spørsmål.find((s) => s.id === pr.id)?.ulest === true && ss0.konklusjoner.some((k) => k.ulest) && ss0.økter.every((ø) => typeof ø.ulest === 'boolean' && ø.sak) && ss0.økter.find((ø) => ø.økt === 'aaaa1111')?.ulest === true && ss0.uleste === ss0.spørsmål.filter((s) => s.ulest).length + ss0.svarKom.filter((s) => s.ulest).length + ss0.konklusjoner.filter((s) => s.ulest).length + ss0.økter.filter((ø) => ø.ulest).length && ss0.økterPerDag.every((d) => typeof d.uleste === 'number'), `uleste ${ss0.uleste}`)
+  ok('POST /api/bruk {sett} på spørsmålet → lest i /api/siden-sist; «sett» teller ikke som bruk i vekten', (await post('/api/bruk', { id: pr.id, hendelse: 'sett' })).status === 200 && (await hent('/api/siden-sist?dager=7')).json.spørsmål.find((s) => s.id === pr.id)?.ulest === false && (brukInfo().get(pr.id)?.antall || 0) === 0 && brukInfo().get(pr.id)?.lest > 0)
+  const økt = ss0.økter.find((ø) => ø.økt === 'aaaa1111')
+  ok('POST /api/bruk {sett} på økt-saken → økta er lest', (await post('/api/bruk', { id: økt.sak, hendelse: 'sett' })).status === 200 && (await hent('/api/siden-sist?dager=7')).json.økter.find((ø) => ø.økt === 'aaaa1111')?.ulest === false)
+  const sa = await post('/api/sett-alt', {})
+  const at1 = (await hent('/api/atoms')).json, ss1 = (await hent('/api/siden-sist?dager=7')).json
+  ok('POST /api/sett-alt → alt som er skrevet før nå er lest: /api/atoms uleste = 0, /api/siden-sist uleste = 0, sett_alt satt; tidspunktet ligger i bruk.jsonl', sa.status === 200 && sa.json.at > 0 && at1.uleste === 0 && at1.atoms.every((a) => !a.ulest) && ss1.uleste === 0 && at1.sett_alt === sa.json.at && settAltSist() === sa.json.at && fs.readFileSync(path.join(FILES_ROOT, '.tua', 'bruk.jsonl'), 'utf8').includes('"sett_alt"'))
+  // en sak skrevet etter «sett alt» er ny igjen
+  { const at = load(); const ny = upsert(at, { key: 'notat:etter', name: 'Notat skrevet etter sett alt', project: 'Aas Kapital', source: 'Erik', by: 'menneske', content: lang('# Etter') }).atom; ny.capturedAt = sa.json.at + 5000; ny.createdAt = ny.capturedAt; save(at)
+    const at2 = (await hent('/api/atoms')).json
+    ok('en sak skrevet etter «sett alt» er ulest; de andre ikke', u(at2.atoms, 'notat:etter') === true && at2.uleste === 1, `uleste ${at2.uleste}`) }
+  ok('POST /api/bruk med ukjent hendelse → 400 med lista (sett er med)', (await post('/api/bruk', { id: pr.id, hendelse: 'tull' })).status === 400 && (await post('/api/bruk', { id: pr.id, hendelse: 'tull' })).json.hendelser.includes('sett'))
 } finally { bro.kill() }
 
 console.log(`\n${feil ? `${feil} feil` : 'alle grønne'} · testarkiv: ${ROOT}`)

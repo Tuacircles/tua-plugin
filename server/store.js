@@ -1015,7 +1015,7 @@ export const driftSlag = (a) => { const k = String(a?.key || ''); return k.start
 
 // Bruk-loggen (03-avisen §3 «rørt av Erik»): lette hendelser appen melder — lest M, lest L, tatt med til Spør, åpnet, redigert. <arkiv>/.tua/bruk.jsonl,
 // én linje per hendelse {at, id, hendelse}, bare metadata. Brukes bare til vekt og sist_rørt; aldri innhold, aldri sendt noe sted.
-export const BRUK_HENDELSER = ['lest_M', 'lest_L', 'tatt_med', 'åpnet', 'redigert', 'delt']
+export const BRUK_HENDELSER = ['lest_M', 'lest_L', 'tatt_med', 'åpnet', 'redigert', 'delt', 'sett']   // sett (friksjon 16): linja ble klikket/sett uten å åpnes — teller som lest, aldri i vekten
 const BRUK = () => (filesMode() ? tuaFile('bruk.jsonl') : path.join(DATA_DIR, 'bruk.jsonl'))
 export function logBruk(id, hendelse) {
   if (!id || !BRUK_HENDELSER.includes(hendelse)) throw new Error(`hendelse må være en av ${BRUK_HENDELSER.join(', ')}`)
@@ -1032,8 +1032,10 @@ export function brukInfo() {
       if (!l) continue
       let e; try { e = JSON.parse(l) } catch { continue }
       if (!e?.id) continue
-      const b = m.get(e.id) || { antall: 0, sist: 0, per: {} }
-      b.antall++; b.sist = Math.max(b.sist, e.at || 0); b.per[e.hendelse] = (b.per[e.hendelse] || 0) + 1
+      const b = m.get(e.id) || { antall: 0, sist: 0, lest: 0, per: {} }
+      if (e.hendelse !== 'sett') { b.antall++; b.sist = Math.max(b.sist, e.at || 0) }   // «sett» er ikke bruk: teller ikke i vekten eller sist_rørt
+      if (LEST_HENDELSER.includes(e.hendelse)) b.lest = Math.max(b.lest, e.at || 0)
+      b.per[e.hendelse] = (b.per[e.hendelse] || 0) + 1
       m.set(e.id, b)
     }
   } catch {}
@@ -1132,4 +1134,30 @@ export function claudeØkter(atoms, { dager = 7, now = Date.now() } = {}) {
     tekst: `I Claude ${r.dag === iDag ? 'i dag' : r.dag === iGår ? 'i går' : r.dag.slice(8, 10) + '.' + r.dag.slice(5, 7)}: ${flertall(r.økter.length, 'økt', 'økter')}, ${flertall(r.filer, 'fil skrevet', 'filer skrevet')}, ${flertall(r.beholdt, 'svar beholdt', 'svar beholdt')}`,
   }))
   return { økter: liste, dager: dagerUt, antall: liste.length }
+}
+
+// ── Friksjon 16 (Erik 24.10.2026): ulest. Alt nytt i Siden sist og avisen er ulest til det er åpnet eller sett. Tilstanden bor i bruk-loggen (.tua/bruk.jsonl),
+//   ikke i fila og ikke i nettleseren: {at, id, hendelse: 'sett'} når linja klikkes (appen) og {at, hendelse: 'sett_alt'} uten id for «Merk alt som lest».
+//   ulestAv(a, {bruk, fra}) — saken er ulest når den er nyere enn `fra` (siste «sett alt», ellers siste sju dager) og ikke er lest (sett/åpnet/lest M/lest L/redigert)
+//   ETTER at den sist ble skrevet (en ny versjon gjør saken ny igjen). Bare arbeid og tråder kan være uleste — spor og drift står utenfor avisen og er aldri «nye».
+export const LEST_HENDELSER = ['sett', 'åpnet', 'lest_M', 'lest_L', 'redigert']
+export function logSettAlt(at = Date.now()) {
+  const e = { at, hendelse: 'sett_alt' }
+  fs.mkdirSync(path.dirname(BRUK()), { recursive: true })
+  fs.appendFileSync(BRUK(), JSON.stringify(e) + '\n')
+  return e
+}
+export function settAltSist() {
+  let sist = 0
+  try { for (const l of fs.readFileSync(BRUK(), 'utf8').split('\n')) { if (!l.includes('sett_alt')) continue; let e; try { e = JSON.parse(l) } catch { continue } if (e?.hendelse === 'sett_alt') sist = Math.max(sist, e.at || 0) } } catch {}
+  return sist
+}
+export const ULEST_VINDU = 7 * DØGN
+export const ulestFra = (now = Date.now()) => settAltSist() || now - ULEST_VINDU
+export function ulestAv(a, { bruk = null, fra = 0, tid = null } = {}) {
+  if (!a) return false
+  const k = klasseAv(a)
+  if (k === 'spor' || k === 'drift') return false
+  const t = tid ?? (a.capturedAt || 0)
+  return t > fra && t > (bruk?.lest || 0)
 }

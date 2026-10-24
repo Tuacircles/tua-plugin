@@ -26,6 +26,7 @@
 //   Runde 2d (03-avisen §2–§5): /api/atoms gir `klasse` (arbeid · spor · drift · tråd), `vekt`, `sist_rørt`, `beholdt`, `drift` per sak og `tråden` samlet på prompt-saker,
 //   pluss `klasser` (tall per klasse for hele arkivet); /api/search har ?drift=uten|med|bare og svarer med `driftUtenfor` og `klasse` per treff.
 //   Nye ruter nederst: POST /api/behold {id} · POST /api/bruk {id, hendelse} · GET /api/siden-sist?dager.
+//   Friksjon 16: /api/atoms og /api/siden-sist gir `ulest` per sak (fra bruk.jsonl og siste «sett alt»); POST /api/bruk {hendelse: 'sett'} · POST /api/sett-alt (nederst).
 //   Passord (valgfritt): `node bridge.js --sett-passord` setter et passord (scrypt-hash i <arkiv>/.tua/passord.json).
 //   Da krever alt — appen og /api/* — innlogging på /logg-inn (HttpOnly-cookie, 30 dager). `--fjern-passord` fjerner det.
 //   /api/* svarer da 401 { error, login: '/logg-inn' } og appen sender brukeren til /logg-inn?next=… (skive 3); sider omdirigeres dit direkte.
@@ -138,6 +139,7 @@ import { inboxPending, inboxShareFiles } from './import.js'
 import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
 import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv, fangetKandidater, slagAvNøkkel } from './store.js'   // runde 2c: Fanget-bøtta (+ app: engangs-merkingen)
 import { klasseAv, tellKlasser, vekt, sistRørt, trådSamlet, brukInfo, deliveryInfo, logBruk, BRUK_HENDELSER, claudeØkter } from './store.js'   // runde 2d (03-avisen §2–§5): klasser, vekt, tråden samlet, bruk-loggen, Claude-øktene
+import { ulestAv, ulestFra, logSettAlt, settAltSist } from './store.js'   // friksjon 16: ulest fra bruk-loggen og siste «sett alt»
 import { projectAliases } from './store.js'   // runde 2d (app), friksjon 14: filer i prosjektmappa som ikke er saker, og aliasene til prosjekt-treffet i søket
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
@@ -496,10 +498,11 @@ http
         // utlevert = antall sendinger saken har vært med i (forsidens hovedsak = mest arbeidet med siste døgn). Bare tellinger.
         // Runde 2d (03-avisen §2–§4): klasse (arbeid · spor · drift · tråd), vekt og sist_rørt per sak; `tråden` samlet på prompt-saken ({svar, forskjeller, konklusjon, åpen, …}).
         // `tråd` er fortsatt prompt-id (streng) på alle sakene i en tråd — appen (regler.slåSammenTråder) leser den slik; det samlede objektet har eget navn så ingenting brekker.
-        const { av: trådAv, per: trådPer } = trådSamlet(all), sendinger = deliveryCounts(), utlev = deliveryInfo(), bruk = brukInfo(), now = Date.now()
+        const { av: trådAv, per: trådPer } = trådSamlet(all), sendinger = deliveryCounts(), utlev = deliveryInfo(), bruk = brukInfo(), now = Date.now(), fraUlest = ulestFra(now)
         const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0, mtime: mtimeAv(fileOf(a)),   // mtime (runde 2a): visningen Mapper sorterer som Finder — nyeste fil øverst
-          klasse: klasseAv(a), vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), tråd: a.kind === 'konklusjon' || a.kind === 'svar' ? trådPer.get(trådAv.get(a.id)) || null : null, now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }), tråden: a.kind === 'prompt' ? trådPer.get(a.id) || null : null }))
-        return json(res, 200, { atoms, total: all.length, offset, file: ARKIV(), klasser: tellKlasser(all) })
+          klasse: klasseAv(a), vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), tråd: a.kind === 'konklusjon' || a.kind === 'svar' ? trådPer.get(trådAv.get(a.id)) || null : null, now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }), tråden: a.kind === 'prompt' ? trådPer.get(a.id) || null : null,
+          ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }) }))   // friksjon 16: nyere enn siste «sett alt» (ellers sju dager) og ikke åpnet/sett/lest siden den ble skrevet
+        return json(res, 200, { atoms, total: all.length, offset, file: ARKIV(), klasser: tellKlasser(all), uleste: atoms.filter((a) => a.ulest && a.klasse === 'arbeid').length, sett_alt: settAltSist() || null })
       }
       if (req.method === 'GET' && url.pathname === '/api/search') {
         const q = url.searchParams.get('q') || ''
@@ -1009,11 +1012,12 @@ http
         const dager = Math.min(90, Math.max(1, num(url.searchParams.get('dager'), 7)))
         const now = Date.now(), fra = now - dager * 86400e3
         const alle = load(), byId = new Map(alle.map((a) => [a.id, a]))
-        const { av, per } = trådSamlet(alle), utlev = deliveryInfo(), bruk = brukInfo()
-        const rad = (a) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: levelOf(a, 'S').text, status: statusOf(a), klasse: klasseAv(a), tråd: av.get(a.id) || null, vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }) })
+        const { av, per } = trådSamlet(alle), utlev = deliveryInfo(), bruk = brukInfo(), fraUlest = ulestFra(now)
+        const rad = (a, tid = null) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: levelOf(a, 'S').text, status: statusOf(a), klasse: klasseAv(a), tråd: av.get(a.id) || null, vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }),
+          ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest, tid }) })   // friksjon 16: ulest til linja er sett eller saken åpnet; et spørsmål er nytt når noe i tråden er nytt (tid = trådens sist)
         // Spørsmål i arbeid: åpne tråder (ingen konklusjon låst, ingen svar beholdt) rørt siste N dager — prompten med tråden samlet
         const spørsmål = [...per.values()].filter((t) => t.åpen && t.sist >= fra && byId.has(t.prompt) && byId.get(t.prompt).fanget !== true && byId.get(t.prompt).drift !== true)
-          .sort((x, y) => y.sist - x.sist).map((t) => ({ ...rad(byId.get(t.prompt)), tråden: t, konklusjon_venter: !!t.konklusjon && t.konklusjon_status !== 'endelig' }))
+          .sort((x, y) => y.sist - x.sist).map((t) => ({ ...rad(byId.get(t.prompt), t.sist), tråden: t, konklusjon_venter: !!t.konklusjon && t.konklusjon_status !== 'endelig' }))
         // Svar som kom tilbake: svar-saker (fra Spør, ikke fanget) som ikke er beholdt eller låst, siste N dager
         const svarKom = alle.filter((a) => a.kind === 'svar' && a.fanget !== true && a.drift !== true && klasseAv(a) === 'tråd' && (a.capturedAt || 0) >= fra && !(a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller'))
           .sort((x, y) => y.capturedAt - x.capturedAt).map((a) => ({ ...rad(a), tråd: av.get(a.id) || null }))
@@ -1021,7 +1025,12 @@ http
         const konklusjoner = alle.filter((a) => a.kind === 'konklusjon' && statusOf(a) !== 'endelig').sort((x, y) => y.capturedAt - x.capturedAt).map((a) => ({ ...rad(a), tråd: av.get(a.id) || null }))
         const dok = innboksDokumenter()
         const økter = claudeØkter(alle, { dager, now })
-        return json(res, 200, { dager, spørsmål, svarKom, konklusjoner, innboks: { antall: dok.length, dokumenter: dok.map((d) => d.navn) }, økter: økter.økter, økterPerDag: økter.dager, antallØkter: økter.antall })
+        // friksjon 16: en økt er ulest når den er ny og ingen av sakene i den er sett/åpnet; `sak` = økt-saken (okt:/samtale:), ellers første sak — den appen melder «sett» på
+        const økterUt = økter.økter.map((ø) => { const sak = ø.saker.find((id) => /^(okt|samtale):/.test(String(byId.get(id)?.key || ''))) || ø.saker[0] || null
+          return { ...ø, sak, ulest: ø.sist > fraUlest && !ø.saker.some((id) => (bruk.get(id)?.lest || 0) >= ø.sist) } })
+        const dagerUt = økter.dager.map((d) => ({ ...d, uleste: økterUt.filter((ø) => d.økter.includes(ø.økt) && ø.ulest).length }))
+        const uleste = spørsmål.filter((s) => s.ulest).length + svarKom.filter((s) => s.ulest).length + konklusjoner.filter((s) => s.ulest).length + økterUt.filter((ø) => ø.ulest).length
+        return json(res, 200, { dager, spørsmål, svarKom, konklusjoner, innboks: { antall: dok.length, dokumenter: dok.map((d) => d.navn) }, økter: økterUt, økterPerDag: dagerUt, antallØkter: økter.antall, uleste, sett_alt: settAltSist() || null })
       }
       // ── Runde 2d (app) — friksjon 14 (Erik 24.10.2026): søk på prosjekt gir prosjektet og filene som hører til; Mapper viser også filer som ikke er saker. Egen blokk. ──
       //   GET  /api/mappe                 → { prosjekter: [{navn, alias: [navn…], saker, filer, sist}] }  prosjektene som mapper, med aliasene fra .tua/project-aliases.json
@@ -1059,6 +1068,13 @@ http
         if (abs.includes(`${path.sep}.`)) return json(res, 403, { error: 'skjulte filer åpnes ikke' })
         const r = await run(b.hvor === 'app' ? 'url' : 'reveal', abs)
         return json(res, 200, { ok: true, ran: r.ran, hvor: b.hvor === 'app' ? 'app' : 'finder' })
+      }
+      // ── Friksjon 16 (Erik 24.10.2026): ulest og «Merk alt som lest». Egen blokk. Tilstanden bor i bruk-loggen (.tua/bruk.jsonl), aldri i fila eller nettleseren. ──
+      //   POST /api/sett-alt {}           → { ok, at }  én linje {at, hendelse: 'sett_alt'} uten id: alt som er skrevet før nå regnes som lest; /api/atoms og /api/siden-sist
+      //                                    gir `ulest: true/false` per sak ut fra dette og «sett»/«åpnet»/«lest_M»/«lest_L»/«redigert» i loggen (POST /api/bruk {id, hendelse: 'sett'}).
+      if (req.method === 'POST' && url.pathname === '/api/sett-alt') {
+        const e = logSettAlt()
+        return json(res, 200, { ok: true, at: e.at })
       }
       return json(res, 404, { error: 'ukjent rute' })
     } catch (e) {
