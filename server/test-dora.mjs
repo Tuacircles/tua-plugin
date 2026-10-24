@@ -131,7 +131,7 @@ ok('ARKIV FØRST-instruksen sier skjermet og logget, Siden sist og del med', /SK
 // 4) tua_share: delingssak gjennom motoren
 {
   const n0 = utlevert().length, nAtoms = load().length
-  const fv = await call('tua_share', { ids: [vanlig.id, vault.id], til: 'Revisor', level: 'M', forhåndsvis: true })
+  const fv = await call('tua_share', { ids: [vanlig.id, vault.id], til: 'Revisor', level: 'M', forhandsvis: true })
   ok('tua_share forhåndsvis: setningen, Vault → S-linja, ingenting lagret eller logget', /Forhåndsvisning/.test(fv.text) && /Revisor får M\/S av 2 saker, \d+ opplysninger skjermet/.test(fv.text) && /Vault-merket og deles bare som S/.test(fv.text) && /— ok\?/.test(fv.text) && utlevert().length === n0 && load().length === nAtoms, fv.text.slice(0, 200))
   const { text } = await call('tua_share', { ids: [vanlig.id, vault.id], til: 'Revisor', level: 'M' })
   const id = (text.match(/atom (a_[a-z0-9_]+)/) || [])[1]

@@ -56,7 +56,7 @@ const INSTRUCTIONS =
   '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt. ' +
   'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen. ' +
   '(7) SIDEN SIST: første gang du bruker Tua i en samtale, kommer en blokk «Siden sist i Tua» (Spør-tråder, konklusjoner, delinger, filer lest inn i appen) — gjengi den i én kort liste før du svarer, så brukeren ser hva som er gjort i Tua. tua_search viser Spør-tråder og konklusjoner for prosjektet øverst. ' +
-  '(8) «DEL MED <navn>»: tua_share lager en delingssak (skjermet gjengivelse, logget) — S som standard, M/L bare når brukeren sier det. Kall først med forhåndsvis=true og still ETT spørsmål («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi den kopierbare teksten og lenka videre slik de er.';
+  '(8) «DEL MED <navn>»: tua_share lager en delingssak (skjermet gjengivelse, logget) — S som standard, M/L bare når brukeren sier det. Kall først med forhandsvis=true og still ETT spørsmål («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi den kopierbare teksten og lenka videre slik de er.';
 
 const server = new McpServer({ name: 'tua', version: '0.5.8' }, { instructions: INSTRUCTIONS });
 
@@ -569,7 +569,7 @@ server.registerTool(
       'Del én eller flere saker med en person («del med Revisor», «del denne på S med anna@firma.no»). Lager en DELINGSSAK gjennom motoren: ' +
       'en skjermet gjengivelse av det som deles (plassholdere i stedet for personopplysninger), med Utlevert-linje, lenke tua://sak/<id> og en kopierbar tekst ' +
       'du gir brukeren. S er standard (V11) — M eller L bare når brukeren sier det; Vault-merkede saker deles bare som S. ' +
-      'Kall FØRST med forhåndsvis=true, still ett spørsmål («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»), og kall uten forhåndsvis når brukeren sier ja. ' +
+      'Kall FØRST med forhandsvis=true, still ett spørsmål («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»), og kall uten forhandsvis når brukeren sier ja. ' +
       'Mottakersiden (en lenke mottakeren kan åpne) kommer senere; i dag er delingssaken det som finnes, og brukeren sender den kopierbare teksten selv.',
     inputSchema: {
       ids: arrayType(stringType()).min(1).describe('Sak-id-ene som skal deles (fra tua_search/tua_list).'),
@@ -577,13 +577,13 @@ server.registerTool(
       level: LevelArg.optional().describe('Nivået som deles: S (standard), M eller L — M/L bare når brukeren sier det.'),
       project: stringType().optional().describe('Prosjektet delingssaken lagres i. Standard: den første sakens prosjekt.'),
       convo: stringType().optional().describe('Samtalen dette skjer i (3–8 ord).'),
-      forhåndsvis: booleanType().optional().describe('true = regn ut hva som deles og hva som skjermes, uten å lagre eller logge — til spørsmålet før deling.'),
+      forhandsvis: booleanType().optional().describe('true = regn ut hva som deles og hva som skjermes, uten å lagre eller logge — til spørsmålet før deling.'),
     },
   },
-  async ({ ids, til, level = 'S', project, convo, forhåndsvis }) => {
+  async ({ ids, til, level = 'S', project, convo, forhandsvis }) => {   // ASCII-navn: MCP-klientene avviser æøå i parameternavn
     const atoms = load();
     let r;
-    try { r = del(atoms, { ids, til, nivå: level, prosjekt: project, klient: CLIENT, convo, forhåndsvis: !!forhåndsvis }); }
+    try { r = del(atoms, { ids, til, nivå: level, prosjekt: project, klient: CLIENT, convo, forhåndsvis: !!forhandsvis }); }
     catch (e) { return text(`Delingen er ikke laget: ${e.message}`) }
     const linjer = r.linjer.length ? `\n${r.linjer.join('\n')}` : '';
     const notater = r.notater.length ? `\nMerk: ${r.notater.join('; ')}` : '';
