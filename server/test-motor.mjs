@@ -188,11 +188,11 @@ try {
   ok('POST /api/spor: text/event-stream, rekkefølge skjermet → del… → ferdig', r.status === 200 && /text\/event-stream/.test(r.type) && navn[0] === 'skjermet' && navn.at(-1) === 'ferdig' && navn.includes('del'), `${r.status} ${r.type} ${navn.slice(0, 3).join(' ')}…${navn.at(-1)}`)
   ok('SSE skjermet: antall per type, tokens ca., «se hva som sendes» uten originaler', r.hendelser[0][1].antall.navn >= 1 && typeof r.hendelser[0][1].tokens.ca === 'number' && !r.hendelser[0][1].tekst.includes(PERSON))
   ok('SSE ferdig: sak-id for svaret og eksakt usage', /^a_/.test(r.hendelser.at(-1)[1].svar) && typeof r.hendelser.at(-1)[1].tokens.inn === 'number', JSON.stringify(r.hendelser.at(-1)[1].tokens))
-  const b = await sse({ melding: 'Alt om Vault-saken', saker: [{ id: a2.id, nivå: 'L' }], mottaker: 'test' })
+  const b = await sse({ melding: 'Alt om Vault-saken', saker: [{ id: a2.id, nivå: 'L' }], mottaker: 'test', prosjekt: 'Testprosjekt' })
   ok('POST /api/spor: Vault på L → event blokkert, ingen del/ferdig', b.hendelser.length === 1 && b.hendelser[0][0] === 'blokkert' && /Vault-merket/.test(b.hendelser[0][1].feil), JSON.stringify(b.hendelser.map((h) => h[0])))
-  const c = await sse({ melding: 'Hei', saker: [], mottaker: 'claude' })
+  const c = await sse({ melding: 'Hei', saker: [], mottaker: 'claude', prosjekt: 'Testprosjekt' })
   ok('POST /api/spor: Claude uten nøkkel → event feil (ikke klar), ingen sending', c.hendelser.length === 1 && c.hendelser[0][0] === 'feil' && /ikke klar/.test(c.hendelser[0][1].feil), JSON.stringify(c.hendelser))
-  const d = await (await fetch(`http://127.0.0.1:${PORT}/api/spor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ melding: 'x' }) })).json()
+  const d = await (await fetch(`http://127.0.0.1:${PORT}/api/spor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ melding: 'x', prosjekt: 'Testprosjekt' }) })).json()
   ok('POST /api/spor uten mottaker → 400', d.error?.includes('mottaker'))
   // Skive 3: én app med ruter — broen gir index.html for hver app-rute (appen leser stien selv), sandkasse.html for /sandkasse, 404 ellers.
   const hent = async (p, init) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { redirect: 'manual', ...init }); return { status: r.status, type: r.headers.get('content-type') || '', location: r.headers.get('location'), cookie: r.headers.get('set-cookie'), tekst: await r.text() } }

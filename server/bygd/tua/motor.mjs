@@ -313,9 +313,11 @@ async function sendMistral({ system, melding, kontekst, json }, { onDel = () => 
 // Som vurderer (TUA_VURDERER=test) svarer «test» med faste, tolkbare forskjeller (JSON over bokstavene A, B … i konteksten) og en fast konklusjon.
 // «test2» (bare med TUA_TESTMOTTAKERE=2, til testene) ekkoer ANNERLEDES enn «test» — overskriftene i konteksten og et tilleggspunkt — så to
 // svar på samme spørsmål faktisk er forskjellige og Forskjeller har noe å finne.
-const strøm = async (ut, onDel) => { for (const b of ut.match(/[\s\S]{1,120}/g) || []) { await new Promise((r) => setTimeout(r, 2)); onDel(b); } };
+// Friksjonsrunde 1: strømmen stopper når signal avbrytes (som en ekte mottaker) — så «Stopp» kan testes uten modell.
+const avbruttFeil = () => { const e = new Error('avbrutt'); e.name = 'AbortError'; return e };
+const strøm = async (ut, onDel, signal) => { for (const b of ut.match(/[\s\S]{1,120}/g) || []) { if (signal?.aborted) throw avbruttFeil(); await new Promise((r) => setTimeout(r, 2)); onDel(b); } };
 const testSvar = (ut, inn, id) => ({ tekst: ut, modell: 'ekko', usage: { input_tokens: anslåTokens(inn, id), output_tokens: anslåTokens(ut, id) }, stopp: 'end_turn' });
-async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => {} } = {}) {
+async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => {}, signal } = {}) {
   const inn = system + melding + kontekst;
   if (oppgave === 'forskjeller') {
     const bokstaver = [...String(kontekst).matchAll(/^## Svar ([A-Z]+)\b/gm)].map((m) => m[1]);
@@ -336,12 +338,12 @@ async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => 
     await strøm(ut, onDel); return testSvar(ut, inn, 'test')
   }
   const ut = `Ekko fra test-mottakeren (ingenting er sendt ut av maskinen).\n\nSystem: ${system}\n\n${byggMelding(melding, kontekst)}`;
-  await strøm(ut, onDel); return testSvar(ut, inn, 'test')
+  await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
 }
-async function sendTest2({ melding, kontekst }, { onDel = () => {} } = {}) {
+async function sendTest2({ melding, kontekst }, { onDel = () => {}, signal } = {}) {
   const overskrifter = [...String(kontekst).matchAll(/^## (.+)$/gm)].map((m) => m[1]);
   const ut = `EKKO B (test-mottaker 2 — ingenting er sendt ut av maskinen).\n\nSpørsmålet var: ${melding.trim()}\n\nKildene jeg fikk: ${overskrifter.length ? overskrifter.join(' · ') : 'ingen'}.\n\nTilleggspunkt bare fra B: dette svaret ser saken fra en annen vinkel enn test-mottaker 1.`;
-  await strøm(ut, onDel); return testSvar(ut, melding + kontekst, 'test2')
+  await strøm(ut, onDel, signal); return testSvar(ut, melding + kontekst, 'test2')
 }
 
 const TEST_TRUST = (label, kilde) => ({ score: 3, label, endpoint: 'lokalt', region: 'lokalt', metadata: 'Ingen — ingenting sendes.', innhold: 'Forlater aldri maskinen; viser bare det som ville blitt sendt.', mining: 'Ingen.', retensjon: 'Bare Tuas egen Utlevert-linje (metadata).', svakest: null, kilde, dato: '2026-10-23' });

@@ -339,9 +339,11 @@ async function sendMistral({ system, melding, kontekst, json }, { onDel = () => 
 // Som vurderer (TUA_VURDERER=test) svarer «test» med faste, tolkbare forskjeller (JSON over bokstavene A, B … i konteksten) og en fast konklusjon.
 // «test2» (bare med TUA_TESTMOTTAKERE=2, til testene) ekkoer ANNERLEDES enn «test» — overskriftene i konteksten og et tilleggspunkt — så to
 // svar på samme spørsmål faktisk er forskjellige og Forskjeller har noe å finne.
-const strøm = async (ut, onDel) => { for (const b of ut.match(/[\s\S]{1,120}/g) || []) { await new Promise((r) => setTimeout(r, 2)); onDel(b) } }
+// Friksjonsrunde 1: strømmen stopper når signal avbrytes (som en ekte mottaker) — så «Stopp» kan testes uten modell.
+const avbruttFeil = () => { const e = new Error('avbrutt'); e.name = 'AbortError'; return e }
+const strøm = async (ut, onDel, signal) => { for (const b of ut.match(/[\s\S]{1,120}/g) || []) { if (signal?.aborted) throw avbruttFeil(); await new Promise((r) => setTimeout(r, 2)); onDel(b) } }
 const testSvar = (ut, inn, id) => ({ tekst: ut, modell: 'ekko', usage: { input_tokens: anslåTokens(inn, id), output_tokens: anslåTokens(ut, id) }, stopp: 'end_turn' })
-async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => {} } = {}) {
+async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => {}, signal } = {}) {
   const inn = system + melding + kontekst
   if (oppgave === 'forskjeller') {
     const bokstaver = [...String(kontekst).matchAll(/^## Svar ([A-Z]+)\b/gm)].map((m) => m[1])
@@ -362,12 +364,12 @@ async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => 
     await strøm(ut, onDel); return testSvar(ut, inn, 'test')
   }
   const ut = `Ekko fra test-mottakeren (ingenting er sendt ut av maskinen).\n\nSystem: ${system}\n\n${byggMelding(melding, kontekst)}`
-  await strøm(ut, onDel); return testSvar(ut, inn, 'test')
+  await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
 }
-async function sendTest2({ melding, kontekst }, { onDel = () => {} } = {}) {
+async function sendTest2({ melding, kontekst }, { onDel = () => {}, signal } = {}) {
   const overskrifter = [...String(kontekst).matchAll(/^## (.+)$/gm)].map((m) => m[1])
   const ut = `EKKO B (test-mottaker 2 — ingenting er sendt ut av maskinen).\n\nSpørsmålet var: ${melding.trim()}\n\nKildene jeg fikk: ${overskrifter.length ? overskrifter.join(' · ') : 'ingen'}.\n\nTilleggspunkt bare fra B: dette svaret ser saken fra en annen vinkel enn test-mottaker 1.`
-  await strøm(ut, onDel); return testSvar(ut, melding + kontekst, 'test2')
+  await strøm(ut, onDel, signal); return testSvar(ut, melding + kontekst, 'test2')
 }
 
 const TEST_TRUST = (label, kilde) => ({ score: 3, label, endpoint: 'lokalt', region: 'lokalt', metadata: 'Ingen — ingenting sendes.', innhold: 'Forlater aldri maskinen; viser bare det som ville blitt sendt.', mining: 'Ingen.', retensjon: 'Bare Tuas egen Utlevert-linje (metadata).', svakest: null, kilde, dato: '2026-10-23' })
@@ -547,9 +549,13 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
   const gammel = promptId ? atoms.find((x) => x.id === promptId && x.kind === 'prompt') || null : null
   if (promptId && !gammel) throw new MotorFeil(`fant ingen prompt-sak ${promptId} å kjøre igjen`)
   if (gammel && !gammel.key) gammel.key = `prompt:spor:${hashOf(gammel.content)}`          // eldre prompt-saker fra Spør (uten nøkkel) får en nå
-  const proj = gammel?.project || prosjekt || atoms.find((x) => x.id === kilder[0]?.id)?.project || 'Uten prosjekt'
+  // Friksjonsrunde 1 (friksjon 6): prosjektet er brukerens eksplisitte valg i Spør (broen avviser tomt). Uten valg (andre kallere) som før: kildenes
+  // prosjekt, ellers «Uten prosjekt». Prompt-, svar-, forskjeller- og konklusjon-sakene lander i det valgte prosjektet; samtalen er spørsmålets
+  // første linje. «Kjør igjen» på en eldre prompt-sak lar prompten stå der den er (samme sak), men svarene lander i det valgte prosjektet.
+  const proj = String(prosjekt || '').trim() || gammel?.project || atoms.find((x) => x.id === kilder[0]?.id)?.project || 'Uten prosjekt'
+  const promptProj = gammel?.project || proj
   const { atom: promptAtom } = upsert(atoms, { key: gammel ? gammel.key : `prompt:spor:${hashOf(melding)}`, kind: 'prompt', content: String(melding), name: gammel && gammel.content.trim() === String(melding).trim() ? gammel.name : tittel,
-    project: proj, convo: gammel ? gammel.convo : samtale || tittel, tags: ['prompt'], source: gammel?.source || 'Tua', by: 'regel', short: førsteSetning(melding),   // gammel: samme samtale (også tom) → ingen falsk ny versjon
+    project: promptProj, convo: gammel ? gammel.convo : samtale || tittel, tags: ['prompt'], source: gammel?.source || 'Tua', by: 'regel', short: førsteSetning(melding),   // gammel: samme samtale (også tom) → ingen falsk ny versjon
     summary: gammel ? gammel.summary : `Spørsmål stilt i Tua til ${til}${kilder.length ? ` med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} som kontekst` : ''}.`.slice(0, 300) })
   const samtaleNavn = samtale || promptAtom.convo || tittel
   save(atoms)
@@ -557,19 +563,26 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
   const vaultArv = kilder.some((k) => k.vault)                                 // et svar bygget på en Vault-merket sak arver merket (V15): går aldri over S ut av maskinen
   const nivåer = [...new Set(kilder.map((k) => k.level))].join('/')
   // Samme skjermede og minimerte melding til alle, samtidig. Hvert svar blir egen sak og egen Utlevert-linje idet det kommer.
+  // Friksjonsrunde 1 (friksjon 8, «Stopp»): avbrytes signalet mens svaret strømmer, lagres det som kom som svar-sak merket avbrutt (tagg `avbrutt`,
+  // ingressen sier det) — sendingen er gjort og logges som Utlevert som vanlig; `ferdig` får avbrutt: true. Kom ingenting, kastes feilen som før.
   async function sendEn(m) {
     let strømmet = ''
-    const r = await m.send({ system: SYSTEM, melding: meldingS, kontekst: kontekstS }, { signal, onDel: (t) => { strømmet += t; på('del', { mottaker: m.id, tekst: t }) } })
+    let r, avbrutt = false
+    try { r = await m.send({ system: SYSTEM, melding: meldingS, kontekst: kontekstS }, { signal, onDel: (t) => { strømmet += t; på('del', { mottaker: m.id, tekst: t }) } }) }
+    catch (e) {
+      if (!(e?.name === 'AbortError' || signal?.aborted) || !strømmet.trim()) throw e
+      avbrutt = true; r = { tekst: strømmet, modell: (await m.status().catch(() => null))?.modeller?.[0] || m.modell || m.id, usage: { input_tokens: null, output_tokens: null }, stopp: 'avbrutt' }
+    }
     const svarTekst = avskjerm(r.tekst || strømmet, sk.kobling)
     const tokens = { ca: tokensCa[m.id], inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
-    const { atom: svarAtom } = upsert(atoms, { kind: 'svar', content: svarTekst, name: `Svar fra ${m.label}: ${tittel}`.slice(0, 90), project: proj, convo: samtaleNavn, tags: ['svar', m.id, ...(vaultArv ? ['vault'] : [])], source: m.label, by: 'regel',
+    const { atom: svarAtom } = upsert(atoms, { kind: 'svar', content: svarTekst, name: `${avbrutt ? 'Avbrutt svar' : 'Svar'} fra ${m.label}: ${tittel}`.slice(0, 90), project: proj, convo: samtaleNavn, tags: ['svar', m.id, ...(avbrutt ? ['avbrutt'] : []), ...(vaultArv ? ['vault'] : [])], source: m.label, by: 'regel',
       derivedFrom: [{ id: promptAtom.id, version: promptAtom.version || 1, level: 'L' }, ...kilder.map(({ id, version, level }) => ({ id, version, level }))],
-      short: `Svar fra ${m.label} (${r.modell}) på «${tittel}»${kilder.length ? `, med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} på nivå ${nivåer}` : ''}.`.slice(0, 300) })
+      short: `${avbrutt ? 'Avbrutt svar (stoppet av brukeren mens det strømmet)' : 'Svar'} fra ${m.label} (${r.modell}) på «${tittel}»${kilder.length ? `, med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} på nivå ${nivåer}` : ''}.`.slice(0, 300) })
     promptAtom.ga = [...(promptAtom.ga || []).filter((g) => g.id !== svarAtom.id), { id: svarAtom.id, version: svarAtom.version || 1 }]
     save(atoms)
     logDelivery({ tool: 'spor', client: klient, mottaker: m.id, endpoint: m.endpoint, modell: r.modell, saker: kilder.map(({ id, version, level }) => ({ id, version, level })),
-      skjermet: { ...sk.antall }, ord: ord(sendes), tokens, prompt: promptAtom.id, svar: svarAtom.id, ...(prosjekt ? { context: prosjekt } : {}) })
-    const ferdig = { svar: svarAtom.id, prompt: promptAtom.id, mottaker: m.id, label: m.label, modell: r.modell, tokens, tekst: svarTekst }
+      skjermet: { ...sk.antall }, ord: ord(sendes), tokens, prompt: promptAtom.id, svar: svarAtom.id, ...(avbrutt ? { avbrutt: true } : {}), ...(prosjekt ? { context: prosjekt } : {}) })
+    const ferdig = { svar: svarAtom.id, prompt: promptAtom.id, mottaker: m.id, label: m.label, modell: r.modell, tokens, tekst: svarTekst, ...(avbrutt ? { avbrutt: true } : {}) }
     på('ferdig', ferdig)
     return ferdig
   }
@@ -582,7 +595,7 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
   if (!ok.length) throw new MotorFeil(`Ingen av mottakerne svarte — ${feilet.map((f) => `${f.label}: ${f.feil?.message || f.feil}`).join(' · ')}`)
   // Forskjeller og konklusjon bare når mer enn én faktisk svarte (V21). Svikter vurdereren, står svarene likevel lagret — det sies med grunn.
   let fsk = null, konk = null
-  if (ok.length > 1) {
+  if (ok.length > 1 && !signal?.aborted) {   // stoppet av brukeren: svarene står lagret, men ingen vurdering (ingenting mer sendes)
     const svar = ok.map((s) => ({ id: s.svar, mottaker: s.mottaker, label: s.label, modell: s.modell, tekst: s.tekst }))
     try { fsk = await forskjeller(svar, { melding: String(melding), prosjekt: proj, klient, signal, på }) } catch (e) { fsk = { tilgjengelig: false, grunn: e.message, enig: [], uenig: [], unikt: [] } }
     på('forskjeller', fsk)
@@ -590,7 +603,7 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
     på('konklusjon', konk)
   }
   const ut = { prompt: promptAtom.id, mottakere: ok.map((s) => s.mottaker), svar: ok.map((s) => s.svar), resultater: ok, feilet: feilet.map((f) => ({ mottaker: f.mottaker, label: f.label, feil: f.feil?.message || String(f.feil) })), forskjeller: fsk, konklusjon: konk }
-  på('slutt', { prompt: ut.prompt, svar: ut.svar, mottakere: ut.mottakere, forskjeller: !!fsk?.tilgjengelig, konklusjon: konk?.id || null })
+  på('slutt', { prompt: ut.prompt, svar: ut.svar, mottakere: ut.mottakere, forskjeller: !!fsk?.tilgjengelig, konklusjon: konk?.id || null, ...(signal?.aborted ? { avbrutt: true } : {}) })
   return ut
 }
 

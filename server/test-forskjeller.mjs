@@ -196,12 +196,12 @@ try {
   const f = r.hendelser.find((h) => h[0] === 'forskjeller')[1], k = r.hendelser.find((h) => h[0] === 'konklusjon')[1]
   ok('SSE forskjeller: sak-id til Forskjeller-saken (lenken i Spør)', /^a_/.test(f.sak))
   ok('SSE forskjeller: tre lister; konklusjon: id og utkast', f.tilgjengelig && f.enig.length && f.uenig.length && f.unikt.length && k.tilgjengelig && /^a_/.test(k.id) && k.status === 'utkast', JSON.stringify([f.enig.length, k.id]))
-  const enkel = await sse({ melding: 'Hei', saker: [], mottaker: 'test' })
+  const enkel = await sse({ melding: 'Hei', saker: [], mottaker: 'test', prosjekt: 'Testprosjekt' })
   const en = enkel.hendelser.map((h) => h[0])
   ok('POST /api/spor med én mottaker (som før): ingen forskjeller/konklusjon, ferdig har mottaker', en.at(-1) === 'ferdig' && !en.includes('forskjeller') && enkel.hendelser.at(-1)[1].mottaker === 'test', en.join(' '))
-  const b = await sse({ melding: 'Alt om Vault-saken', saker: [{ id: a2.id, nivå: 'L' }], mottakere: ['test2', 'test'] })
+  const b = await sse({ melding: 'Alt om Vault-saken', saker: [{ id: a2.id, nivå: 'L' }], mottakere: ['test2', 'test'], prosjekt: 'Testprosjekt' })
   ok('POST /api/spor: Vault på L til to → ett event blokkert med mottaker, ingen del/ferdig', b.hendelser.length === 1 && b.hendelser[0][0] === 'blokkert' && b.hendelser[0][1].mottaker === 'test2' && /Stoppet hos Test 2/.test(b.hendelser[0][1].feil), JSON.stringify(b.hendelser.map((h) => [h[0], h[1].mottaker])))
-  const d = await post('/api/spor', { melding: 'x', mottakere: [] })
+  const d = await post('/api/spor', { melding: 'x', mottakere: [], prosjekt: 'Testprosjekt' })
   ok('POST /api/spor uten mottakere → 400', d.status === 400 && /mottaker/.test(d.json.error))
   // konklusjon-døra
   const rett = await post('/api/konklusjon', { id: k.id, tekst: 'Rettet i broen.' })

@@ -213,10 +213,10 @@ const sse = async (url, body) => {
     ok('GET /api/search uten kind: alle typer som før', s2.status === 200 && s2.json.hits.some((h) => h.kind !== 'prompt'))
     // kjør igjen via broen
     const p1 = load().find((a) => a.key === promptKey(SID, P1))
-    const r = await sse(`http://127.0.0.1:${PORT}/api/spor`, { melding: p1.content, saker: [], mottaker: 'test', prompt: p1.id })
+    const r = await sse(`http://127.0.0.1:${PORT}/api/spor`, { melding: p1.content, saker: [], mottaker: 'test', prompt: p1.id, prosjekt: p1.project })
     const ferdig = r.events.find((e) => e.ev === 'ferdig')
     ok('POST /api/spor med prompt: ferdig.prompt er samme prompt-sak, ga vokser', ferdig?.d?.prompt === p1.id && load().find((a) => a.id === p1.id).ga.length === 4, JSON.stringify(r.events.map((e) => e.ev)))
-    const r2 = await sse(`http://127.0.0.1:${PORT}/api/spor`, { melding: 'x', saker: [], mottaker: 'test', prompt: 'a_finnes_ikke' })
+    const r2 = await sse(`http://127.0.0.1:${PORT}/api/spor`, { melding: 'x', saker: [], mottaker: 'test', prompt: 'a_finnes_ikke', prosjekt: p1.project })
     ok('POST /api/spor med ukjent prompt: event feil', r2.events.some((e) => e.ev === 'feil' && /fant ingen prompt-sak/.test(e.d.feil)))
     // datasettet
     const txt = await (await fetch(`http://127.0.0.1:${PORT}/api/datasett.jsonl`)).text()

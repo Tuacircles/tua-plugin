@@ -78,6 +78,12 @@
 //   M19 + M14 (skive 8): prompter som førsteklasses saker, datasettet og onboardingen i appen.
 //   GET  /api/search?kind=prompt   bare saker av én type; prompt-treff har også `tekst` (hele prompten), `ga` og `modeller` — til forslagene i Spør og Prompter-visningen
 //   POST /api/spor  {…, prompt: <id>}   «Kjør igjen»: svaret kobles til DENNE prompt-saken (ga vokser; ny versjon bare når teksten er endret). Uten prompt: nøkkel på teksten.
+//   Friksjonsrunde 1 — Spør (24.10, bruksdag 1):
+//   POST /api/spor  {…, prosjekt}  prosjekt KREVES (400 uten) — det er brukerens synlige valg i Spør; prompt-, svar-, forskjeller- og konklusjon-sakene lander der
+//   POST /api/spor  {…, kjøring: <id>} + POST /api/spor/stopp {kjøring} → avbryter kallet mot mottakeren(e); det som kom, lagres som svar merket avbrutt
+//        (tagg `avbrutt`), event: ferdig {…, avbrutt: true}; kom ingenting: event: feil {avbrutt: true}. SSE-rekkefølgen ellers uendret.
+//   POST /api/prosjekter {navn} → { prosjekt, ny, prosjekter }   nytt prosjekt = ny mappe i arkivet (V9); GET /api/prosjekter tar også med tomme mapper
+//   GET  /api/sak?id=<sak>  → { id, name, project, kind, …, ord, tegn, nivåer: {S,M,L: {tekst, fallback, av}} }   én sak med teksten per nivå (kilde-raden i Spør som åpnes)
 //   GET  /api/datasett.jsonl[?laast=1]  én linje per konklusjon (V21 nivå 2): {prompt_id, prompt, kilder:[{id, nivå}], svar:[{mottaker, tekst_id}], forskjeller_id, konklusjon_id,
 //        konklusjon, laast, versjon, dato} — id-er, prompt- og konklusjonsteksten; aldri svartekster, aldri koblingen plassholder → original. Lokal fil, logges ikke som Utlevert.
 //   GET  /api/onboarding[?tall=1]  tilstand (vis/trenger/steg/ferdig), arkiv + kandidater (archiveOptions), Ollama-status, mottakere; med tall=1 også tallene til steg 3
@@ -316,7 +322,20 @@ async function onboardingView({ medTall = false } = {}) {
   return ut
 }
 const prosjektNavn = (p) => { const n = String(p || '').trim().replace(/[\/\\:*?"<>|\u0000-\u001f]/g, '·').replace(/\s+/g, ' ').slice(0, 90); if (!n || n.startsWith('.') || n === 'Ferdig') throw new Error(`«${p}» er ikke et gyldig prosjektnavn`); return n }
-const alleProsjekter = () => [...new Set([...load().map((a) => a.project), ...Object.keys(prosjektRegister()), STANDARD_PROSJEKT])].filter(Boolean).sort((a, b) => a.localeCompare(b, 'no'))
+// Friksjonsrunde 1 (friksjon 6): også tomme prosjektmapper i arkivet telles som prosjekter (et nytt prosjekt fra Spør er en mappe før det har saker, V9).
+const prosjektMapper = () => { if (!filesMode()) return []; try { return fs.readdirSync(FILES_ROOT, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'Innboks').map((e) => e.name) } catch { return [] } }
+const alleProsjekter = () => [...new Set([...load().map((a) => a.project), ...Object.keys(prosjektRegister()), ...prosjektMapper(), STANDARD_PROSJEKT])].filter(Boolean).sort((a, b) => a.localeCompare(b, 'no'))
+// Nytt prosjekt = ny mappe i arkivet (V9: mappa er sannheten). Navnet må være et mappenavn: ingen skråstrek, ikke punktum først, ≤ 80 tegn.
+export function nyttProsjekt(navn) {
+  const n = String(navn || '').replace(/\s+/g, ' ').trim()
+  if (!n || n.length > 80 || /[\/\\:\0]/.test(n) || n.startsWith('.') || n === '..') throw new Error('prosjektnavn må være et mappenavn: 1–80 tegn, uten skråstrek eller kolon, ikke punktum først')
+  const finnes = alleProsjekter().find((p) => p.toLowerCase() === n.toLowerCase())
+  if (finnes) return { prosjekt: finnes, ny: false }
+  if (filesMode()) fs.mkdirSync(path.join(FILES_ROOT, n), { recursive: true })
+  return { prosjekt: n, ny: true }
+}
+// Kjøringer som kan stoppes (friksjon 8, «Stopp»): klienten sender `kjøring: <id>` med POST /api/spor og kaller POST /api/spor/stopp {kjøring}.
+const kjøringer = new Map()
 
 // ── /api/open: fast liste (V13) ────────────────────────────────────────────
 // spawn med argv — aldri shell. Returnerer { ok, ran } eller kaster med forklaring.
@@ -482,6 +501,19 @@ http
       }
       // ── M16 (skive 7): lesere og Innboks ──
       if (req.method === 'GET' && url.pathname === '/api/prosjekter') return json(res, 200, { prosjekter: alleProsjekter() })
+      if (req.method === 'POST' && url.pathname === '/api/prosjekter') {   // friksjon 6: «nytt prosjekt …» i Spør — mappa opprettes i arkivet
+        const b = await readBody(req)
+        try { const r = nyttProsjekt(b.navn); console.error(`[tua-bro] prosjekt «${r.prosjekt}» ${r.ny ? 'opprettet som mappe' : 'fantes'}`); return json(res, 200, { ...r, prosjekter: alleProsjekter() }) }
+        catch (e) { return json(res, 400, { error: e.message }) }
+      }
+      if (req.method === 'GET' && url.pathname === '/api/sak') {   // friksjon 4: én sak med teksten på hvert nivå — til kilde-raden i Spør som åpnes (lokalt, logges ikke)
+        const id = url.searchParams.get('id') || ''
+        const a = load().find((x) => x.id === id)
+        if (!a) return json(res, 404, { error: `fant ikke sak ${id}` })
+        const niv = Object.fromEntries(LEVELS.map((l) => { const g = levelOf(a, l); return [l, { tekst: g.text, fallback: g.fallback ? g.level : null, av: a.levels?.[l]?.by || null }] }))
+        return json(res, 200, { id: a.id, name: a.name, project: a.project, convo: a.convo || '', kind: a.kind || 'capture', tags: a.tags || [], capturedAt: a.capturedAt, version: a.version || 1, status: statusOf(a), vault: isVault(a), max: 'L',
+          ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), nivåer: niv, file: fileOf(a) })
+      }
       if (req.method === 'GET' && url.pathname === '/api/innboks') {
         const dok = innboksDokumenter().map(({ sti, ...r }) => r)
         return json(res, 200, { sti: INBOX_DIR, dokumenter: dok, eksporter: inboxPending(), lenker: inboxShareFiles().map((p) => path.basename(p)), antall: dok.length, ferdig: ferdigAntall(), formater: Object.values(FORMATER).map((f) => f.label), standard: STANDARD_PROSJEKT, prosjekter: alleProsjekter() })
@@ -553,23 +585,35 @@ http
         if (!b.melding || !String(b.melding).trim()) return json(res, 400, { error: 'melding kreves' })
         const mottakerIds = [...new Set([...(Array.isArray(b.mottakere) ? b.mottakere : []), ...(b.mottaker ? [b.mottaker] : [])].map((x) => String(x || '').trim()).filter(Boolean))]
         if (!mottakerIds.length) return json(res, 400, { error: 'mottaker kreves (se /api/mottakere) — én som `mottaker` eller flere som `mottakere: []`' })
+        const prosjekt = String(b.prosjekt || '').replace(/\s+/g, ' ').trim()
+        if (!prosjekt) return json(res, 400, { error: 'prosjekt kreves — velg hvor spørsmålet og svaret skal lagres (se /api/prosjekter)' })   // friksjon 6: fail closed, aldri usynlig valg
         const saker = Array.isArray(b.saker) ? b.saker.filter((s) => s && s.id) : []
+        const kjøring = b.kjøring ? String(b.kjøring).slice(0, 80) : null
         // SSE: hendelsene skrives etter hvert — broen er ren http, ingenting bufrer (K9). Lukker klienten, avbrytes kallet mot mottakeren.
         res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
         res.flushHeaders?.()
         const hendelse = (ev, data) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`) }
         const ctl = new AbortController()
         req.on('close', () => ctl.abort())
+        if (kjøring) kjøringer.set(kjøring, ctl)
         try {
-          const r = await spor({ melding: String(b.melding), saker, mottakere: mottakerIds, prosjekt: b.prosjekt || undefined, samtale: b.samtale || undefined, prompt: b.prompt || undefined, klient: 'app', signal: ctl.signal, på: hendelse })
-          if (Array.isArray(r.svar)) console.error(`[tua-bro] spor → ${mottakerIds.join('+')} · ${saker.length} saker · ${r.svar.length} svar${r.feilet?.length ? ` · ${r.feilet.length} feilet` : ''} · forskjeller ${r.forskjeller ? (r.forskjeller.tilgjengelig ? `${r.forskjeller.enig.length}/${r.forskjeller.uenig.length}/${r.forskjeller.unikt.length} (${r.forskjeller.vurdert_av})` : 'ikke tilgjengelig') : '—'} · konklusjon ${r.konklusjon?.id || '—'}`)
-          else console.error(`[tua-bro] spor → ${mottakerIds[0]} · ${saker.length} saker · svar ${r.svar} · tokens ca. ${r.tokens.ca}${r.tokens.inn != null ? ` (eksakt ${r.tokens.inn}+${r.tokens.ut})` : ''}`)
+          const r = await spor({ melding: String(b.melding), saker, mottakere: mottakerIds, prosjekt, samtale: b.samtale || undefined, prompt: b.prompt || undefined, klient: 'app', signal: ctl.signal, på: hendelse })
+          if (Array.isArray(r.svar)) console.error(`[tua-bro] spor → ${mottakerIds.join('+')} · ${prosjekt} · ${saker.length} saker · ${r.svar.length} svar${r.feilet?.length ? ` · ${r.feilet.length} feilet` : ''}${ctl.signal.aborted ? ' · STOPPET' : ''} · forskjeller ${r.forskjeller ? (r.forskjeller.tilgjengelig ? `${r.forskjeller.enig.length}/${r.forskjeller.uenig.length}/${r.forskjeller.unikt.length} (${r.forskjeller.vurdert_av})` : 'ikke tilgjengelig') : '—'} · konklusjon ${r.konklusjon?.id || '—'}`)
+          else console.error(`[tua-bro] spor → ${mottakerIds[0]} · ${prosjekt} · ${saker.length} saker · svar ${r.svar}${r.avbrutt ? ' (avbrutt)' : ''} · tokens ca. ${r.tokens.ca}${r.tokens.inn != null ? ` (eksakt ${r.tokens.inn}+${r.tokens.ut})` : ''}`)
         } catch (e) {
           const blokkert = e instanceof Blokkert
-          console.error(`[tua-bro] spor → ${mottakerIds.join('+')} ${blokkert ? 'BLOKKERT' : 'FEIL'}: ${e.message}`)
-          hendelse(blokkert ? 'blokkert' : 'feil', { feil: e.message, ...(blokkert ? { detaljer: e.detaljer, ...(e.mottaker ? { mottaker: e.mottaker } : {}) } : {}) })
-        }
+          const stoppet = !blokkert && ctl.signal.aborted
+          console.error(`[tua-bro] spor → ${mottakerIds.join('+')} ${blokkert ? 'BLOKKERT' : stoppet ? 'STOPPET før svar' : 'FEIL'}: ${e.message}`)
+          hendelse(blokkert ? 'blokkert' : 'feil', { feil: stoppet ? 'Stoppet før noe svar kom — ingenting er lagret som svar.' : e.message, ...(stoppet ? { avbrutt: true } : {}), ...(blokkert ? { detaljer: e.detaljer, ...(e.mottaker ? { mottaker: e.mottaker } : {}) } : {}) })
+        } finally { if (kjøring) kjøringer.delete(kjøring) }
         return res.end()
+      }
+      if (req.method === 'POST' && url.pathname === '/api/spor/stopp') {   // friksjon 8: «Stopp» — avbryter kallet mot mottakeren; det som kom, lagres som avbrutt svar (motoren)
+        const b = await readBody(req)
+        const ctl = kjøringer.get(String(b.kjøring || ''))
+        if (!ctl) return json(res, 404, { error: 'ingen kjøring med den id-en pågår' })
+        ctl.abort(); console.error(`[tua-bro] spor stoppet av brukeren (${b.kjøring})`)
+        return json(res, 200, { stoppet: true })
       }
       // ── M20b (skive 6): konklusjonen — rettelse eller «kjør igjen». Alt gjennom motoren; låsing er /api/status. ──
       if (req.method === 'POST' && url.pathname === '/api/konklusjon') {
