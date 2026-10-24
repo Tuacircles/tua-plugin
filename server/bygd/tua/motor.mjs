@@ -2,7 +2,7 @@
 import fs__default from 'node:fs';
 import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LONG_L, load, logDelivery, LEVELS, filesMode, FILES_ROOT, DATA_DIR } from './store.mjs';
+import { LONG_L, load, logDelivery, LEVELS, filesMode, FILES_ROOT, DATA_DIR, clampLevel, maxLevel, isVault, levelOf, hashOf, upsert, save } from './store.mjs';
 import { hasKey, ollamaStatus, readKey } from './keychain.mjs';
 import { OLLAMA_VERT, OLLAMA_URL } from './ollama.mjs';
 
@@ -53,6 +53,7 @@ const trustScores = () => {
   for (const e of endepunkter) { const lev = e.leverandør || e.id; if (lev && !ai[lev]) ai[lev] = e; }
   return { ...ts, sky: ts.sky || {}, endepunkter, ai: { ...ai, ...(Array.isArray(ts.endepunkter) ? {} : ts.ai || {}) } }
 };
+const trustFor = (id) => { const ts = trustScores(); return ts.endepunkter.find((e) => e.id === id) || ts.ai[id] || null };
 
 class Blokkert extends Error { constructor(msg, detaljer = []) { super(msg); this.name = 'Blokkert'; this.kode = 'blokkert'; this.detaljer = detaljer; } }
 class MotorFeil extends Error { constructor(msg) { super(msg); this.name = 'MotorFeil'; this.kode = 'feil'; } }
@@ -204,6 +205,27 @@ function kjentePersoner(atoms = [], { lær = [] } = {}) {
   k.navn = [...sett].sort();
   if (k.navn.length !== før) skrivKjente(k);
   return k.navn
+}
+
+// ── 2) Minimering ───────────────────────────────────────────────────────────
+// Konteksten bygges av valgte saker på valgt nivå per sak (S standard når nivå mangler; L bare når eksplisitt valgt).
+// Nivået klampes til det prosjektet får se (maxLevel, V11). Vault klampes IKKE her — det er fail closed i sjekkTillatt().
+// Det som sendes om saken er tittel, versjon og nivå — ikke prosjekt, samtale eller tagger (Trust Score-teksten lover det).
+function minimer(atoms, saker = [], { prosjekt } = {}) {
+  const kilder = [], deler = [], notater = [];
+  for (const s of saker) {
+    const id = typeof s === 'string' ? s : s.id;
+    const a = atoms.find((x) => x.id === id);
+    if (!a) { notater.push(`fant ikke sak ${id}`); continue }
+    const ønsket = LEVELS.includes(s.nivå) ? s.nivå : LEVELS.includes(s.level) ? s.level : 'S';
+    const eff = clampLevel(ønsket, maxLevel(a, prosjekt));
+    if (eff !== ønsket) notater.push(`«${a.name}»: ${prosjekt} ser bare ${eff}, ikke ${ønsket}`);
+    const got = levelOf(a, eff);
+    const tekst = got.text.trim();
+    kilder.push({ id: a.id, name: a.name, version: a.version || 1, level: eff, ønsket, vault: isVault(a), fallback: got.fallback ? got.level : null, tegn: tekst.length, ord: ord(tekst) });
+    deler.push(`## ${a.name}\n_v${a.version || 1} · nivå ${eff}_\n\n${tekst}`);
+  }
+  return { kontekst: deler.join('\n\n'), kilder, notater }
 }
 
 // ── 3) Mottakere og fail closed ─────────────────────────────────────────────
@@ -368,6 +390,13 @@ function lagMottakere() {
   return liste
 }
 
+// Vurdereren (skive 6, V21): Forskjeller og konklusjonen skrives av standardmodellen lokalt — Ollama når den kjører, ellers Claude med nøkkel,
+// ellers ikke tilgjengelig med grunn. TUA_VURDERER overstyrer (testene setter «test»). Går gjennom de samme trinnene som spor():
+// sjekkTillatt (svar-sakene på L — arver et svar Vault-merket, stoppes en ekstern vurderer) → skjerm → send → Utlevert-linje med mottaker.
+// Nivået en vurderer får lese svar-sakene på: det høyeste Trust Score tillater (L for lokal og Claude, M for test). Vault-arv stoppes
+// fortsatt hos en ekstern vurderer i sjekkTillatt — det klampes ikke ned til S i det stille (forskjeller av ingresser ville være verdiløse).
+const maksNivå = (m) => { const score = Number(m?.trust?.score) || 1; return LEVELS.filter((l) => NIVÅ_KREVER_TRUST[l] <= score).at(-1) || 'S' };
+
 // ── 0) Lese: S og M for en innlest fil (M16, skive 7) ──────────────────────
 // En fil som leses inn (lesere.js → innlesing.js) blir en sak med L = hele teksten. S og M skrives av standardmodellen LOKALT — Ollama når den
 // kjører — ellers etter regler (regelNivåer). Claude skriver bare når det bes om det (skriver: 'claude'); da går teksten gjennom de samme trinnene
@@ -463,4 +492,110 @@ function plukkJson(t) {
   return null
 }
 
-export { ord, skrivNivåer };
+// ── 7) Claude-døra (runde 3a i arbeidsstykke 32, §5.7 og 03-avisen §5): det MCP-verktøyene gir Claude går gjennom motoren ──────
+// «Én motor, to dører» var til nå bare appens dør: server.js hentet L rett fra lageret og logget. Fra runde 3a går tua_get, tua_compose,
+// tua_card og tua_search-treffene (S) gjennom de samme trinnene som spor(): lese → klippe (fail closed) → skjerme → logge. Ingen kodevei utenom.
+//
+// Mottakeren er Claude som ENDEPUNKT (trust-scores.json «claude», api.anthropic.com) uansett klient — Desktop, Code og Cowork er samme dør,
+// og Trust Score-fila er stedet Erik retter hva den får. Det Claude får er skjermet med skjerm(); koblingen plassholder → original kastes
+// her og settes ALDRI inn igjen i det Claude får (V21). Vault-merkede saker og nivåer over det Trust Score tillater gir S og én linje om hvorfor
+// (fail closed, aldri en advarsel) — ikke en feil, for Claude skal kunne svare på S. Hver utlevering er én Utlevert-linje med antall skjermet
+// per type, ord og tokens (ca.), som Spør — aldri innhold, aldri originaler.
+function endepunkt(id = 'claude') {
+  const t = trustFor(id);
+  return { id, label: t?.label || id, endpoint: t?.endpoint || '', trust: t, local: id === 'ollama' || t?.region === 'lokalt' }
+}
+// Ett skjermings-oppsett for et helt verktøysvar: samme person får samme plassholder i tittel, ingress og tekst. Lista vokser av bruk (som spor()).
+function skjermerFor(atoms) {
+  const sk = lagSkjermer(kjentePersoner(atoms));
+  // treff er en getter på skjermeren — den må defineres på nytt her (en spredning ville fryst den til 0)
+  return { skjerm: (t) => sk.skjerm(t), kobling: sk.kobling, antall: sk.antall, nye: sk.nye, get treff() { return sk.treff }, lær: () => { if (sk.nye.size) kjentePersoner([], { lær: [...sk.nye] }); } }
+}
+// lever(): én sak til Claude på et nivå. Returnerer { nivå (det som faktisk gis), ønsket, maks, linje (hvorfor klippet, '' når ikke), felt (navn, samtale,
+// S, hvorfor — skjermet), tekst (skjermet), got (levelOf-svaret), antall, treff, tokens, ord, logget }. `versjon` er en tidligere versjon av saken
+// (readVersion) — nivået vurderes på saken slik den er nå (Vault-taggen), teksten tas fra versjonen. `logg: false` skjermer uten Utlevert-linje.
+function lever(atoms, sak, { nivå = 'L', mottaker = 'claude', tool = 'tua_get', klient = 'Claude', context, versjon = null, logg = true, sk = null } = {}) {
+  const m = typeof mottaker === 'string' ? endepunkt(mottaker) : mottaker;
+  const kilde = versjon || sak;
+  const ønsket = LEVELS.includes(nivå) ? nivå : 'L';
+  const maks = clampLevel(ønsket, maxLevel(sak, context));                   // referansens nivå (V11) først — det er ikke fail closed, bare synlighet
+  let eff = maks, linje = '';
+  try { sjekkTillatt(m, [{ id: sak.id, name: sak.name, version: kilde.version || 1, level: eff, vault: isVault(sak) }]); }
+  catch (e) {
+    if (!(e instanceof Blokkert)) throw e
+    eff = 'S';
+    linje = isVault(sak)
+      ? `«${sak.name}» er Vault-merket: ${m.label} får bare S (V15, fail closed). Hele innholdet finnes bare i Tua-appen på denne maskinen.`
+      : `${m.label} har Trust Score ${Number(m.trust?.score) || 1}/5 — nivå ${maks} krever minst ${NIVÅ_KREVER_TRUST[maks]} (fail closed, V21). Du får S.`;
+  }
+  const got = levelOf(kilde, eff);
+  const egen = !sk;
+  sk = sk || skjermerFor(atoms);
+  const S = levelOf(kilde, 'S');
+  const felt = { navn: sk.skjerm(kilde.name || sak.name), samtale: sk.skjerm(kilde.convo || ''), S: S.level === 'S' ? sk.skjerm(S.text) : '', hvorfor: kilde.summary && kilde.summary !== S.text ? sk.skjerm(kilde.summary) : '' };
+  const tekst = sk.skjerm(got.text);
+  if (egen) sk.lær();
+  const alt = `${felt.navn}\n${felt.samtale}\n${felt.S}\n${felt.hvorfor}\n${tekst}`;
+  const tokens = { ca: anslåTokens(alt, m.id) };
+  const antall = { ...sk.antall };
+  let logget = false;
+  if (logg) {
+    logDelivery({ tool, client: klient, mottaker: m.id, endpoint: m.endpoint, id: sak.id, version: kilde.version || 1, level: eff,
+      saker: [{ id: sak.id, version: kilde.version || 1, level: eff }], skjermet: antall, ord: ord(alt), tokens, ...(linje ? { klippet: `${ønsket}→${eff}` } : {}), ...(context ? { context } : {}) });
+    logget = true;
+  }
+  return { nivå: eff, ønsket, maks, linje, felt, tekst, got, S, antall, treff: Object.values(antall).reduce((a, b) => a + b, 0), tokens, ord: ord(alt), logget, mottaker: m }
+}
+
+// del(): «del med …» (runde 3a; mottakersiden — lenka som kan åpnes — er runde 3b). Lager en DELINGSSAK gjennom motoren: lese (minimer) → klippe
+// (Vault → S, fail closed, med linje) → skjerme → lagre gjengivelsen → logge. Mottakeren er en person som navn/e-post i tekst (V11: S som standard;
+// M/L bare når brukeren sier det — personer har ingen Trust Score ennå, det er 3b). Delingssaken ER det som deles: en skjermet gjengivelse med
+// «Utlevert»-linje, lenke tua://sak/<id> og kopierbar tekst. Originalene står aldri i den. `forhåndsvis: true` regner ut det samme uten å lagre
+// eller logge — til spørsmålet Claude stiller før deling («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»).
+const slug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'mottaker';
+function del(atoms, { ids = [], til, nivå = 'S', prosjekt, klient = 'Claude', convo, forhåndsvis = false } = {}) {
+  const mottaker = String(til || '').trim();
+  if (!mottaker) throw new MotorFeil('mottaker kreves («del med <navn eller e-post>»)')
+  if (!Array.isArray(ids) || !ids.length) throw new MotorFeil('minst én sak-id kreves')
+  const ønsket = LEVELS.includes(nivå) ? nivå : 'S';
+  const { kilder, notater } = minimer(atoms, ids.map((id) => ({ id, nivå: ønsket })));
+  if (!kilder.length) throw new MotorFeil(`Ingen av sakene finnes: ${notater.join('; ')}`)
+  const linjer = [];
+  for (const k of kilder) if (k.vault && k.level !== 'S') { k.level = 'S'; k.klippet = true; linjer.push(`«${k.name}» er Vault-merket og deles bare som S (V15, fail closed).`); }
+  const sk = skjermerFor(atoms);
+  const deler = kilder.map((k) => {
+    const a = atoms.find((x) => x.id === k.id);
+    const got = levelOf(a, k.level);
+    k.tegn = got.text.trim().length; k.ord = ord(got.text);
+    return `## ${sk.skjerm(a.name)}\n_v${a.version || 1} · nivå ${k.level}${got.fallback ? ` (${got.level})` : ''}_\n\n${sk.skjerm(got.text.trim())}`
+  });
+  const gjengivelse = deler.join('\n\n');
+  const antall = { ...sk.antall }, treff = Object.values(antall).reduce((a, b) => a + b, 0);
+  const nivåer = [...new Set(kilder.map((k) => k.level))].join('/');
+  const når = new Date();
+  const skjermetTekst = treff ? `${treff} opplysning${treff === 1 ? '' : 'er'} skjermet (${Object.entries(antall).map(([t, n]) => `${n} ${t}`).join(', ')})` : 'ingen opplysninger å skjerme';
+  const setning = `${mottaker} får ${nivåer} av ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'}, ${skjermetTekst}.`;
+  const tokens = { ca: anslåTokens(gjengivelse, 'claude') };
+  if (forhåndsvis) return { forhåndsvis: true, til: mottaker, nivå: nivåer, kilder, antall, treff, linjer, notater, setning, tokens, ord: ord(gjengivelse) }
+  const proj = String(prosjekt || '').trim() || atoms.find((x) => x.id === kilder[0].id)?.project || 'Uten prosjekt';
+  const tittel = `Deling til ${mottaker}: ${kilder.length === 1 ? kilder[0].name : `${kilder.length} saker`}`.slice(0, 90);
+  const hode = `# Deling til ${mottaker}\n\n_Delt med: ${mottaker} · nivå ${nivåer} · ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} · ${skjermetTekst} · utlevert ${fmtTid(når)} fra Claude (${klient})_` +
+    (linjer.length ? `\n\n${linjer.map((l) => `> ${l}`).join('\n')}` : '');
+  const content = `${hode}\n\n${gjengivelse}\n\n---\n\n_Gjengivelsen er skjermet: plassholdere som [Person A] står for opplysninger som ikke er delt. Mottakersiden (lenka som kan åpnes) kommer i runde 3b._`;
+  const key = `deling:${slug(mottaker)}:${hashOf([...ids].sort().join(',') + ':' + nivåer)}`;
+  const { atom, status } = upsert(atoms, { key, kind: 'leveranse', name: tittel, content, project: proj, convo: convo || `Deling til ${mottaker}`, source: 'Tua', by: 'regel', tags: ['deling'],
+    derivedFrom: kilder.map(({ id, version, level }) => ({ id, version, level })),
+    short: `Delt med ${mottaker} på nivå ${nivåer}: ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} (${kilder.map((k) => k.name).join(', ')}), ${skjermetTekst}.`.slice(0, 300),
+    summary: `Deling laget fra Claude (${klient}) ${fmtTid(når)}; mottakersiden er runde 3b.` });
+  const lenke = `tua://sak/${atom.id}`;
+  atom.links = [...(atom.links || []).filter((l) => l.href !== lenke), { kind: 'url', href: lenke, label: `Delingen til ${mottaker}` }];
+  save(atoms);
+  logDelivery({ tool: 'tua_share', client: klient, mottaker, endpoint: 'deling (lenke — runde 3b)', saker: kilder.map(({ id, version, level }) => ({ id, version, level })),
+    skjermet: antall, ord: ord(gjengivelse), tokens, deling: atom.id, ...({ context: proj } ) });
+  sk.lær();
+  const kopierbar = `${gjengivelse}\n\n— Delt fra Tua ${fmtTid(når)} · nivå ${nivåer} · ${skjermetTekst} · ${lenke}`;
+  return { id: atom.id, version: atom.version || 1, status, til: mottaker, nivå: nivåer, kilder, antall, treff, linjer, notater, setning, lenke, kopierbar, tokens, ord: ord(gjengivelse), prosjekt: atom.project }
+}
+const fmtTid = (d) => d.toLocaleString('no-NO', { dateStyle: 'short', timeStyle: 'short' });
+
+export { anslåTokens, del, endepunkt, lever, maksNivå, ord, skjermerFor, skrivNivåer };

@@ -2,6 +2,13 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## Unreleased — 2026-10-24 (the Claude door goes through the engine — round 3a)
+
+- **Everything Claude gets from Tua now goes through the engine** (`motor.js` «7) Claude-døra»): `tua_get`, `tua_compose`, `tua_card` and the `tua_search` hits are clipped by the Vault tag and the Claude endpoint's Trust Score (fail closed → S plus one line saying why), shielded with `skjerm()` (placeholders like [Person A]; the originals are never put back into what Claude receives), and every delivery is one Utlevert line with counts per type, words and tokens — the same shape as Spør. Search shields without logging (S is free).
+- **New tool `tua_share`** («del med Revisor»): creates a *sharing atom* through the engine — a shielded rendition of the shared atoms with a Delt-med line, link `tua://sak/<id>` and a copyable text. S by default (V11), M/L only on request, Vault → S. `forhåndsvis=true` computes the sentence («Revisor får S av 2 saker, 3 opplysninger skjermes») without saving or logging, for the one question Claude asks first. The recipient page is round 3b.
+- **Tua → Claude:** «Siden sist i Tua» (Spør threads, conclusions, shares, files read in — last 7 days, captured and drift atoms excluded) on the first `tua_card`/`tua_search` call in a conversation and as one line in the Code SessionStart hook; `tua_search` lists Spør threads and conclusions first, one line per thread; a project-instruction text for Claude Desktop (`docs/desktop-prosjekt-instruks.md`, offered by `tua_setup` and the card's «Kopier instruksen» when the project has a Desktop uuid).
+- Tests: `server/test-dora.mjs` (47 checks over MCP stdio against a scratch archive).
+
 ## 0.5.8 — 2026-10-24 (prompts are first-class atoms — V16)
 
 - **Every substantial prompt becomes its own atom** (`kind: prompt`, key `prompt:<session8>:<sha8>`): in the Code/Cowork import, in the Desktop-cache and export readers, and live in Claude Code through a new `UserPromptSubmit` hook (silent — it writes nothing to stdout). S is the first sentence (≤ 300 chars), the atom lives in the project folder with the tag `prompt`, and it is never shared by default. Threshold: ≥ 80 characters, not a slash command, not a bare confirmation («ja», «fortsett»).

@@ -273,6 +273,11 @@ function exportRenders(a) {
   }
   return n
 }
+
+// M23 (skive 4, V21 «arbeidsløp som status på sak»): status utkast | endelig. Standard uten nøkkel i fila: et svar fra en modell
+// er utkast til noen låser det («Lås som endelig» i sak-panelet); alt annet er endelig. Nøkkelen `status` skrives bare når den er satt.
+const STATUSER = ['utkast', 'endelig'];
+const statusOf = (a) => (STATUSER.includes(a?.status) ? a.status : a?.kind === 'svar' || a?.kind === 'konklusjon' ? 'utkast' : 'endelig');
 // Utleveringslogg (V15 regel 3): hver gang innhold går UT av arkivet til en modell — hva, hvilken versjon,
 // hvilket nivå, til hvem. Bare metadata, aldri innhold. .tua/utlevering.jsonl, én linje per utlevering.
 function logDelivery(entry) {
@@ -289,6 +294,29 @@ function deliveries(id, limit = 10) {
     return fs__default.readFileSync(DELIVERY(), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } })
       .filter((e) => e && (!id || e.id === id || (Array.isArray(e.saker) && e.saker.some((s) => s && s.id === id)))).slice(-limit)
   } catch { return [] }
+}
+// Runde 1: Spørs biprodukter som ÉN tråd. Ett spørsmål til to modeller gir fem saker (prompt, to svar, Forskjeller, konklusjon); i avisen, Oppslag,
+// søket og «Legg til fra arkivet» skal de stå som én. tråder(atoms) → { av: Map<id, promptId>, per: Map<promptId, {prompt, svar, forskjeller, konklusjon}> }.
+//   svar/konklusjon: derivedFrom peker på prompten (eller prompten har dem i ga) · Forskjeller: kind svar med taggen forskjeller, derivedFrom peker på svarene.
+// Prompten selv får tråd = egen id. Saker uten prompt får ingen tråd.
+function tråder(atoms) {
+  const av = new Map(), per = new Map();
+  const prompter = atoms.filter((a) => a.kind === 'prompt');
+  const erForskjeller = (a) => a.kind === 'svar' && (a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller');
+  for (const p of prompter) { per.set(p.id, { prompt: p.id, svar: [], forskjeller: [], konklusjon: null }); av.set(p.id, p.id); }
+  const promptAv = (a) => (a.derivedFrom || []).map((d) => d.id).find((id) => per.has(id)) || prompter.find((p) => (p.ga || []).some((g) => g.id === a.id))?.id || null;
+  for (const a of atoms) {
+    if (a.kind === 'prompt' || erForskjeller(a)) continue
+    if (a.kind !== 'svar' && a.kind !== 'konklusjon') continue
+    const pid = promptAv(a); if (!pid) continue
+    av.set(a.id, pid); const t = per.get(pid);
+    if (a.kind === 'konklusjon') t.konklusjon = a.id; else t.svar.push(a.id);
+  }
+  for (const a of atoms.filter(erForskjeller)) {
+    const pid = (a.derivedFrom || []).map((d) => av.get(d.id)).find(Boolean) || promptAv(a); if (!pid) continue
+    av.set(a.id, pid); per.get(pid).forskjeller.push(a.id);
+  }
+  return { av, per }
 }
 // Sett sammen en leveranse av atomer lest på ett nivå. Vault-atomer går alltid inn som S.
 function compose(atoms, { ids, level = 'M', name, intro, context }) {
@@ -755,4 +783,4 @@ function ensureArchive() {
   return { created: true, root: FILES_ROOT }
 }
 
-export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, hashOf, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, maxLevel, mergeGa, needsLevel, noteImport, onboardingActive, projectOf, readConfig, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sha8, sources, staleSources, upsert, vaultClamp, versions, visibleIn, welcomeAtom };
+export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, hashOf, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, maxLevel, mergeGa, needsLevel, noteImport, onboardingActive, projectOf, projects, readConfig, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sha8, sources, staleSources, statusOf, tråder, upsert, vaultClamp, versions, visibleIn, welcomeAtom };

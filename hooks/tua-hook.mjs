@@ -10,6 +10,7 @@
 //                          prompt:<økt8>:<sha8> — samme som importen, så importen etterpå gir «uendret». STUM: stdout blir kontekst for modellen.
 //          svar-modusen lagrer også prompten (siste brukermelding i transkriptet) FØR lengdesjekken, og kobler: svaret får prompten i
 //          bygget_av, prompten får svaret i ga. Samme svar-hash som importen (sha8), så hook og import aldri lager to atomer av ett svar.
+//   Runde 3a (arb. 32, 03-avisen §5): start-modus skriver også «Siden sist i Tua» for prosjektet (dora.js sidenSist) — Tua → Claude i Code.
 //   Runde 2c (arb. 32 §5 sp. 1, 24.10.2026): økt-, prompt- og svar-sakene får `fanget: true` — Fanget-bøtta, utenfor avisen og søket til brukeren løfter dem inn
 //          (Behold / Slå sammen / Kast). fil-modus får det IKKE: et dokument Claude skrev ligger på disk og er laget med vilje (Forsidens «Dokumenter», runde 1).
 //
@@ -38,6 +39,7 @@ if (!process.env.TUA_DATA_DIR && process.env.CLAUDE_PLUGIN_DATA) process.env.TUA
 const store = await import(mod('store.js'))
 const imp = await import(mod('import.js'))
 const desk = await import(mod('desktop.js'))
+const dora = await import(mod('dora.js'))                                     // runde 3a: «Siden sist i Tua» som én linje ved øktstart (Tua → Claude)
 const { posix, insideTmp } = await import(mod('platform.js'))
 const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState, mergeGa } = store
 const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts, sha8, promptKey, worthKeeping, promptTitle, promptL, firstSentence, samtaleS } = imp
@@ -111,7 +113,11 @@ try {
     if (!st.last) extra.push('ingen historikk er tatt med ennå — /tua_start tar med alt og slår på automatikken; nevn det én gang hvis det passer')
     const root = gitRootOf(cwd)
     if (root && !fs.existsSync(path.join(root, '.tua-sync.json')) && !insideArchive(root) && offerOnce(root)) extra.push(`repoet «${path.basename(root)}» speiles ikke til Tua ennå (ingen .tua-sync.json) — tilby /tua_auto én gang hvis det passer: node "${path.join(HERE, '..', 'server', 'sync-tua.js')}" --project "${path.basename(root)}" --install-hook`)
-    if (parts.length || extra.length) process.stdout.write(`Tua: ${[...parts, ...extra].join('. ')}. ${parts.length ? 'Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. ' : ''}Ikke kjør noe uten at brukeren sier ja.\n`)
+    // Runde 3a (03-avisen §5): det som er gjort i Tua-appen for prosjektet de siste 7 dagene (Spør-tråder, konklusjoner, delinger, filer lest inn) — én linje,
+    // så Claude og brukeren ser det uten å spørre. Fanget og drift holdes utenfor. Aldri innhold — titler og tall.
+    let siden = ''
+    try { const s = dora.sidenSist(load(), { prosjekt: project }); if (s.noe) siden = `Siden sist i Tua (7 dager, ${project}): ${s.linjer.map((l) => l.tekst).join(' · ')}${s.lagret ? ` · ${s.lagret} ${s.lagret === 1 ? 'sak' : 'saker'} lagret med vilje` : ''} — nevn det i én setning hvis det passer; tua_search(project="${project}") finner sakene` } catch {}
+    if (parts.length || extra.length || siden) process.stdout.write(`Tua: ${[...parts, ...extra, siden].filter(Boolean).join('. ')}. ${parts.length ? 'Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. ' : ''}Ikke kjør noe uten at brukeren sier ja.\n`)
     log({ pending, pendingCw, desktop: hc?.desktopNew, dokumenter: hc?.dokumenter, inbox: inbox.length, days, daysCw, first: !st.last, repoOffer: extra.length > (st.last ? 0 : 1) })
     if (konfigurert) log({ arkivmappe: konfigurert.root, before: konfigurert.before, note: 'innstillingen «arkivmappe» skrevet til ~/.tua/config.json' })
   } else if (mode === 'prompt') {

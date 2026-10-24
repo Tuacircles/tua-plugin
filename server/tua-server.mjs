@@ -3,9 +3,11 @@ globalThis.__TUA_BUNDLE = true;
 import { McpServer } from './bygd/vendor/@modelcontextprotocol/sdk/server/mcp.mjs';
 import { StdioServerTransport } from './bygd/vendor/@modelcontextprotocol/sdk/server/stdio.mjs';
 import { registerApps } from './bygd/tua/apps.mjs';
-import { ensureArchive, archiveOptions, FILES_ROOT, filesMode, rootLabel, chooseArchive, load, INBOX_DIR, KINDS, LINK_KINDS, upsert, save, WELCOME_KEY, finishOnboarding, SHORT_L, S_MAX, M_MAX, LONG_L, fmtTime, fileOf, search, visibleIn, readVersion, versions, vaultClamp, maxLevel, levelOf, logDelivery, hasExternalEdits, related, needsLevel, compose, setShare, FILE, onboardingActive, welcomeAtom, linksFor, isVault, sources, staleSources, renderStatus, deliveries, isStale, clampLevel } from './bygd/tua/store.mjs';
+import { ensureArchive, archiveOptions, FILES_ROOT, filesMode, rootLabel, chooseArchive, load, INBOX_DIR, KINDS, LINK_KINDS, upsert, save, WELCOME_KEY, finishOnboarding, SHORT_L, S_MAX, M_MAX, LONG_L, fmtTime, fileOf, search, visibleIn, readVersion, versions, vaultClamp, maxLevel, hasExternalEdits, related, needsLevel, compose, logDelivery, setShare, FILE, onboardingActive, welcomeAtom, linksFor, isVault, sources, staleSources, renderStatus, deliveries, isStale, clampLevel } from './bygd/tua/store.mjs';
 import { DEFAULT_MIN, processInbox, processInboxShares, inboxPending, importShare, importDesktop, importFinder, importAll, historyCounts, importCode, watchInbox, watchDesktop, historyLine } from './bygd/tua/import.mjs';
 import { watchFinder } from './bygd/tua/finder.mjs';
+import { skjermerFor, lever, endepunkt, maksNivå as maksNiv_, anslåTokens as ansl_Tokens, ord, del } from './bygd/tua/motor.mjs';
+import { instruksFor, trådFørst as tr_dF_rst, trådLinje as tr_dLinje, skalVise, sidenSist } from './bygd/tua/dora.mjs';
 import { lesInnInnboks } from './bygd/tua/innlesing.mjs';
 import { enumType, stringType, booleanType, numberType, arrayType, objectType } from './bygd/vendor/zod/v3/types.mjs';
 
@@ -19,8 +21,14 @@ import { enumType, stringType, booleanType, numberType, arrayType, objectType } 
 //   tua_unlink  — fjern referansen
 //   tua_compose — M10: bygg en leveranse av flere atomer (lest på S/M/L) → nytt atom med bygget_av
 //
+//   tua_share   — runde 3a: «del med <navn>» → delingssak gjennom motoren (S standard, V11), mottakersiden er runde 3b
+//
 // M10/V15: hver utlevering (tua_get, tua_compose) logges i .tua/utlevering.jsonl (bare metadata);
 // Vault-merkede atomer (tag «vault») utleveres aldri utover S; fil endret utenfor Tua = ny versjon.
+// Runde 3a (arbeidsstykke 32 §5.7, 03-avisen §5): Claude-døra går gjennom MOTOREN (motor.js «7) Claude-døra»): det Claude får fra tua_get, tua_compose,
+// tua_card og tua_search er klippet etter Vault og Claude-endepunktets Trust Score (fail closed → S og én linje om hvorfor), skjermet med skjerm()
+// (originalene settes aldri inn igjen) og logget med antall skjermet per type og tokens — som Spør. Ingen kodevei utenom. Tua → Claude: «Siden sist i Tua»
+// ved første kall, Spør-tråder øverst i tua_search, prosjekt-instruksen (dora.js).
 // NB: stdout er MCP-protokollen. All logging må gå til stderr.
 
 // M17: vaktene — Innboks (eksporter og delte lenker), Desktop-cachen (hvert 10. min), Finder-mappene. Ingenting før arkivet er valgt.
@@ -41,12 +49,14 @@ const INSTRUCTIONS =
   'Tua er brukerens ene arkiv for AI-arbeid, på tvers av alle prosjekter og klienter. Mappa på disk er sannheten; hvert atom er en markdown-fil. ' +
   'Regler: ' +
   '(1) ARKIV FØRST — før du svarer fra hukommelsen på noe som kan finnes fra før («hva har jeg om», «har vi noe om», «hva ble bestemt», tidligere arbeid, et navn eller tall du ikke er sikker på), kall tua_search. Treffene svarer med ingressen (S) — ofte nok. Hent M med tua_get(level=M) før L. ' +
-  '(2) Svar kort: S og adresse. L bare når svaret krever det; hver utlevering logges. ' +
+  '(2) Svar kort: S og adresse. L bare når svaret krever det. Alt du får fra Tua er SKJERMET og LOGGET (V21): plassholdere som [Person A], [E-post 1] eller [Adresse 1] er opplysninger du ikke har fått — bruk dem uendret i svaret, gjett aldri hva de står for. Vault-merkede saker får du bare som S; får du S med en linje om hvorfor, svar på S. ' +
   '(3) TILBY, IKKE SKRIV — når du har levert noe verdt å finne igjen, spør én gang «Vil du at jeg lagrer dette til Tua?». Kall tua_save bare når brukeren sier ja eller selv ber om lagring. Spør aldri hvilken mappe; prosjektet er mappa. ' +
   '(4) Ved lagring: content = hele innholdet, short = ingress (alltid, ≤ 300 tegn), medium når over ~3 000 tegn, project = brukerens prosjektnavn, convo = 3–8 ord om samtalen. ' +
   '(5) Står det en linje som begynner med «oppsett:» eller «onboarding:» i et verktøysvar, følg den etter at du har svart på det brukeren ba om — det er brukerens første økt med Tua. Arkivstedet velger brukeren selv (tua_setup); gjett aldri. ' +
   '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt. ' +
-  'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen.';
+  'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen. ' +
+  '(7) SIDEN SIST: første gang du bruker Tua i en samtale, kommer en blokk «Siden sist i Tua» (Spør-tråder, konklusjoner, delinger, filer lest inn i appen) — gjengi den i én kort liste før du svarer, så brukeren ser hva som er gjort i Tua. tua_search viser Spør-tråder og konklusjoner for prosjektet øverst. ' +
+  '(8) «DEL MED <navn>»: tua_share lager en delingssak (skjermet gjengivelse, logget) — S som standard, M/L bare når brukeren sier det. Kall først med forhåndsvis=true og still ETT spørsmål («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi den kopierbare teksten og lenka videre slik de er.';
 
 const server = new McpServer({ name: 'tua', version: '0.5.8' }, { instructions: INSTRUCTIONS });
 
@@ -130,7 +140,8 @@ server.registerTool(
       return text(
         `Arkiv: ${filesMode() ? `${FILES_ROOT} (${rootLabel()})` : 'ikke valgt ennå'}\nSteder på denne maskinen: ${optionLines()}\n` +
         (filesMode() ? 'Vil brukeren flytte arkivet: det er en Finder-jobb (flytt mappa) + tua_setup(sti=ny sti); Tua kopierer ikke filer selv.' : 'Spør brukeren hvor arkivet skal ligge, og kall tua_setup(sted=…).') +
-        '\nInnstillinger-siden (M15): http://127.0.0.1:5274/innstillinger — arkivsted, skytjenester, AI-nøkler i Keychain og Finder-mapper, med Trust Score (krever at kartet kjører: npm run kart i tua-plugin).',
+        '\nInnstillinger-siden (M15): http://127.0.0.1:5274/innstillinger — arkivsted, skytjenester, AI-nøkler i Keychain og Finder-mapper, med Trust Score (krever at kartet kjører: npm run kart i tua-plugin).' +
+        instruksLinje(),
       )
     }
     const before = filesMode() ? FILES_ROOT : null;
@@ -195,6 +206,13 @@ server.registerTool(
   },
 );
 
+// Runde 3a: prosjekt-instruksen for Desktop («spør Tua først») tilbys når et prosjekt har Desktop-uuid (claudeProject). Erik limer den inn én gang per prosjekt.
+const instruksLinje = (prosjekt = '') => {
+  const i = instruksFor(prosjekt);
+  return i ? `\n\nkopier instruksen: prosjektet «${i.prosjekt}» har et Desktop-prosjekt (${i.uuid}). Tilby brukeren å lime denne teksten inn i Desktop-prosjektets «Project instructions» (gjengi den ordrett, som kodeblokk):\n${i.tekst}\nFila ligger også i tua-plugin/docs/desktop-prosjekt-instruks.md.` : ''
+};
+// Runde 3a: «Siden sist i Tua» ved første kall i en samtale (per prosess og prosjekt, igjen etter 30 min stillhet) — Tua → Claude
+const sidenSistBlokk = (atoms, prosjekt = '') => (skalVise(prosjekt) ? `\n\n${sidenSist(atoms, { prosjekt }).tekst}` : '');
 // «(sammendrag fra v3, innhold er v5)» når nivået er utdatert
 const staleNote = (a, L) => (isStale(a, L) ? ` (${L === 'S' ? 'ingress' : 'sammendrag'} fra v${a.levels[L].of}, innhold er v${a.version || 1})` : '');
 // Én linje per nivå: finnes det, hvem skrev det, er det utdatert
@@ -320,23 +338,30 @@ server.registerTool(
   },
   async ({ query, project, context, limit, fanget }) => {
     const atoms = load();
-    const hits = search(atoms, query, { project, context, limit, fanget: fanget ? 'med' : 'uten' });
+    const rå = search(atoms, query, { project, context, limit, fanget: fanget ? 'med' : 'uten' });
+    const hits = tr_dF_rst(atoms, rå);                      // runde 3a: Spør-tråder og konklusjoner for prosjektet øverst (én linje per tråd); drift: true ut
     // runde 2c: fangede saker (hook/import, ikke løftet inn) holdes utenfor til brukeren ber om dem — avisen og søket viser det som er laget med vilje
     const fangetLinje = hits.fanget ? `\n\n${hits.fanget} fanget${hits.fanget === 1 ? ' sak' : 'e saker'} holdt utenfor — si «ta med fangede» for å søke i dem (tua_search med fanget=true).` : '';
+    const siden = sidenSistBlokk(atoms, project || context || '');
     if (!hits.length) {
-      return text(`Ingen treff på «${query}»${project ? ` i ${project}` : ''}${context ? ` (synlig for ${context})` : ''}. Arkivet har ${atoms.length} atomer.` + fangetLinje + onboardLine(atoms))
+      return text(`Ingen treff på «${query}»${project ? ` i ${project}` : ''}${context ? ` (synlig for ${context})` : ''}. Arkivet har ${atoms.length} atomer.` + fangetLinje + siden + onboardLine(atoms))
     }
+    // runde 3a: treffene går gjennom skjermingen (tittel, samtale, S, hvorfor, utdrag) — samme plassholdere i hele svaret; ingen Utlevert-linje for S (V15: S er fri)
+    const sk = skjermerFor(atoms);
     const projects = new Set(hits.map((h) => h.atom.project)).size;
     const refMark = (a, max) => (context && a.project.toLowerCase() !== context.toLowerCase() ? ` (referert inn${max !== 'L' ? `, nivå ${max}` : ''})` : '');
     const sLabel = (S) => (S.level === 'S' ? 'S' : S.level === 'L' ? 'S (kort atom — alt)' : S.level === 'hvorfor' ? 'S mangler · hvorfor' : 'S mangler · utdrag');
-    const lines = hits.map(({ atom: a, S, max, snippet: s }, i) =>
-      `${i + 1}. [${a.id}] ${a.name}\n   ${a.project}${refMark(a, max)} · ${a.convo || '—'} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
-      `\n   ${sLabel(S)}: ${S.text}${staleNote(a, 'S')}` +
-      (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${a.summary}` : '') +
-      (s ? `\n   Treff: ${s}` : '') +
+    const lines = hits.map(({ atom: a, S, max, snippet: s, tråd }, i) =>
+      `${i + 1}. [${a.id}] ${sk.skjerm(a.name)}\n   ${a.project}${refMark(a, max)} · ${sk.skjerm(a.convo || '—')} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
+      (tråd ? `\n   ${sk.skjerm(tr_dLinje(tråd))}${tråd.traff.length > 1 ? ` · traff også: ${tråd.traff.filter((id) => id !== a.id).map((id) => `[${id}]`).join(' ')}` : ''}` : '') +
+      `\n   ${sLabel(S)}: ${sk.skjerm(S.text)}${staleNote(a, 'S')}` +
+      (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${sk.skjerm(a.summary)}` : '') +
+      (s ? `\n   Treff: ${sk.skjerm(s)}` : '') +
       `\n   ↗ ${addr(a.id)}`,
     );
-    return text(`${hits.length} treff på «${query}» i ${projects} prosjekt${projects === 1 ? '' : 'er'}:\n\n${lines.join('\n\n')}` + fangetLinje + onboardLine(atoms))
+    sk.lær();
+    const skjermLinje = sk.treff ? `\n\nSkjermet: ${sk.treff} opplysning${sk.treff === 1 ? '' : 'er'} i treffene (plassholdere som [Person A]) — bruk dem uendret.` : '';
+    return text(`${hits.length} treff på «${query}» i ${projects} prosjekt${projects === 1 ? '' : 'er'}${hits.tråder ? ` — ${hits.tråder} ${hits.tråder === 1 ? 'tråd fra Spør' : 'tråder fra Spør'} øverst` : ''}:\n\n${lines.join('\n\n')}` + skjermLinje + fangetLinje + siden + onboardLine(atoms))
   },
 );
 
@@ -363,13 +388,13 @@ server.registerTool(
     if (context && !visibleIn(cur, context)) return text(`Atom ${id} er ikke synlig for ${context}.`)
     const a = version ? readVersion(id, version) : cur;
     if (!a) return text(`Fant ikke versjon «${version}» av ${id}. Finnes: ${versions(id).map((v) => v.name).join(', ') || 'ingen'}.`)
-    const max = vaultClamp(cur, maxLevel(cur, context));               // V15: Vault → aldri over S
-    const eff = clampLevel(level, max);
-    const got = levelOf(a, eff);
-    logDelivery({ tool: 'tua_get', id, version: a.version || 1, level: eff, client: CLIENT, ...(context ? { context } : {}) });
+    // runde 3a: gjennom motoren — klippe (Vault og Claude-endepunktets Trust Score → S med én linje om hvorfor, fail closed), skjerme (originalene settes
+    // aldri inn igjen), logge én Utlevert-linje med antall skjermet per type og tokens. Referansens nivå (context, V11) klippes først som før.
+    const lv = lever(atoms, cur, { nivå: level, tool: 'tua_get', klient: CLIENT, context, versjon: version ? a : null });
+    const eff = lv.nivå, got = lv.got;
+    const max = vaultClamp(cur, maxLevel(cur, context));               // V15: Vault → aldri over S (til «Hele innholdet»-hintet)
     const edited = hasExternalEdits(atoms);
     if (edited) save(atoms);                                            // V15 regel 1: fest den nye versjonen, bevar den redigerte teksten
-    const S = levelOf(a, 'S');
     const rel = related(atoms, cur);
     const relLine = (label, list) => (list.length ? `\n${label}: ${list.map((x) => `[${x.id}] ${x.name}`).join(' · ')}` : '');
     const vers = versions(id);
@@ -378,13 +403,15 @@ server.registerTool(
       got.level === eff ? `${eff} (av ${got.by || '?'}, fra v${got.of ?? '?'})${staleNote(a, eff)}` :
       got.level === 'L' ? `${eff} — innholdet er kort nok til at L er M` :
       `${eff} mangler — viser starten av L (${got.text.length} av ${(a.content || '').length} tegn)`;
+    const skjermet = Object.entries(lv.antall).filter(([, n]) => n > 0).map(([t, n]) => `${n} ${t}`).join(', ');
     return text(
-      `# ${a.name}${version ? ` (tidligere versjon ${version})` : ''}\n` +
-        `Prosjekt: ${a.project} · Samtale: ${a.convo || '—'} · Kilde: ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}` +
+      `# ${lv.felt.navn}${version ? ` (tidligere versjon ${version})` : ''}\n` +
+        `Prosjekt: ${a.project} · Samtale: ${lv.felt.samtale || '—'} · Kilde: ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}` +
         `\nNivå: ${nivå}` +
-        (eff !== level ? ` — ${context} ser dette bare på nivå ${max}` : '') +
-        (eff !== 'S' && S.level === 'S' ? `\nS: ${S.text}${staleNote(a, 'S')}` : '') +
-        (a.summary && a.summary !== S.text ? `\nHvorfor: ${a.summary}` : '') +
+        (lv.linje ? `\n${lv.linje}` : eff !== level ? ` — ${context} ser dette bare på nivå ${max}` : '') +
+        (eff !== 'S' && lv.felt.S ? `\nS: ${lv.felt.S}${staleNote(a, 'S')}` : '') +
+        (lv.felt.hvorfor ? `\nHvorfor: ${lv.felt.hvorfor}` : '') +
+        `\nUtlevert: ${eff} til ${lv.mottaker.label} · ${lv.treff ? `${lv.treff} skjermet (${skjermet})` : 'ingenting å skjerme'} · ca. ${lv.tokens.ca} tokens — logget` +
         (a.tags?.length ? `\nTagger: ${a.tags.join(', ')}` : '') +
         (cur.refs?.length ? `\nSynlig også i: ${shareLine(cur)}` : '') +
         (cur.fanget ? '\nFanget: automatisk (hook/import), ikke løftet inn — står utenfor avisen og søket til brukeren beholder, slår sammen eller kaster den i appen' : '') +
@@ -395,8 +422,8 @@ server.registerTool(
         relLine('Relaterte · samme samtale', rel.sameConvo) +
         relLine('Relaterte · synlig i samme prosjekt', rel.viaRefs) +
         relLine('Relaterte · felles tagger', rel.sameTags) +
-        (eff !== 'L' && max !== eff ? `\nHele innholdet: tua_get(id, level=L)` : '') +
-        `\n\n---\n\n${got.text}` + onboardLine(atoms),
+        (eff !== 'L' && max !== eff && !lv.linje ? `\nHele innholdet: tua_get(id, level=L)` : '') +
+        `\n\n---\n\n${lv.tekst}` + onboardLine(atoms),
     )
   },
 );
@@ -497,9 +524,19 @@ server.registerTool(
   },
   async ({ ids, name, level = 'M', intro, project, key, convo, tags, context }) => {
     const atoms = load();
-    const { content, derivedFrom, notes } = compose(atoms, { ids, level, name, intro, context });
+    // runde 3a: gjennom motoren — nivået klippes etter Claude-endepunktets Trust Score FØR kildene leses (fail closed; Vault → S gjør compose selv),
+    // det Claude får tilbake er skjermet (leveransen i arkivet har originalene — den er lokal), og én Utlevert-linje med alle kildene, antall skjermet og tokens.
+    const m = endepunkt('claude');
+    const tillatt = maksNiv_(m);
+    const eff = clampLevel(level, tillatt);
+    const { content, derivedFrom, notes } = compose(atoms, { ids, level: eff, name, intro, context });
+    if (eff !== level) notes.unshift(`${m.label} har Trust Score ${Number(m.trust?.score) || 1}/5 — kildene er lest på ${eff}, ikke ${level} (fail closed, V21)`);
     if (!derivedFrom.length) return text(`Ingen av atomene kunne brukes: ${notes.join('; ')}`)
-    for (const d of derivedFrom) logDelivery({ tool: 'tua_compose', id: d.id, version: d.version, level: d.level, client: CLIENT, ...(context ? { context } : {}) });
+    const sk = skjermerFor(atoms);
+    const skjermet = sk.skjerm(content);
+    sk.lær();
+    const tokens = { ca: ansl_Tokens(skjermet, m.id) };
+    logDelivery({ tool: 'tua_compose', client: CLIENT, mottaker: m.id, endpoint: m.endpoint, saker: derivedFrom.map(({ id, version, level: l }) => ({ id, version, level: l })), skjermet: { ...sk.antall }, ord: ord(skjermet), tokens, ...(context ? { context } : {}) });
     const proj = project || atoms.find((x) => x.id === derivedFrom[0].id)?.project;
     const names = derivedFrom.map((d) => atoms.find((x) => x.id === d.id)?.name).filter(Boolean);
     const { atom, status } = upsert(atoms, {
@@ -511,12 +548,55 @@ server.registerTool(
     save(atoms);
     console.error(`[tua] compose «${name}» ← ${derivedFrom.length} atomer (${level}) · ${status}`);
     return text(
-      `Leveranse «${name}» ${status === 'ny' ? 'lagret' : status} som atom ${atom.id}${atom.version > 1 ? ` (v${atom.version})` : ''} i ${atom.project} — bygget av ${derivedFrom.length} atomer på nivå ${level}.` +
+      `Leveranse «${name}» ${status === 'ny' ? 'lagret' : status} som atom ${atom.id}${atom.version > 1 ? ` (v${atom.version})` : ''} i ${atom.project} — bygget av ${derivedFrom.length} atomer på nivå ${eff}.` +
         (notes.length ? `\nMerk: ${notes.join('; ')}` : '') +
         `\nAdresse: ${addr(atom.id)}` +
         outputLines(atoms, atom) +
+        `\nUtlevert: ${derivedFrom.length} kilder på ${eff} til ${m.label} · ${sk.treff ? `${sk.treff} skjermet` : 'ingenting å skjerme'} · ca. ${tokens.ca} tokens — logget. Leveransen i Tua har originalene; teksten under er skjermet (plassholdere som [Person A] blir stående om du lagrer den på nytt).` +
         `\nNeste: skriv om i husstilen om nødvendig og lagre med tua_save(key=«${atom.key || '…'}», content=…); rendre html/pdf og fest dem med renders=[{path}].` +
-        `\n\n---\n\n${content}`,
+        `\n\n---\n\n${skjermet}`,
+    )
+  },
+);
+
+// ── Runde 3a: «del med …» — delingssak gjennom motoren (mottakersiden er runde 3b) ──────────────────
+server.registerTool(
+  'tua_share',
+  {
+    title: 'Del med en person',
+    annotations: WRITE,
+    description:
+      'Del én eller flere saker med en person («del med Revisor», «del denne på S med anna@firma.no»). Lager en DELINGSSAK gjennom motoren: ' +
+      'en skjermet gjengivelse av det som deles (plassholdere i stedet for personopplysninger), med Utlevert-linje, lenke tua://sak/<id> og en kopierbar tekst ' +
+      'du gir brukeren. S er standard (V11) — M eller L bare når brukeren sier det; Vault-merkede saker deles bare som S. ' +
+      'Kall FØRST med forhåndsvis=true, still ett spørsmål («Revisor får S av 2 saker, 3 opplysninger skjermes — ok?»), og kall uten forhåndsvis når brukeren sier ja. ' +
+      'Mottakersiden (en lenke mottakeren kan åpne) kommer senere; i dag er delingssaken det som finnes, og brukeren sender den kopierbare teksten selv.',
+    inputSchema: {
+      ids: arrayType(stringType()).min(1).describe('Sak-id-ene som skal deles (fra tua_search/tua_list).'),
+      til: stringType().min(1).describe('Mottakeren som tekst: navn eller e-post («Revisor», «anna@firma.no»).'),
+      level: LevelArg.optional().describe('Nivået som deles: S (standard), M eller L — M/L bare når brukeren sier det.'),
+      project: stringType().optional().describe('Prosjektet delingssaken lagres i. Standard: den første sakens prosjekt.'),
+      convo: stringType().optional().describe('Samtalen dette skjer i (3–8 ord).'),
+      forhåndsvis: booleanType().optional().describe('true = regn ut hva som deles og hva som skjermes, uten å lagre eller logge — til spørsmålet før deling.'),
+    },
+  },
+  async ({ ids, til, level = 'S', project, convo, forhåndsvis }) => {
+    const atoms = load();
+    let r;
+    try { r = del(atoms, { ids, til, nivå: level, prosjekt: project, klient: CLIENT, convo, forhåndsvis: !!forhåndsvis }); }
+    catch (e) { return text(`Delingen er ikke laget: ${e.message}`) }
+    const linjer = r.linjer.length ? `\n${r.linjer.join('\n')}` : '';
+    const notater = r.notater.length ? `\nMerk: ${r.notater.join('; ')}` : '';
+    if (r.forhåndsvis) {
+      return text(`Forhåndsvisning — ingenting er lagret eller logget. ${r.setning}${linjer}${notater}\nSaker: ${r.kilder.map((k) => `[${k.id}] ${k.name} (${k.level}, ${k.ord} ord)`).join(' · ')}\n` +
+        `Spør brukeren én gang: «${r.setning.replace(/\.$/, '')} — ok?» Sier hen ja: kall tua_share igjen uten forhåndsvis (samme ids, til og level).`)
+    }
+    console.error(`[tua] share → ${r.til} · ${r.nivå} · ${r.kilder.length} saker · ${r.treff} skjermet · ${r.id} (${r.status})`);
+    return text(
+      `Delingssak ${r.status === 'ny' ? 'lagret' : r.status} som atom ${r.id}${r.version > 1 ? ` (v${r.version})` : ''} i ${r.prosjekt}. ${r.setning}${linjer}${notater}` +
+        `\nUtlevert: logget (${r.til} · ${r.nivå} · ${r.kilder.length} ${r.kilder.length === 1 ? 'sak' : 'saker'} · ${r.ord} ord · ca. ${r.tokens.ca} tokens).` +
+        `\nLenke: ${r.lenke} — mottakersiden (lenka mottakeren kan åpne) kommer i runde 3b; i dag åpner den delingssaken i Tua-appen: ${addr(r.id)}` +
+        `\n\nKopierbar tekst til ${r.til} — gi den til brukeren slik den er (den er skjermet; originalene er ikke med):\n\n---\n\n${r.kopierbar}`,
     )
   },
 );

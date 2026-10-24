@@ -6,7 +6,7 @@ description: Lagre AI-output som atomer i Tua-arkivet med automatisk proveniens 
 # Tua — lagre og gjenfinne via MCP
 
 Tua er brukerens ene arkiv for AI-arbeid, på tvers av alle prosjekter. Verktøyene
-`tua_save`, `tua_search`, `tua_get`, `tua_list`, `tua_link`, `tua_unlink`, `tua_compose`, `tua_card`, `tua_setup`, `tua_import` kommer fra MCP-serveren `tua`.
+`tua_save`, `tua_search`, `tua_get`, `tua_list`, `tua_link`, `tua_unlink`, `tua_compose`, `tua_share`, `tua_card`, `tua_setup`, `tua_import` kommer fra MCP-serveren `tua`.
 Prinsipp: **innhold er atomet, proveniens festes automatisk, det finnes ingen mappe.**
 **Arkiv først:** før du svarer fra hukommelsen på noe som kan finnes fra før, kall `tua_search`. **Tilby, ikke skriv:** spør én gang før du lagrer.
 
@@ -108,8 +108,9 @@ og fest dem med `tua_save` med samme `key` og `project` hvis atomet har key — 
    på nytt med samme key.
 
 Tre regler (V15): **Vault** — et atom tagget `vault` går aldri ut over S, uansett hva som bes om; si det i stedet for
-å omgå det. **Utlevering logges** — hver `tua_get`/`tua_compose` skrives til `.tua/utlevering.jsonl` (bare metadata);
-hent derfor ikke L «for sikkerhets skyld». **Redigert utenfor Tua** — står det «redigert utenfor Tua → v5», er fila
+å omgå det. **Utlevering logges** — hver `tua_get`/`tua_compose`/`tua_card` skrives til `.tua/utlevering.jsonl` (bare metadata:
+nivå, antall skjermet, tokens); hent derfor ikke L «for sikkerhets skyld». Teksten du får fra `tua_compose` er skjermet — leveransen
+i Tua har originalene; lagrer du teksten på nytt med `tua_save`, blir plassholderne stående. **Redigert utenfor Tua** — står det «redigert utenfor Tua → v5», er fila
 endret i Finder/annen editor; det er en ny versjon, aldri en fletting, og S/M er da utdaterte.
 
 ## Når brukeren vil gjøre noe synlig i et annet prosjekt («gjør dette synlig i X», «prosjekt X trenger dette»)
@@ -120,6 +121,33 @@ i prosjektet det oppsto i. Si det eksplisitt: «synlig i X nå — som referanse
   sammendraget», send `level=S` eller `level=M`. Kall `tua_link` igjen med nytt `level` for å løfte eller senke.
 - Når mottakeren er en *annen person*, foreslå S som utgangspunkt og la brukeren løfte bevisst.
 - `tua_unlink` fjerner synligheten igjen.
+
+## Når brukeren vil dele med en person («del med Revisor», «del denne på S med anna@firma.no») — runde 3a
+
+Kall `tua_share` med `ids` (sakene), `til` (navn eller e-post som tekst) og `level`: **S er standard** (V11) — M eller L bare når
+brukeren sier det eksplisitt («del hele», «på M»). Vault-merkede saker deles bare som S uansett; si det.
+1. Kall først med `forhåndsvis=true`. Svaret gir setningen: «Revisor får S av 2 saker, 3 opplysninger skjermes».
+2. Still **ett** spørsmål: «Revisor får S av 2 saker, 3 opplysninger skjermes — ok?» Ikke del uten ja.
+3. Sier brukeren ja: kall `tua_share` igjen uten `forhåndsvis`. Det lager en **delingssak** gjennom motoren (lese → skjerme → minimere → logge):
+   en skjermet gjengivelse av det som deles, med Utlevert-linje og lenke `tua://sak/<id>`. Utlevert er logget.
+4. Gi brukeren den **kopierbare teksten** slik den kommer (den er skjermet — plassholdere som [Person A] er med vilje) og lenka.
+   Mottakersiden (en lenke mottakeren kan åpne) kommer i runde 3b; i dag sender brukeren teksten selv.
+«Del med prosjekt X» er noe annet: det er `tua_link` (synlighet mellom brukerens egne prosjekter).
+
+## Det du får fra Tua er skjermet og logget (runde 3a, V21)
+
+Alt `tua_get`, `tua_compose`, `tua_card` og `tua_search` gir deg går gjennom Tuas motor: nivået klippes etter Vault-taggen og
+Claude-endepunktets Trust Score (fail closed — du får S og én linje om hvorfor, ikke en feil), teksten skjermes (plassholdere som
+[Person A], [E-post 1], [Adresse 1] — originalene settes aldri inn igjen), og hver utlevering logges med antall skjermet og tokens.
+Bruk plassholderne uendret, gjett aldri hva de står for, og si fra at innholdet er skjermet når brukeren spør etter et navn eller tall
+som er borte: hen finner originalene i Tua-appen (adressen står i svaret). Får du S med en linje om hvorfor, svar på S.
+
+## Siden sist i Tua (runde 3a)
+
+Første gang du bruker Tua i en samtale, slutter `tua_search`/`tua_card`-svaret med en blokk «Siden sist i Tua» — Spør-tråder, konklusjoner,
+delinger og filer lest inn i appen de siste 7 dagene for prosjektet. Gjengi den i én kort liste før du svarer. `tua_search` viser Spør-tråder og
+konklusjoner for prosjektet øverst (én linje per tråd) — det er arbeid gjort i appen. Står det «kopier instruksen» i et `tua_setup`-svar, tilby
+teksten (prosjekt-instruksen for Desktop) ordrett som kodeblokk.
 
 Om `context` i søk og henting: **standard er å søke i alt** — brukeren eier hele arkivet.
 Bruk `context=X` bare når brukeren eksplisitt spør «hva ser prosjekt X?» / «hva har prosjekt X tilgang til?».
