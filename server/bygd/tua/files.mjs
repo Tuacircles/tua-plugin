@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import 'node:path';
 
 // files.js — atom ↔ markdown-fil, begge veier.
@@ -24,6 +24,11 @@ import 'node:path';
 // (gammel plugin-cache, hook fra forrige versjon) kan ikke lenger stryke et felt den ikke har hørt om (hendelsen 24.10: 1 035 filer uten drift/fanget).
 // `S_dato`/`M_dato` (ISO) sier når nivået ble skrevet — Ny gjennomgang (AI3) merker med modell og dato.
 //
+// Friksjon 20 (25.10.2026, «arbeidet som samler», V21 «arbeidsløp som status på sak»): ingen ny saktype. En sak er et ARBEID når andre saker peker på den —
+// `hører_til: <sak-id>` på samtale-saker, Spør-tråder (prompt-saker) og saker laget i løpet; `hører_til_forslag: <sak-id>` når Tua foreslår en kobling
+// (hooken ved øktstart) som brukeren ikke har svart på; `arbeid: true` når brukeren sa «Gjør til arbeid» før noe henger på saken. `gren` (git-grenen
+// Code-samtalen gikk på) og `vert` (Code-øktas verts-id i Desktop-appen, local_…) er sporene hooken bruker til å koble en samtale til forelderens arbeid.
+//
 // Quick Look viser toppen (= S). Parse og serialize er inverse av hverandre.
 
 
@@ -32,7 +37,7 @@ const H_WHY = '## Hvorfor';
 const H_M = '## Sammendrag (M)';
 const H_L = '## Innhold (L)';
 // nøklene parse() forstår; alt annet i frontmatter er `ekstra` (runde 3c)
-const KJENTE_NØKLER = new Set(['tua_id', 'prosjekt', 'samtale', 'kilde', 'dato', 'versjon', 'key', 'kind', 'status', 'fanget', 'drift', 'beholdt', 'tagger', 'synlig_i', 'lenker', 'bygget_av', 'ga', 'gjengivelser', 'nivaa', 'S_av', 'S_versjon', 'S_dato', 'M_av', 'M_versjon', 'M_dato', 'tittel']);
+const KJENTE_NØKLER = new Set(['tua_id', 'prosjekt', 'samtale', 'kilde', 'dato', 'versjon', 'key', 'kind', 'status', 'fanget', 'drift', 'beholdt', 'tagger', 'synlig_i', 'lenker', 'bygget_av', 'ga', 'gjengivelser', 'nivaa', 'S_av', 'S_versjon', 'S_dato', 'M_av', 'M_versjon', 'M_dato', 'tittel', 'hører_til', 'hører_til_forslag', 'arbeid', 'gren', 'vert', 'start']);
 
 const isoLocal = (ms) => {
   const d = new Date(ms);
@@ -68,6 +73,12 @@ function serialize(atom) {
     ...(atom.fanget === true || atom.fanget === false ? { fanget: atom.fanget } : {}),   // runde 2c (arb. 32 §5 sp. 1, 24.10.2026): true = fanget automatisk (hook/import), ikke løftet inn — utenfor avisen og søket; false = løftet inn med vilje (Behold) — regelen rører den aldri igjen
     ...(atom.drift === true || atom.drift === false ? { drift: atom.drift } : {}),      // runde 2d (03-avisen §2, A): true = Tua om seg selv (sync, importrapport, helsesjekk, byggeøkt) — aldri i avisen, i søket bare på forespørsel; false = brukeren sa «dette er arbeid» (Behold) — regelen rører den aldri igjen
     ...(atom.beholdt === true ? { beholdt: true } : {}),                                  // runde 2d (03-avisen §4, D): brukeren trykket Behold på et svar (eller løftet saken inn) — et beholdt svar er arbeid, ikke tråd
+    ...(atom.hørerTil ? { hører_til: atom.hørerTil } : {}),                                 // friksjon 20: saken henger på arbeidet <sak-id> (samtale, tråd, sak laget i løpet)
+    ...(atom.hørerTilForslag ? { hører_til_forslag: atom.hørerTilForslag } : {}),           // friksjon 20: Tua foreslår et arbeid — til brukeren sier Ja/Annet/Nei
+    ...(atom.arbeid === true ? { arbeid: true } : {}),                                      // friksjon 20: «Gjør til arbeid» — saken er et arbeid også før noe henger på den
+    ...(atom.gren ? { gren: atom.gren } : {}),                                              // friksjon 20: git-grenen Code-samtalen gikk på (kobling via felles stamme)
+    ...(atom.vert ? { vert: atom.vert } : {}),                                              // friksjon 20: Code-øktas verts-id (CLAUDE_CODE_HOST_SESSION_ID) — barn finner forelderen
+    ...(atom.kind === 'samtale' && atom.createdAt && atom.capturedAt && Math.abs(atom.createdAt - atom.capturedAt) > 60e3 ? { start: isoLocal(atom.createdAt) } : {}),   // friksjon 20: når samtalen begynte (dato = sist skrevet) — løpet ordner samtalene etter start
     tagger: atom.tags || [],
     synlig_i: atom.refs || [],
     ...(atom.links?.length ? { lenker: atom.links } : {}),
@@ -154,6 +165,12 @@ function parse(text, { fallbackId } = {}) {
   if (fm.drift === true || fm.drift === 'true') atom.drift = true;                     // runde 2d: drift — Tua om seg selv
   else if (fm.drift === false || fm.drift === 'false') atom.drift = false;
   if (fm.beholdt === true || fm.beholdt === 'true') atom.beholdt = true;               // runde 2d: beholdt av brukeren
+  if (typeof fm.hører_til === 'string' && fm.hører_til) atom.hørerTil = fm.hører_til;                    // friksjon 20
+  if (typeof fm.hører_til_forslag === 'string' && fm.hører_til_forslag) atom.hørerTilForslag = fm.hører_til_forslag;
+  if (fm.arbeid === true || fm.arbeid === 'true') atom.arbeid = true;
+  if (typeof fm.gren === 'string' && fm.gren) atom.gren = fm.gren;
+  if (typeof fm.vert === 'string' && fm.vert) atom.vert = fm.vert;
+  if (typeof fm.start === 'string' && fm.start && Date.parse(fm.start)) atom.createdAt = Date.parse(fm.start);
   if (fm.nivaa && typeof fm.nivaa === 'object') atom.share = fm.nivaa;
   if (Array.isArray(fm.lenker) && fm.lenker.length) atom.links = fm.lenker.filter((l) => l && l.href);
   if (Array.isArray(fm.bygget_av) && fm.bygget_av.length) atom.derivedFrom = fm.bygget_av.filter((d) => d && d.id);

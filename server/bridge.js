@@ -148,7 +148,8 @@ import { ulestAv, ulestFra, logSettAlt, settAltSist, fjernetAv } from './store.j
 import { projectAliases } from './store.js'
 import { lesMottakere, oppdaterPerson, nyPerson, navngiSirkel, avvisSirkel, eier, settEier, delingerFor, lenkerFor, trukketSide, MERKER } from './deling.js'   // runde 3b: personer, sirkler som emerger, delingene (mottakersiden tegnes i motoren)   // runde 2d (app), friksjon 14: filer i prosjektmappa som ikke er saker, og aliasene til prosjekt-treffet i søket
 import { flytt as ryddFlytt, giNyttNavn, tømPapirkurv, ryddeforslag, sisteSave } from './store.js'   // runde 3c: rydding på saken, papirkurv, Tua foreslår — én skriver i lageret
-import { gjennomgang, planFor, NIVÅER_GJENNOMGANG } from './gjennomgang.js'   // runde 3c: Ny gjennomgang (AI3) — S/M på nytt med valgt modell, aldri menneskeskrevet
+import { gjennomgang, planFor, NIVÅER_GJENNOMGANG, samtalerGjennomgang } from './gjennomgang.js'   // runde 3c: Ny gjennomgang (AI3) — S/M på nytt med valgt modell, aldri menneskeskrevet · friksjon 20: samtale-sakene på nytt
+import { følgereAv, erArbeid, delAv, løpFor, arbeider, åpneArbeider, settHørerTil, løsne, avvisForslag, harForslag, gjørTilArbeid, vurderPakke, vurderingsprompt, settVurderingsprompt, VURDERING_STANDARD } from './arbeid.js'   // friksjon 20: arbeidet som samler
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
 const sakSvar = (a) => ({ ...a, links: linksFor(a), file: fileOf(a), status: statusOf(a), klasse: klasseAv(a) })   // runde 3c: én form på saken tilbake fra rydde-rutene
@@ -169,6 +170,7 @@ async function settingsView() {
     arkiv: { ...info, atomer: info.exists ? countMd(info.root) : 0, config: CONFIG_FILE },
     steder, sky, ai,
     finder: { folders: finderFolders(), standard: FINDER_DEFAULTS(), home: os.homedir() },
+    spor: { vurderingsprompt: vurderingsprompt(), standard: VURDERING_STANDARD, erStandard: vurderingsprompt() === VURDERING_STANDARD },   // friksjon 20: «Vurder dette arbeidet» — prompten kan endres i Innstillinger › Spør
     trust: { merk: ts._merk || '', om: ts._om || '' },
     platform: process.platform,
   }
@@ -509,9 +511,12 @@ http
         // Runde 2d (03-avisen §2–§4): klasse (arbeid · spor · drift · tråd), vekt og sist_rørt per sak; `tråden` samlet på prompt-saken ({svar, forskjeller, konklusjon, åpen, …}).
         // `tråd` er fortsatt prompt-id (streng) på alle sakene i en tråd — appen (regler.slåSammenTråder) leser den slik; det samlede objektet har eget navn så ingenting brekker.
         const { av: trådAv, per: trådPer } = trådSamlet(all), sendinger = deliveryCounts(), utlev = deliveryInfo(), bruk = brukInfo(), now = Date.now(), fraUlest = ulestFra(now)
+        const følgere = følgereAv(all), arbeidTall = new Map(arbeider(all).map((r) => [r.id, r]))   // friksjon 20: hvem som er arbeid, og tallene («3 samtaler, 2 tråder»)
         const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0, mtime: mtimeAv(fileOf(a)),   // mtime (runde 2a): visningen Mapper sorterer som Finder — nyeste fil øverst
           klasse: klasseAv(a), vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), tråd: a.kind === 'konklusjon' || a.kind === 'svar' ? trådPer.get(trådAv.get(a.id)) || null : null, now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }), tråden: a.kind === 'prompt' ? trådPer.get(a.id) || null : null,
-          ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }) }))   // friksjon 16: nyere enn siste «sett alt» (ellers sju dager) og ikke åpnet/sett/lest siden den ble skrevet
+          ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }),   // friksjon 16: nyere enn siste «sett alt» (ellers sju dager) og ikke åpnet/sett/lest siden den ble skrevet
+          // friksjon 20: hører_til (arbeidet saken henger på), del_av («Del av: <arbeid> · samtale 7 av 12»), arbeid (saken er et arbeid) med tall, hører_til_forslag bare når det venter på svar
+          hører_til: a.hørerTil || null, del_av: delAv(all, a, følgere), arbeid: erArbeid(a, følgere), ...(arbeidTall.has(a.id) ? { arbeid_tall: (({ samtaler, tråder, filer, saker, sist, åpen }) => ({ samtaler, tråder, filer, saker, sist, åpen }))(arbeidTall.get(a.id)) } : {}), ...(harForslag(a) ? { hører_til_forslag: a.hørerTilForslag } : {}) }))
         return json(res, 200, { atoms, total: all.length, offset, file: ARKIV(), klasser: tellKlasser(all), uleste: atoms.filter((a) => a.ulest && a.klasse === 'arbeid').length, sett_alt: settAltSist() || null })
       }
       if (req.method === 'GET' && url.pathname === '/api/search') {
@@ -619,8 +624,10 @@ http
         const a = load().find((x) => x.id === id)
         if (!a) return json(res, 404, { error: `fant ikke sak ${id}` })
         const niv = Object.fromEntries(LEVELS.map((l) => { const g = levelOf(a, l); return [l, { tekst: g.text, fallback: g.fallback ? g.level : null, av: a.levels?.[l]?.by || null }] }))
+        const alleSak = load(), følgereSak = følgereAv(alleSak)   // friksjon 20: hører_til, del_av og arbeid også her
         return json(res, 200, { id: a.id, name: a.name, project: a.project, convo: a.convo || '', kind: a.kind || 'capture', tags: a.tags || [], capturedAt: a.capturedAt, version: a.version || 1, status: statusOf(a), vault: isVault(a), max: 'L',
-          ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), nivåer: niv, file: fileOf(a) })
+          ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), nivåer: niv, file: fileOf(a),
+          hører_til: a.hørerTil || null, del_av: delAv(alleSak, a, følgereSak), arbeid: erArbeid(a, følgereSak), ...(harForslag(a) ? { hører_til_forslag: a.hørerTilForslag } : {}) })
       }
       if (req.method === 'GET' && url.pathname === '/api/innboks') {
         const dok = innboksDokumenter().map(({ sti, ...r }) => r)
@@ -725,7 +732,7 @@ http
         req.on('close', () => ctl.abort())
         if (kjøring) kjøringer.set(kjøring, ctl)
         try {
-          const r = await spor({ melding: String(b.melding), saker, mottakere: mottakerIds, prosjekt, samtale: b.samtale || undefined, prompt: b.prompt || undefined, klient: 'app', signal: ctl.signal, på: hendelse })
+          const r = await spor({ melding: String(b.melding), saker, mottakere: mottakerIds, prosjekt, samtale: b.samtale || undefined, prompt: b.prompt || undefined, hørerTil: b.hørerTil || b.hører_til || null, klient: 'app', signal: ctl.signal, på: hendelse })   // friksjon 20: hørerTil = arbeidet spørsmålet stilles inne i
           if (Array.isArray(r.svar)) console.error(`[tua-bro] spor → ${mottakerIds.join('+')} · ${prosjekt} · ${saker.length} saker · ${r.svar.length} svar${r.feilet?.length ? ` · ${r.feilet.length} feilet` : ''}${ctl.signal.aborted ? ' · STOPPET' : ''} · forskjeller ${r.forskjeller ? (r.forskjeller.tilgjengelig ? `${r.forskjeller.enig.length}/${r.forskjeller.uenig.length}/${r.forskjeller.unikt.length} (${r.forskjeller.vurdert_av})` : 'ikke tilgjengelig') : '—'} · konklusjon ${r.konklusjon?.id || '—'}`)
           else console.error(`[tua-bro] spor → ${mottakerIds[0]} · ${prosjekt} · ${saker.length} saker · svar ${r.svar}${r.avbrutt ? ' (avbrutt)' : ''} · tokens ca. ${r.tokens.ca}${r.tokens.inn != null ? ` (eksakt ${r.tokens.inn}+${r.tokens.ut})` : ''}`)
         } catch (e) {
@@ -876,7 +883,10 @@ http
         if (b.finder && Array.isArray(b.finder.folders)) {
           try { const list = setFinderFolders(b.finder.folders); console.error(`[tua-bro] Finder-mapper: ${list.join(' · ')}`); return json(res, 200, { ok: true, folders: list, restart: true }) } catch (e) { return json(res, 400, { error: e.message }) }
         }
-        return json(res, 400, { error: 'send {arkiv: {sted|sti}} eller {finder: {folders: [...]}}' })
+        if (b.spor && typeof b.spor.vurderingsprompt === 'string') {   // friksjon 20: vurderingsprompten («Vurder dette arbeidet») — tom = tilbake til standard
+          try { const p = settVurderingsprompt(b.spor.vurderingsprompt); console.error(`[tua-bro] vurderingsprompt ${p === VURDERING_STANDARD ? 'tilbake til standard' : 'endret'}`); return json(res, 200, { ok: true, spor: { vurderingsprompt: p, standard: VURDERING_STANDARD, erStandard: p === VURDERING_STANDARD } }) } catch (e) { return json(res, 400, { error: e.message }) }
+        }
+        return json(res, 400, { error: 'send {arkiv: {sted|sti}}, {finder: {folders: [...]}} eller {spor: {vurderingsprompt}}' })
       }
       if (url.pathname === '/api/keychain' && (req.method === 'POST' || req.method === 'DELETE')) {
         const { provider, key } = await readBody(req)
@@ -1083,7 +1093,14 @@ http
         const igjen = new Set(økterUt.map((ø) => ø.økt))
         const dagerUt = økter.dager.map((d) => { const ø = økterUt.filter((x) => d.økter.includes(x.økt)); return { ...d, økter: d.økter.filter((id) => igjen.has(id)), antall: ø.length, filer: ø.reduce((n, x) => n + (x.filer || 0), 0), beholdt: ø.reduce((n, x) => n + (x.beholdt || 0), 0), uleste: ø.filter((x) => x.ulest).length } }).filter((d) => d.økter.length > 0)
         const uleste = spørsmål.filter((s) => s.ulest).length + svarKom.filter((s) => s.ulest).length + konklusjoner.filter((s) => s.ulest).length + økterUt.filter((ø) => ø.ulest).length
-        return json(res, 200, { dager, spørsmål, svarKom, konklusjoner, innboks: { antall: dok.length, dokumenter: dok.map((d) => d.navn) }, økter: økterUt, økterPerDag: dagerUt, antallØkter: økterUt.length, uleste, sett_alt: settAltSist() || null })
+        // friksjon 20: «Arbeid i gang: Anken til Energima — 3 samtaler, 2 tråder, sist i dag» (åpne arbeider rørt i perioden; × husker fjernet) og Tuas forslag «Ny samtale i X — hører den til «Y»? Ja / Annet / Nei»
+        const iDag = (t) => new Date(t).toDateString() === new Date(now).toDateString(), iGår = (t) => new Date(t).toDateString() === new Date(now - 86400e3).toDateString()
+        const når = (t) => (iDag(t) ? 'i dag' : iGår(t) ? 'i går' : new Date(t).toLocaleDateString('no-NO', { day: 'numeric', month: 'short' }))
+        const arbeidUt = åpneArbeider(alle, { nå: now, dager }).filter((r) => !fjernetAv(bruk.get(r.id), r.sist) && byId.get(r.id)?.drift !== true).map((r) => ({ ...r, ulest: ulestAv(byId.get(r.id), { bruk: bruk.get(r.id), fra: fraUlest, tid: r.sist }),
+          tekst: `Arbeid i gang: ${r.name} — ${r.samtaler + r.tråder + r.filer ? [r.samtaler ? `${r.samtaler} ${r.samtaler === 1 ? 'samtale' : 'samtaler'}` : '', r.tråder ? `${r.tråder} ${r.tråder === 1 ? 'tråd' : 'tråder'}` : '', r.filer ? `${r.filer} ${r.filer === 1 ? 'fil' : 'filer'}` : ''].filter(Boolean).join(', ') : 'ingenting henger på det ennå'}, sist ${når(r.sist)}` }))
+        const arbeidForslag = alle.filter((a) => harForslag(a) && a.drift !== true && (a.capturedAt || 0) >= fra && byId.has(a.hørerTilForslag) && !fjernetAv(bruk.get(a.id), a.capturedAt)).sort((x, y) => y.capturedAt - x.capturedAt)
+          .map((a) => { const w = byId.get(a.hørerTilForslag); return { id: a.id, name: a.name, project: a.project, source: a.source, capturedAt: a.capturedAt, arbeid: { id: w.id, name: w.name }, ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }), tekst: `Ny samtale i ${a.project}: «${a.name}» — hører den til «${w.name}»?` } })
+        return json(res, 200, { dager, spørsmål, svarKom, konklusjoner, innboks: { antall: dok.length, dokumenter: dok.map((d) => d.navn) }, økter: økterUt, økterPerDag: dagerUt, antallØkter: økterUt.length, arbeider: arbeidUt, arbeidForslag, uleste: uleste + arbeidForslag.filter((f) => f.ulest).length, sett_alt: settAltSist() || null })
       }
       // ── Runde 3c (M25, 03-avisen §2, plan videre §4 3c, 24.10.2026): rydding PÅ SAKEN, papirkurv, Tua foreslår, Ny gjennomgang. Egen blokk; alt gjennom lageret (store.js) og
       //    gjennomgang.js. Lageret har nå ÉN skriver: save() skriver bare det denne prosessen endret, og fletter treveis mot en fil en annen prosess har skrevet siden (aldri tekst).
@@ -1282,6 +1299,69 @@ http
         if (!b.token) return json(res, 400, { error: 'token kreves' })
         try { const d = trekkDeling(String(b.token), { klient: 'app' }); console.error(`[tua-bro] deling trukket tilbake: ${d.til?.map((t) => t.navn).join(', ')}`); return json(res, 200, { ok: true, trukket: d.trukket, token: d.token }) }
         catch (e) { return json(res, 404, { error: e.message }) }
+      }
+      // ── Friksjon 20 (25.10.2026): arbeidet som samler — egen blokk. Alt gjennom arbeid.js og lageret; sendingen («Vurder dette arbeidet») går gjennom motoren (POST /api/spor med hørerTil).
+      //   GET  /api/arbeid?id=<sak>            → løpet: { id, name, project, status, åpen, samtaler, tråder, saker, delinger, filer, versjoner, utleveringer, tidslinje (nyeste nederst), tall }
+      //   GET  /api/arbeid[?prosjekt=]         → { arbeider: [{id, name, project, status, åpen, samtaler, tråder, filer, saker, sist}] }  nyeste først
+      //   POST /api/hoerer-til {id, arbeid}     → kobler saken til arbeidet (hører_til) · {id, arbeid: null} løsner · {id, forslag: 'nei'} avviser forslaget (husket)
+      //   POST /api/arbeid/merk {id, av?}       → «Gjør til arbeid» (arbeid: true, status utkast når ingen er satt) · av: true tar flagget bort
+      //   POST /api/arbeid/vurder {id}          → pakken til «Vurder dette arbeidet»: { arbeid, hørerTil, siste, kilder: [{id, name, …, ord, tegn, max, vault}], prompt, standard, mottakere }
+      //   POST /api/samtaler/gjennomgang {dryRun?, skriver?: regel|auto|ollama|test} → SSE start · sak · slutt {samtaler, saker, S, M, tittel, kind, menneske, uendret, uleselig, av, filer, vis}
+      //        S og M på nytt for samtale-sakene etter samtaleregelen (Innstillinger › Spør — Erik trykker; dry-run først). Samme som node review.js --samtaler.
+      if (req.method === 'GET' && url.pathname === '/api/arbeid') {
+        const id = url.searchParams.get('id') || ''
+        const alleA = load()
+        if (!id) return json(res, 200, { arbeider: arbeider(alleA, { prosjekt: url.searchParams.get('prosjekt') || '' }) })
+        try { return json(res, 200, løpFor(alleA, id)) } catch (e) { return json(res, 404, { error: e.message }) }
+      }
+      if (req.method === 'POST' && (url.pathname === '/api/hoerer-til' || url.pathname === '/api/h%C3%B8rer-til' || url.pathname === '/api/hører-til')) {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves' })
+        const atoms = load()
+        if (!atoms.some((x) => x.id === b.id)) return json(res, 404, { error: `fant ikke sak ${b.id}` })
+        try {
+          let r
+          if (b.forslag === 'nei') { r = avvisForslag(atoms, b.id); console.error(`[tua-bro] forslag avvist for «${r.atom.name}»`) }
+          else if (b.arbeid) { r = settHørerTil(atoms, b.id, String(b.arbeid)); console.error(`[tua-bro] «${r.atom.name}» hører til «${r.arbeid.name}»`) }
+          else { r = løsne(atoms, b.id); console.error(`[tua-bro] «${r.atom.name}» løsnet${r.før ? ` fra ${r.før}` : ''}`) }
+          save(atoms)
+          const alleE = load(), f = følgereAv(alleE), a = alleE.find((x) => x.id === b.id)
+          return json(res, 200, { atom: { ...sakSvar(a), hører_til: a.hørerTil || null, del_av: delAv(alleE, a, f), arbeid: erArbeid(a, f) }, arbeid: r.arbeid ? { id: r.arbeid.id, name: r.arbeid.name, project: r.arbeid.project } : null, før: r.før ?? null })
+        } catch (e) { return json(res, e.message.startsWith('fant ikke') ? 404 : 400, { error: e.message }) }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/arbeid/merk') {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves' })
+        const atoms = load()
+        if (!atoms.some((x) => x.id === b.id)) return json(res, 404, { error: `fant ikke sak ${b.id}` })
+        const r = gjørTilArbeid(atoms, b.id, { av: b.av === true })
+        save(atoms)
+        console.error(`[tua-bro] «${r.atom.name}» ${r.arbeid ? 'er et arbeid' : 'er ikke lenger merket som arbeid'}`)
+        const alleE = load(), f = følgereAv(alleE), a = alleE.find((x) => x.id === b.id)
+        return json(res, 200, { atom: { ...sakSvar(a), hører_til: a.hørerTil || null, arbeid: erArbeid(a, f), del_av: delAv(alleE, a, f) } })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/arbeid/vurder') {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves' })
+        const atoms = load()
+        let p
+        try { p = vurderPakke(atoms, String(b.id)) } catch (e) { return json(res, 404, { error: e.message }) }
+        const kilder = p.kilder.map((k) => { const a = atoms.find((x) => x.id === k.id); return { ...k, ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a) } })
+        const ms = await mottakere()
+        console.error(`[tua-bro] vurder «${p.arbeid.name}»: ${kilder.length} kilder (${p.filer} filer), prompt ${p.standard ? 'standard' : 'egen'}`)
+        return json(res, 200, { ...p, kilder, mottakere: ms.filter((m) => m.aktiv).map((m) => m.id), standardMottaker: ms.find((m) => m.standard)?.id || null })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/samtaler/gjennomgang') {
+        const b = await readBody(req)
+        const skriver = ['regel', 'auto', 'ollama', 'test'].includes(b.skriver) ? b.skriver : 'regel'
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        const ctl = new AbortController()
+        req.on('close', () => ctl.abort())
+        try { const r = await samtalerGjennomgang({ dryRun: !!b.dryRun, skriver, klient: 'app', signal: ctl.signal, på: hendelse }); console.error(`[tua-bro] samtaler på nytt (${r.av}): ${r.saker} av ${r.samtaler} · S ${r.S} · M ${r.M} · titler ${r.tittel} · ${r.filer} filer${b.dryRun ? ' · DRY-RUN' : ''}`) }
+        catch (e) { hendelse('feil', { feil: e.message }) }
+        return res.end()
       }
       return json(res, 404, { error: 'ukjent rute' })
     } catch (e) {

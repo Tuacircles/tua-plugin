@@ -1,8 +1,9 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 globalThis.__TUA_BUNDLE = true;
 import { McpServer } from './bygd/vendor/@modelcontextprotocol/sdk/server/mcp.mjs';
 import { StdioServerTransport } from './bygd/vendor/@modelcontextprotocol/sdk/server/stdio.mjs';
 import { registerApps } from './bygd/tua/apps.mjs';
+import { settHørerTil as settH_rerTil, følgereAv as f_lgereAv, erArbeid, løsne as l_sne, delAv } from './bygd/tua/arbeid.mjs';
 import { ensureArchive, archiveOptions, FILES_ROOT, filesMode, rootLabel, chooseArchive, load, INBOX_DIR, KINDS, LINK_KINDS, upsert, save, WELCOME_KEY, finishOnboarding, SHORT_L, S_MAX, M_MAX, LONG_L, fmtTime, fileOf, search, visibleIn, readVersion, versions, vaultClamp, maxLevel, hasExternalEdits, related, needsLevel, compose, logDelivery, setShare, FILE, onboardingActive, welcomeAtom, linksFor, isVault, sources, staleSources, renderStatus, deliveries, isStale, clampLevel } from './bygd/tua/store.mjs';
 import { DEFAULT_MIN, processInbox, processInboxShares, inboxPending, importShare, importDesktop, importFinder, importAll, historyCounts, importCode, watchInbox, watchDesktop, historyLine } from './bygd/tua/import.mjs';
 import { watchFinder } from './bygd/tua/finder.mjs';
@@ -281,11 +282,15 @@ server.registerTool(
         .describe('Kildeatomene en leveranse er bygget av: id, versjonen du leste, nivået du leste på. tua_compose fyller dette selv; send det når du bygde leveransen av tua_get-resultater for hånd.'),
       renders: arrayType(objectType({ format: stringType().optional(), path: stringType().optional(), url: stringType().optional(), sha256: stringType().optional() })).optional()
         .describe('Gjengivelser av dette atomet: html/pdf som absolutt sti (sha256 regnes ut), eller artifact som url. Fila er en gjengivelse — atomet (markdown) er sannheten. Send med samme key når du har rendret.'),
+      hører_til: stringType().optional().describe('Arbeidet saken hører til (sak-id, eller tittelen på et arbeid i samme prosjekt) — når brukeren sier «dette hører til Anken». Et arbeid er en sak som samtaler, tråder og saker henger på.'),
     },
   },
   async (args) => {
     const atoms = load();
-    const { atom, status } = upsert(atoms, { ...args, by: args.source || 'Claude' });
+    const { hører_til: hørerTilArg, ...rest } = args;
+    const hørerTil = hørerTilArg ? finnArbeid(atoms, hørerTilArg, rest.project)?.id : null;   // friksjon 20
+    const { atom, status } = upsert(atoms, { ...rest, by: args.source || 'Claude', ...(hørerTil ? { hørerTil } : {}) });
+    if (hørerTil && atom.hørerTil !== hørerTil && atom.id !== hørerTil) { try { settH_rerTil(atoms, atom.id, hørerTil); } catch {} }
     if (status !== 'uendret') save(atoms);
     // M14: første ekte lagring avslutter onboardingen — og ber modellen lukke sløyfa («finn den igjen fra et annet prosjekt»)
     const firstSave = status !== 'uendret' && atom.key !== WELCOME_KEY && finishOnboarding('tua_save');
@@ -612,27 +617,47 @@ server.registerTool(
 
 // ── Synlighet på tvers av prosjekter: referanser, aldri kopier ─────────────
 const sameName = (x, y) => x.toLowerCase() === y.toLowerCase();
+// Friksjon 20: et arbeid oppgitt som sak-id eller som tittel (hel, eller inneholdt, ≥ 4 tegn) — helst et arbeid i samme prosjekt, ellers en hvilken som helst sak med den tittelen
+function finnArbeid(atoms, hva, prosjekt = '') {
+  const h = String(hva || '').trim();
+  if (!h) return null
+  const påId = atoms.find((x) => x.id === h); if (påId) return påId
+  const n = h.toLowerCase(), f = f_lgereAv(atoms);
+  const kand = atoms.filter((x) => (!prosjekt || sameName(x.project, prosjekt)) && x.drift !== true && (x.name.toLowerCase() === n || (n.length >= 4 && x.name.toLowerCase().includes(n))));
+  return kand.find((x) => erArbeid(x, f) && x.name.toLowerCase() === n) || kand.find((x) => erArbeid(x, f)) || kand.find((x) => x.name.toLowerCase() === n) || kand.sort((x, y) => (y.capturedAt || 0) - (x.capturedAt || 0))[0] || null
+}
 
 server.registerTool(
   'tua_link',
   {
-    title: 'Gjør synlig i et annet prosjekt',
+    title: 'Gjør synlig i et annet prosjekt, eller koble til et arbeid',
     annotations: WRITE_IDEMPOTENT,
     description:
       'Gjør et atom synlig i et annet prosjekt — som REFERANSE, aldri kopi. Atomet finnes fortsatt én gang, ' +
       'i prosjektet det oppsto i. Bruk når brukeren sier «gjør dette synlig i X», «del dette med prosjekt X», ' +
       '«prosjekt X trenger dette». Valgfritt nivå: S (bare ingress), M (sammendrag) eller L (alt, standard for ' +
-      'eierens egne prosjekter). Kall igjen med nytt nivå for å løfte/senke en eksisterende referanse.',
+      'eierens egne prosjekter). Kall igjen med nytt nivå for å løfte/senke en eksisterende referanse. ' +
+      'ELLER (friksjon 20): koble saken til et ARBEID — «denne samtalen hører til Anken», «dette hører til arbeidet X»: send `arbeid` (sak-id eller tittel) i stedet for project. ' +
+      'Arbeidet er en sak samtaler, tråder og saker henger på («Del av: Anken · samtale 7 av 12» i Tua); `arbeid: "-"` løsner koblingen.',
     inputSchema: {
-      id: stringType().describe('Atom-id (fra tua_search/tua_list).'),
-      project: stringType().min(1).describe('Prosjektet som skal se atomet.'),
+      id: stringType().describe('Atom-id (fra tua_search/tua_list, eller samtale-sakens id fra Tua-linja ved øktstart).'),
+      project: stringType().optional().describe('Prosjektet som skal se atomet (kreves når arbeid ikke er sendt).'),
       level: LevelArg.optional().describe('Hvor mye prosjektet får se: S, M eller L (standard L — V11).'),
+      arbeid: stringType().optional().describe('Arbeidet saken skal høre til: sak-id eller tittel (helst et arbeid i samme prosjekt). «-» løsner koblingen.'),
     },
   },
-  async ({ id, project, level }) => {
+  async ({ id, project, level, arbeid }) => {
     const atoms = load();
     const a = atoms.find((x) => x.id === id);
     if (!a) return text(`Fant ikke atom ${id}.`)
+    if (arbeid) {   // friksjon 20: hører til et arbeid
+      if (String(arbeid).trim() === '-') { const r = l_sne(atoms, a.id); if (r.endret) save(atoms); console.error(`[tua] løsne «${a.name}»`); return text(r.endret ? `«${a.name}» hører ikke lenger til noe arbeid.` : `«${a.name}» hørte ikke til noe arbeid.`) }
+      const w = finnArbeid(atoms, arbeid, a.project);
+      if (!w) return text(`Fant ikke noe arbeid «${arbeid}»${a.project ? ` i ${a.project}` : ''}. Oppgi sak-id eller tittelen på saken som er arbeidet (tua_search finner den).`)
+      try { const r = settH_rerTil(atoms, a.id, w.id); if (r.endret) save(atoms); const d = delAv(load(), load().find((x) => x.id === a.id)); console.error(`[tua] «${a.name}» hører til «${w.name}»`); return text(`${r.endret ? `«${a.name}» hører nå til arbeidet «${w.name}»` : `«${a.name}» hører alt til «${w.name}»`}${d ? ` — ${d.slag} ${d.nr} av ${d.av}` : ''}. Løpet vises på arbeidet i Tua (${addr(w.id)}).`) }
+      catch (e) { return text(`Kunne ikke koble: ${e.message}`) }
+    }
+    if (!project || !String(project).trim()) return text('Oppgi project (prosjektet som skal se atomet) eller arbeid (arbeidet saken hører til).')
     const p = project.trim();
     if (sameName(a.project, p)) return text(`«${a.name}» oppsto i ${a.project} — det er allerede synlig der, på alle nivåer.`)
     a.refs = a.refs || [];

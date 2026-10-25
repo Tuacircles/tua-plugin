@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { SpanKind } from '../../../../../@opentelemetry/api/trace/span_kind.mjs';
 import { SpanStatusCode } from '../../../../../@opentelemetry/api/trace/status.mjs';
 import { context } from '../../../../../@opentelemetry/api/context-api.mjs';

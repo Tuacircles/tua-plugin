@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 var $id = "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#";
 var description = "Meta-schema for $data reference (JSON AnySchema extension proposal)";
 var type = "object";

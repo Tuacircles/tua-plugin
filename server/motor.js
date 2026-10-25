@@ -34,7 +34,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, LONG_L, FILES_ROOT, filesMode, DATA_DIR, hashOf } from './store.js'
+import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, LONG_L, FILES_ROOT, filesMode, DATA_DIR, hashOf, markDirty } from './store.js'
 import { readKey, hasKey, ollamaStatus } from './keychain.js'
 import { OLLAMA_URL, OLLAMA_VERT } from './ollama.js'   // friksjon 12: adressen og standardmodellen (ollamaStatus().modell) bor der
 import { løsMottakere, registrerDeling, skrivMottakere, lagreDeling, hentDeling, delingerFor, trekkTilbake, noterForespørsel, lenkerFor, nyttToken, eier, mottakerside, trukketSide, BASE } from './deling.js'   // runde 3b: personer, sirkler som emerger, delinger med token, mottakersiden
@@ -570,7 +570,9 @@ export function forhåndsvis({ melding = '', saker = [], mottaker: mId, mottaker
     saker: kilder.map(({ id, name, version, level, ord: o, tegn }) => ({ id, name, version, level, ord: o, tegn })), notater, blokkert }
 }
 
-export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds, prosjekt, samtale, prompt: promptId, klient = 'app', signal, på = () => {} }) {
+// Friksjon 20: `hørerTil` = arbeidet (sak-id) spørsmålet stilles inne i — prompt-, svar-, Forskjeller- og konklusjon-sakene får hører_til, så løpet samler dem.
+// Uten parameter arver «kjør igjen» koblingen fra prompt-saken; nye spørsmål uten arbeid får ingen.
+export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds, prosjekt, samtale, prompt: promptId, hørerTil = null, klient = 'app', signal, på = () => {} }) {
   if (!melding || !String(melding).trim()) throw new MotorFeil('melding kreves')
   const alle = lagMottakere()
   const ids = [...new Set([...(Array.isArray(mIds) ? mIds : []), ...(mId ? [mId] : [])].map((x) => String(x || '').trim()).filter(Boolean))]
@@ -609,9 +611,11 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
   // første linje. «Kjør igjen» på en eldre prompt-sak lar prompten stå der den er (samme sak), men svarene lander i det valgte prosjektet.
   const proj = String(prosjekt || '').trim() || gammel?.project || atoms.find((x) => x.id === kilder[0]?.id)?.project || 'Uten prosjekt'
   const promptProj = gammel?.project || proj
+  const arbeidId = hørerTil && atoms.some((x) => x.id === hørerTil) ? String(hørerTil) : gammel?.hørerTil || null   // friksjon 20
   const { atom: promptAtom } = upsert(atoms, { key: gammel ? gammel.key : `prompt:spor:${hashOf(melding)}`, kind: 'prompt', content: String(melding), name: gammel && gammel.content.trim() === String(melding).trim() ? gammel.name : tittel,
     project: promptProj, convo: gammel ? gammel.convo : samtale || tittel, tags: ['prompt'], source: gammel?.source || 'Tua', by: 'regel', short: førsteSetning(melding),   // gammel: samme samtale (også tom) → ingen falsk ny versjon
-    summary: gammel ? gammel.summary : `Spørsmål stilt i Tua til ${til}${kilder.length ? ` med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} som kontekst` : ''}.`.slice(0, 300) })
+    summary: gammel ? gammel.summary : `Spørsmål stilt i Tua til ${til}${kilder.length ? ` med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} som kontekst` : ''}.`.slice(0, 300), ...(arbeidId ? { hørerTil: arbeidId } : {}) })
+  if (arbeidId && promptAtom.hørerTil !== arbeidId && arbeidId !== promptAtom.id) { promptAtom.hørerTil = arbeidId; if (promptAtom.hørerTilForslag !== undefined) promptAtom.hørerTilForslag = ''; markDirty(atoms, promptAtom.id) }   // et eksplisitt valg vinner
   const samtaleNavn = samtale || promptAtom.convo || tittel
   save(atoms)
 
@@ -631,6 +635,7 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
     const svarTekst = avskjerm(r.tekst || strømmet, sk.kobling)
     const tokens = { ca: tokensCa[m.id], inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
     const { atom: svarAtom } = upsert(atoms, { kind: 'svar', content: svarTekst, name: `${avbrutt ? 'Avbrutt svar' : 'Svar'} fra ${m.label}: ${tittel}`.slice(0, 90), project: proj, convo: samtaleNavn, tags: ['svar', m.id, ...(avbrutt ? ['avbrutt'] : []), ...(vaultArv ? ['vault'] : [])], source: m.label, by: 'regel',
+      ...(promptAtom.hørerTil ? { hørerTil: promptAtom.hørerTil } : {}),   // friksjon 20: svaret henger på samme arbeid som spørsmålet
       derivedFrom: [{ id: promptAtom.id, version: promptAtom.version || 1, level: 'L' }, ...kilder.map(({ id, version, level }) => ({ id, version, level }))],
       short: `${avbrutt ? 'Avbrutt svar (stoppet av brukeren mens det strømmet)' : 'Svar'} fra ${m.label} (${r.modell}) på «${tittel}»${kilder.length ? `, med ${kilder.length} ${kilder.length === 1 ? 'sak' : 'saker'} på nivå ${nivåer}` : ''}.`.slice(0, 300) })
     promptAtom.ga = [...(promptAtom.ga || []).filter((g) => g.id !== svarAtom.id), { id: svarAtom.id, version: svarAtom.version || 1 }]
@@ -702,7 +707,7 @@ export async function forskjeller(svar, { melding = '', prosjekt, klient = 'app'
   const navnFor = (id) => svar.find((s) => s.mottaker === id)?.label || id
   const { atom: fAtom } = upsert(atoms, { key: `forskjeller:${promptAtom?.id || tittel}`, kind: 'svar', content: forskjellerTilMarkdown(tolket, navnFor), name: `Forskjeller: ${tittel}`.slice(0, 90),
     project: prosjekt || promptAtom?.project || svarAtomer.find(Boolean)?.project || 'Uten prosjekt', convo: promptAtom?.convo || svarAtomer.find(Boolean)?.convo || tittel,
-    tags: ['svar', 'forskjeller', v.m.id, ...(kilder.some((k) => k.vault) ? ['vault'] : [])], source: v.m.label, by: 'regel',
+    tags: ['svar', 'forskjeller', v.m.id, ...(kilder.some((k) => k.vault) ? ['vault'] : [])], source: v.m.label, by: 'regel', ...(promptAtom?.hørerTil ? { hørerTil: promptAtom.hørerTil } : {}),   // friksjon 20
     derivedFrom: kilder.filter((k) => k.id).map(({ id, version, level }) => ({ id, version, level })),
     short: `Forskjeller mellom ${svar.length} svar på «${tittel}», vurdert av ${v.m.label} (${r.modell}): ${tolket.enig.length} enig · ${tolket.uenig.length} uenig · ${tolket.unikt.length} unikt.`.slice(0, 300) })
   save(atoms)
@@ -819,6 +824,7 @@ export async function konklusjon({ prompt: promptId, svar, forskjeller: f = null
   const proj = prosjekt || promptAtom?.project || 'Uten prosjekt'
   const tittel = tittelAv(spørsmål)
   const { atom } = upsert(atoms, { key: `konklusjon:${promptId || tittel}`, kind: 'konklusjon', content: tekst, name: `Konklusjon: ${tittel}`.slice(0, 90), project: proj, convo: samtale || promptAtom?.convo || tittel, tags: ['konklusjon', ...(kilder.some((k) => k.vault) ? ['vault'] : [])], source: v.m.label, by: 'regel',
+    ...(promptAtom?.hørerTil ? { hørerTil: promptAtom.hørerTil } : {}),   // friksjon 20: konklusjonen henger på arbeidet
     derivedFrom: kilder.filter((k) => k.id).map(({ id, version, level }) => ({ id, version, level })),
     short: `Utkast til konklusjon fra ${v.m.label} (${r.modell}) på «${tittel}», ut fra ${svar.length} svar (${svar.map((s) => s.label || s.mottaker).join(', ')}). Rettes og låses av brukeren.`.slice(0, 300) })
   setStatus(atom, 'utkast')

@@ -81,3 +81,61 @@ export async function gjennomgang({ atoms = null, nivå = 'M', tvang = true, skr
   på('slutt', ut)
   return ut
 }
+
+// ── Friksjon 20 (økt-sakene, 25.10.2026): S og M på nytt for SAMTALE-saker etter samtaleregelen ───────────────────────────────────────────────
+// Hookens økt-saker («Økt: …», oppgaveliste med systemtekst, klippet svar) og importens samtaler får S = siste vending (samtaleS) og M = ekte sammendrag
+// (samtaleM: første spørsmål + siste svar + filene) lest ut av L (samtaleFraSak) — ingen øktfil eller Desktop-cache trengs. Med en lokal modell (skriver auto →
+// Ollama) skrives M av modellen (merket M_av «Ollama · gemma3:4b»); uten: regelen (M_av regel). Menneskeskrevet S/M røres aldri (V10). Tittelen «Økt: …» mister
+// prefikset. Samme funksjon bak `node review.js --samtaler [--dry-run] [--modell]` og POST /api/samtaler/gjennomgang (Innstillinger › Spør — Erik trykker).
+export async function samtalerGjennomgang({ atoms = null, dryRun = false, skriver = 'regel', klient = 'app', signal, på = () => {}, maks = 0 } = {}) {
+  const { samtaleFraSak } = await import('./import.js')
+  const liste = atoms || load()
+  const samtaler = liste.filter((a) => a.kind === 'samtale' || /^okt:/.test(String(a.key || '')) || (/^Økt:\s/.test(String(a.name || '')) && !erMenneskeskrevet(a)))
+  const tall = { samtaler: samtaler.length, S: 0, M: 0, tittel: 0, kind: 0, menneske: 0, uendret: 0, uleselig: 0, saker: 0, feil: 0 }
+  const v = skriver === 'regel' ? { m: null, regel: true } : await velgSkriver(skriver === 'auto' ? undefined : skriver)
+  const av = v.m ? (v.m.test ? 'test' : `${v.m.label.split(' (')[0]} · ${v.modell || v.m.modell}`) : 'regel'
+  på('start', { ...tall, av, modell: v.m ? v.modell || v.m.modell : null, lokalt: !v.m || !!v.m.local || !!v.m.test, dryRun })
+  const vis = []
+  let i = 0, sidenLagring = 0
+  for (const a of samtaler) {
+    if (signal?.aborted) break
+    i++
+    const r = samtaleFraSak(a.content, { first: a.createdAt, last: a.capturedAt })
+    if (!r) { tall.uleselig++; continue }
+    const endringer = []
+    const oldS = a.levels?.S, oldM = a.levels?.M
+    const nyttNavn = /^Økt:\s+/.test(a.name) ? a.name.replace(/^Økt:\s+/, '') : a.name
+    let S = null, M = null, Mav = 'regel'
+    if (oldS?.by === 'menneske') tall.menneske++
+    else if (oldS?.text !== r.S) { S = r.S; endringer.push('S') }
+    if (oldM?.by === 'menneske') { if (oldS?.by !== 'menneske') tall.menneske++ }
+    else {
+      M = r.M
+      if (v.m && !dryRun) {
+        try { const n = await skrivNivåer(a.content, { tittel: nyttNavn, sak: a, prosjekt: a.project, klient, skriver: v.m.id, signal }); if (n.M) { M = n.M; Mav = n.M_av || n.av } } catch (e) { tall.feil++ }
+      }
+      if (oldM?.text !== M) endringer.push('M')
+    }
+    if (nyttNavn !== a.name) endringer.push('tittel')
+    if (a.kind !== 'samtale') endringer.push('kind')
+    if (!endringer.length) { tall.uendret++; continue }
+    tall.saker++
+    for (const e of endringer) tall[e]++
+    if (vis.length < 12) vis.push({ id: a.id, project: a.project, name: a.name, endringer, S_før: oldS?.text || '', S: S || oldS?.text || '', M_før: (oldM?.text || '').slice(0, 160), M: (M || '').slice(0, 160) })
+    på('sak', { i, antall: samtaler.length, id: a.id, name: a.name, endringer })
+    if (dryRun) continue
+    const når = isoNå()
+    if (S !== null) a.levels = { ...(a.levels || {}), S: { ...mkLevel(S, 'regel', a.version || 1), at: når } }
+    if (M !== null && endringer.includes('M')) a.levels = { ...(a.levels || {}), M: { ...mkLevel(M, Mav, a.version || 1), at: når } }
+    if (nyttNavn !== a.name) a.name = nyttNavn
+    if (a.kind !== 'samtale') { a.kind = 'samtale'; if (!(a.tags || []).includes('samtale')) a.tags = ['samtale', ...(a.tags || []).filter((t) => t !== 'økt' && t !== 'auto')] }
+    markDirty(liste, a.id)
+    if (++sidenLagring >= 10 && !atoms) { save(liste); sidenLagring = 0 }
+    if (maks && tall.saker >= maks) break
+  }
+  let filer = 0
+  if (!dryRun && tall.saker && !atoms) { filer = save(liste) }
+  const ut = { ...tall, av, filer, dryRun, vis }
+  på('slutt', ut)
+  return ut
+}

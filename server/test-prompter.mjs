@@ -143,8 +143,8 @@ fs.writeFileSync(path.join(PROSJEKTDIR, `${SID}.jsonl`), transkript)
   const before = load().length
   const r4 = importCode({ log: () => {} })
   const p3b = load().find((a) => a.key === promptKey(HSID, P3)), svb = load().find((a) => a.key === sv.key)
-  // importen legger bare til samtale-saken for hook-økta og samtalen i svarets bygget_av («nivåer», ikke ny versjon) — prompten og svaret er de samme sakene
-  ok('import etter hook: ingen nye prompter, svaret og prompten er de samme sakene på versjon 1 (bare samtale-saken er ny) — hook og import lager aldri to av samme', r4.stats.prompter === 0 && r4.stats.nye === 1 && load().length === before + 1 && (p3b.version || 1) === 1 && (svb.version || 1) === 1 && svb.derivedFrom[0].id === p3b.id && svb.derivedFrom.length === 2, JSON.stringify(r4.stats))
+  // friksjon 20: hookens samtale-sak (okt:<sid>, laget ved første prompt) ER samtalen — importen lager ingen ny, men legger samtalen i svarets bygget_av («nivåer», ikke ny versjon); prompten og svaret er de samme sakene
+  ok('import etter hook: ingen nye prompter, ingen ny samtale-sak (hookens okt:-sak brukes, stats.hook 1), svaret og prompten er de samme sakene på versjon 1 — hook og import lager aldri to av samme', r4.stats.prompter === 0 && r4.stats.nye === 0 && r4.stats.hook === 1 && load().length === before && (p3b.version || 1) === 1 && (svb.version || 1) === 1 && svb.derivedFrom[0].id === p3b.id && svb.derivedFrom.length === 2 && load().find((a) => a.key === `okt:${HSID}`)?.kind === 'samtale', JSON.stringify(r4.stats))
 }
 
 // ── 5) «Kjør igjen» gjennom motoren ─────────────────────────────────────────

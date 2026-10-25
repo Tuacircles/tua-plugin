@@ -11,11 +11,10 @@
 //        by: 'Claude' (standard) — overskriver aldri et menneskeskrevet nivå (V10)
 //   TUA_REVIEW_BY=menneske node review.js --apply …   merk som menneskeskrevet
 //
-//   node review.js --samtaler --dry-run   friksjon 9 (24.10.2026): viser hvilke samtale-saker som får ny ingress etter regelen «siste vending»
-//                                         («Sist: <siste prompt> → <første setning av svaret> · N vendinger · periode»), skriver ingenting
-//   node review.js --samtaler             skriver S på nytt (by: regel) for de samtalene. Menneskeskrevet S røres aldri (V10); S skrevet av
-//                                         Claude røres bare når den er utdatert (fra en eldre versjon). Lest ut av transkriptet (L) — trenger
-//                                         ikke øktfila eller Desktop-cachen, så det virker også for samtaler kildene er borte for.
+//   node review.js --samtaler --dry-run   friksjon 9 (24.10.2026) + friksjon 20 (25.10.2026): viser hvilke samtale-saker (og hookens «Økt: …»-saker) som får ny S (siste vending),
+//                                         ny M (første spørsmål + siste svar + filene skrevet), tittel uten «Økt: » og kind samtale — lest ut av L, skriver ingenting
+//   node review.js --samtaler [--modell]  skriver dem (S by: regel; M by: regel, eller «Ollama · <modell>» med --modell når den kjører). Menneskeskrevet S/M røres aldri (V10).
+//                                         Samme funksjon som knappen «Samtalene på nytt» i Innstillinger › Spør (POST /api/samtaler/gjennomgang) — Erik trykker, dry-run først.
 //
 //   node review.js --fanget --dry-run     runde 2c (arb. 32 §5 sp. 1, 24.10.2026): viser hvor mange eksisterende saker som ville fått `fanget: true` etter regelen
 //                                         (store.erFangetEtterRegel): nøkkelen er svar:<økt>:…, prompt:<økt>:… (ikke prompt:spor:), okt:<økt> eller samtale:<id>
@@ -40,7 +39,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { load, save, saveAll, needsLevel, isStale, mkLevel, FILES_ROOT, filesMode, LONG_L, S_MAX, M_MAX, fangetKandidater, slagAvNøkkel, driftKandidater, erDriftEtterRegel, driftProsjekter, driftSlag, tellKlasser, klasseAv, KLASSER } from './store.js'
-import { samtaleSFraTranskript } from './import.js'
 
 const args = process.argv.slice(2)
 const atoms = load()
@@ -102,26 +100,15 @@ if (args.includes('--rydd')) {
 }
 
 if (args.includes('--samtaler')) {
+  // Friksjon 20 (økt-sakene): samme funksjon som POST /api/samtaler/gjennomgang (Innstillinger › Spør). S = siste vending, M = første spørsmål + siste svar + filene,
+  // tittelen uten «Økt: », kind samtale. --modell: M skrives av den lokale modellen (Ollama) når den kjører, ellers regelen. Menneskeskrevet røres aldri.
+  const { samtalerGjennomgang } = await import('./gjennomgang.js')
   const dryRun = args.includes('--dry-run')
-  const tall = { samtaler: 0, endres: 0, uendret: 0, menneske: 0, annen: 0, uleselig: 0 }
-  const vis = []
-  for (const a of atoms) {
-    if (a.kind !== 'samtale') continue
-    tall.samtaler++
-    const S = samtaleSFraTranskript(a.content, { first: a.createdAt, last: a.capturedAt })
-    if (!S) { tall.uleselig++; continue }
-    const old = a.levels?.S
-    if (old?.by === 'menneske') { tall.menneske++; continue }                       // V10: menneskeskrevet overskrives aldri
-    if (old && old.by !== 'regel' && !isStale(a, 'S')) { tall.annen++; continue }   // Claude-skrevet og gjeldende: la stå
-    if (old?.text === S) { tall.uendret++; continue }
-    tall.endres++
-    if (vis.length < 12) vis.push(`${a.project} / ${a.name}\n    før: ${old?.text || '(mangler)'}\n    nå:  ${S}`)
-    if (!dryRun) { a.levels = { ...(a.levels || {}), S: mkLevel(S, 'regel', a.version || 1) } }
-  }
-  console.log(`${tall.samtaler} samtale-saker · ${tall.endres} får ny S (siste vending) · ${tall.uendret} har den alt · ${tall.menneske} menneskeskrevet (røres ikke) · ${tall.annen} skrevet av Claude og gjeldende (røres ikke) · ${tall.uleselig} uten lesbart transkript${dryRun ? ' · DRY-RUN, ingenting skrevet' : ''}\n`)
-  for (const v of vis) console.log(v)
-  if (tall.endres > vis.length) console.log(`… og ${tall.endres - vis.length} til`)
-  if (!dryRun && tall.endres) { const written = saveAll(atoms); console.log(`\n${tall.endres} ingresser skrevet (by: regel) · ${written} filer skrevet`) }
+  const r = await samtalerGjennomgang({ atoms, dryRun, skriver: args.includes('--modell') ? 'auto' : 'regel', klient: 'kommandolinje' })
+  console.log(`${r.samtaler} samtale-saker · ${r.saker} får ny S/M (${r.S} S · ${r.M} M · ${r.tittel} titler uten «Økt:» · ${r.kind} blir samtale-saker) · ${r.menneske} menneskeskrevet (røres ikke) · ${r.uendret} uendret · ${r.uleselig} uten lesbart innhold · skriver: ${r.av}${dryRun ? ' · DRY-RUN, ingenting skrevet' : ''}\n`)
+  for (const v of r.vis) console.log(`${v.project} / ${v.name}  [${v.endringer.join(', ')}]\n    S før: ${v.S_før || '(mangler)'}\n    S nå:  ${v.S}\n    M nå:  ${v.M}${v.M.length >= 160 ? '…' : ''}`)
+  if (r.saker > r.vis.length) console.log(`… og ${r.saker - r.vis.length} til`)
+  if (!dryRun && r.saker) { const written = saveAll(atoms); console.log(`\n${r.saker} samtale-saker skrevet på nytt · ${written} filer skrevet`) }
   else if (!dryRun) console.log('\nIngenting å skrive.')
   process.exit(0)
 }

@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { APIPromise } from '../../core/api-promise.mjs';
 import { AnthropicError } from '../../core/error.mjs';
 import { addResponseIDs } from '../../internal/parse.mjs';

@@ -349,5 +349,27 @@ try {
   ok('friksjon 19: med «ta med» vokser Samtaler med drift-samtalene og Dokumenter med fangede og drift-saker (ikke samtalene)', smMed.length === sm.length + logger.filter((a) => a.klasse === 'drift').length && regler.dokumenterAv(regler.utvalg(at7, { med: true })).length > dok.length && !regler.dokumenterAv(regler.utvalg(at7, { med: true })).some((a) => a.kind === 'samtale'))
 } finally { bro.kill() }
 
+
+// ── Friksjon 20 (25.10.2026): arbeidet som samler — reglene appen bruker, og ordet «økt» utgår ───────────────────────────────────────
+{
+  ok('typeOrd: en hook-samtale (okt:) er «samtale», ikke «økt»; en gammel sak med taggen økt også', regler.typeOrd({ kind: 'samtale', key: 'okt:abc', tags: ['samtale', 'code'] }) === 'samtale' && regler.typeOrd({ kind: 'capture', tags: ['økt', 'auto'] }) === 'samtale')
+  ok('øktTekst: «I Claude i dag: 3 samtaler, 2 filer skrevet» — ordet økt utgår', regler.øktTekst({ tekst: 'I Claude i dag: 3 økter, 2 filer skrevet, 0 svar beholdt', antall: 3, filer: 2, beholdt: 0 }) === 'I Claude i dag: 3 samtaler, 2 filer skrevet' && regler.øktTekst({ tekst: 'I Claude i går: 1 økt', antall: 1 }) === 'I Claude i går: 1 samtale')
+  ok('delAvTekst / arbeidTall: «Del av: Anken · samtale 7 av 12», «3 samtaler, 2 tråder, 1 fil»', regler.delAvTekst({ del_av: { id: 'w', name: 'Anken', slag: 'samtale', nr: 7, av: 12 } }) === 'Del av: Anken · samtale 7 av 12' && regler.arbeidTall({ samtaler: 3, tråder: 2, filer: 1 }) === '3 samtaler, 2 tråder, 1 fil' && regler.arbeidTall({ samtaler: 1 }) === '1 samtale' && regler.delAvTekst({}) === '')
+  const løp = { id: 'w', tidslinje: [{ tid: 1, type: 'samtale', id: 's1', navn: 'Første', kilde: 'Claude Code' }, { tid: 2, type: 'svar', id: 'v1', navn: 'Svar', kilde: 'Ollama (lokal)' }, { tid: 3, type: 'versjon', id: 'w', navn: 'v1', kilde: '' }, { tid: 4, type: 'utlevert', id: 'w', navn: 'Utlevert til test', kilde: 'ekko' }, { tid: 5, type: 'fil', id: 'f1', navn: 'anke.md', kilde: 'Claude', href: '/x/anke.md' }] }
+  const rader = regler.løpRader(løp)
+  ok('løpRader: rekkefølgen beholdes (nyeste nederst), versjon og utlevert uten lenke, kilden kortet («Ollama»), typeord på norsk', rader.map((r) => r.lenke) .join() === 'true,true,false,false,true' && rader[1].kilde === 'Ollama' && rader[0].typeOrd === 'samtale' && rader[4].typeOrd === 'fil')
+  // treMedArbeid: samtalene og sakene som hører til et arbeid flyttes inn under det; resten står; arbeidet selv står ikke som fil under seg selv
+  const W = { id: 'w1', name: 'Anken til Energima', status: 'utkast', kind: 'samtale' }
+  const tre = [{ navn: 'Energima', via: 'navn', samtaler: [
+    { navn: 'Utkastet', sist: 10, saker: [{ id: 'p1', hører_til: 'w1' }], logg: { id: 's1', hører_til: 'w1' } },
+    { navn: 'Strømprisene', sist: 20, saker: [{ id: 'p2' }], logg: { id: 's2' } },
+    { navn: 'Anken til Energima', sist: 5, saker: [], logg: W },
+  ], filer: [{ slag: 'sak', sak: { id: 'f1', hører_til: 'w1', capturedAt: 30 } }, { slag: 'sak', sak: { id: 'w1', name: 'Anken til Energima', capturedAt: 1 } }, { slag: 'fil', fil: { sti: 'faktura.pdf' } }], antallSamtaler: 3, antallFiler: 3 }]
+  const t2 = regler.treMedArbeid(tre, [W])
+  ok('treMedArbeid: ett arbeid med samtalen og fila som hører til, resten av samtalene og filene står i prosjektet, arbeidet selv er ikke en fil under seg selv', t2[0].arbeider.length === 1 && t2[0].arbeider[0].navn === 'Anken til Energima' && t2[0].arbeider[0].samtaler.length === 1 && t2[0].arbeider[0].filer.length === 1 && t2[0].arbeider[0].sak?.id === 'w1' && t2[0].samtaler.length === 2 && t2[0].filer.length === 1 && t2[0].filer[0].slag === 'fil', JSON.stringify(t2[0].arbeider[0]))
+  ok('treMedArbeid: uten koblinger er treet som før (arbeider tomt)', regler.treMedArbeid([{ navn: 'X', samtaler: [{ navn: 'a', saker: [{ id: 'q' }], logg: null }], filer: [] }])[0].arbeider.length === 0)
+  ok('erArbeidSak: feltet fra broen', regler.erArbeidSak({ arbeid: true }) && !regler.erArbeidSak({ hører_til: 'w1' }))
+}
+
 console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT}`)
 process.exit(feil ? 1 : 0)

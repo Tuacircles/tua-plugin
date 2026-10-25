@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { datetime, date, time, duration } from './iso.mjs';
 import { parse, safeParse, parseAsync, safeParseAsync } from './parse.mjs';
 import { _custom, _string, _number, _unknown, _array, _boolean, _null as _null$1, _undefined as _undefined$1, _any, _never, _regex, _includes, _startsWith, _endsWith, _minLength, _maxLength, _length, _lowercase, _uppercase, _trim, _normalize, _toLowerCase, _toUpperCase, _overwrite, _refine, _email, _url, _jwt, _emoji, _guid, _uuid, _uuidv4, _uuidv6, _uuidv7, _nanoid, _cuid, _cuid2, _ulid, _base64, _base64url, _xid, _ksuid, _ipv4, _ipv6, _cidrv4, _cidrv6, _e164, _gt, _gte, _lt, _lte, _multipleOf, _int } from '../core/api.mjs';

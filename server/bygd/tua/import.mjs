@@ -1,14 +1,15 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import os from 'node:os';
 import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unzipToTemp } from './unzip.mjs';
-import { filesMode, INBOX_DIR, SHORT_L, load, erTuaRepo, S_MAX, sha8, mergeGa, FILES_ROOT, upsert, save, noteImport, importState, ensureArchive, hashOf, projectOf, registerProject, claudeProjectHref, finishOnboarding, erTuaSak } from './store.mjs';
+import { filesMode, INBOX_DIR, SHORT_L, load, erTuaRepo, markDirty, S_MAX, sha8, mergeGa, FILES_ROOT, upsert, save, noteImport, importState, ensureArchive, hashOf, projectOf, registerProject, claudeProjectHref, finishOnboarding, erTuaSak } from './store.mjs';
 import { cacheAvailable, CACHE_DIR, countDesktopConversations, importedDesktop, collectDesktop, desktopFolderGrants, noteImportedDesktop, desktopStaleness } from './desktop.mjs';
 import { scanFinder, countFinderCandidates } from './finder.mjs';
 import { CLAUDE_APP_DIR, posix } from './platform.mjs';
 import { lesInnInnboks, innboksDokumenter } from './innlesing.mjs';
+import { arbeidForslag } from './arbeid.mjs';
 
 // import.js — «Ta med historikken» (M14 + M17): tidligere samtaler og dokumenter blir atomer. Kildene:
 //
@@ -109,6 +110,25 @@ function samtaleS({ pairs = [], turns, first, last } = {}) {
   if (svar && plass - hode.length - 3 >= 40) hode += ` → ${førsteSetning(svar, plass - hode.length - 3)}`;
   return clip(`${hode} · ${hale}`, S_MAX)
 }
+// Friksjon 20 (økt-sakene, Erik 25.10.2026: «teksten er uryddig og litt meningsløs»): M for en samtale er et ekte sammendrag av hva samtalen gjorde — etter regel:
+// første menneskeprompt + siste svar (kortet) + filene som ble skrevet, innenfor M_MAX. En lokal modell (gemma) kan skrive den på nytt (review --samtaler / Innstillinger),
+// merket M_av. S er fortsatt samtaleS (siste vending, én linje).
+const M_MAKS = 2500;
+const avsnittKutt = (t, maks) => { const s = String(t || '').replace(/\r\n?/g, '\n').trim(); if (s.length <= maks) return s; const k = s.slice(0, maks); const i = Math.max(k.lastIndexOf('\n\n'), k.lastIndexOf('. ')); return (i > maks * 0.5 ? k.slice(0, i + 1) : k.slice(0, maks - 1)).trimEnd() + ' …' };
+function samtaleM({ prompts = [], lastAssistant = '', filer = [], turns, first, last, kilde = '' } = {}) {
+  const første = flat(prompts.find((p) => flat(p)) || '');
+  const siste = String(lastAssistant || '').trim();
+  const n = turns ?? prompts.length;
+  const d1 = datoKort(first), d2 = datoKort(last || first);
+  const hale = [kilde, `${n} ${n === 1 ? 'vending' : 'vendinger'}`, d1 && d2 && d1 !== d2 ? `${d1}–${d2}` : d2 || d1].filter(Boolean).join(' · ');
+  const deler = [];
+  if (første) deler.push(`**Første spørsmål:** ${clip(første, 400)}`);
+  if (filer.length) deler.push(`**Filer skrevet (${filer.length}):** ${filer.slice(0, 10).map((f) => path__default.basename(String(f))).join(' · ')}${filer.length > 10 ? ` · … og ${filer.length - 10} til` : ''}`);
+  const plass = M_MAKS - deler.join('\n\n').length - hale.length - 40;
+  if (siste && plass > 200) deler.push(`**Siste svar:** ${avsnittKutt(siste, Math.min(1600, plass))}`);
+  deler.push(`_${hale}_`);
+  return deler.join('\n\n').slice(0, M_MAKS)
+}
 // Datalinjer: nesten bare tall og skilletegn («10027245·450000 10059885·140000», tabellrader med id/pris). En tittel tas fra
 // første linje med bokstaver, og et svar/dokument som i hovedsak består av datalinjer (≥ 60 %) regnes som en data-dump og
 // blir ikke eget atom — innholdet står uansett i samtalens transkript. Regelen gjelder bare auto-fangst (svar, filer), ikke samtaler.
@@ -155,10 +175,31 @@ function projectOfCwd(cwd) {
 // Linjer: {type: user|assistant|…, message: {role, content: [{type: text|tool_use|tool_result, …}]}, cwd, sessionId,
 // timestamp, isSidechain}. Verifisert mot Eriks filer 14.10.2026 (6 økter). Systemets <system-reminder>-blokker og
 // kommando-markører i brukermeldinger fjernes; tool_result-blokker (det meste av volumet) tas ikke med i L.
-const stripReminders = (t) => String(t || '').replace(/<system-reminder[\s\S]*?<\/system-reminder>/g, '').replace(/<(command-name|command-message|command-args|local-command-stdout|local-command-caveat)>[\s\S]*?<\/\1>/g, '').trim();
+// Friksjon 20 (økt-sakene): «Oppgaver» skal bare ha det et menneske skrev. Bort går: <system-reminder>, Code-kommandoens markører, meldinger fra andre økter
+// (<cross-session-message …>, <task-notification>, <side-sessions-event>, <ci-monitor-event>) og andre XML-lignende systemblokker med bindestrek i navnet,
+// [Image: …]-markører, «[Request interrupted …]», bakgrunnsteksten en startøkt la i første melding («Background (from the session that started this one): …»
+// fram til «Task:» — selve oppgaven beholdes) og harness-linjene («Shared notes folder for this group of sessions …», «The user hasn't heard from you …»).
+// Rekkefølge og tidspunkt beholdes; en melding som er tom etterpå, var ikke et menneskes.
+const HARNESS_TAGGER = 'system-reminder|cross-session-message|task-notification|side-sessions-event|ci-monitor-event|command-name|command-message|command-args|local-command-stdout|local-command-caveat|command-stdout|command-stderr|local-command';
+const HARNESS_LINJER = /^(?:Shared notes folder for this group of sessions\b|The user hasn't heard from you in a while\b|Linked sessions now \(status|You are operating in a git worktree\b|Worktree (?:path|name): )[^\n]*\n?/gm;
+const stripReminders = (t) => String(t || '')
+  .replace(/\r\n?/g, '\n')
+  .replace(new RegExp(`<~?(${HARNESS_TAGGER})(?:\\s[^>]*)?>[\\s\\S]*?<\\/~?\\1>`, 'g'), '')
+  .replace(/<~?([a-z][a-z0-9]*(?:[-_][a-z0-9]+)+)(?:\s[^>]*)?>[\s\S]*?<\/~?\1>/g, '')
+  .replace(/<~?(?:system-reminder|cross-session-message|task-notification|side-sessions-event|ci-monitor-event)(?:\s[^>]*)?\/?>/g, '')
+  .replace(/\[Image:[^\]]*\]/g, '')
+  .replace(/\[Request interrupted[^\]]*\]/g, '')
+  .replace(/(?:^|\n)Background \(from the session[^\n]*\n[\s\S]*?(?=\n\s*Task:\s*\n|$)/, '')
+  .replace(/^\s*Task:\s*\n/, '')
+  .replace(HARNESS_LINJER, '')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim();
+// Sporene til koblingen (friksjon 20, 4a): barnets første melding har forelderens local_-id i stien til notatmappa; grenen står på hver linje (gitBranch)
+const forelderAv = (t) => (String(t || '').match(/side-session-notes\/(local_[0-9a-f-]{36})/) || [])[1] || '';
+const erBarneØkt = (t) => /Background \(from the session that started this one\)/.test(String(t || ''));
 const TEXT_FILE = /\.(md|markdown|txt|rst)$/i;
 function parseCodeSession(file, { maxChars = 300_000 } = {}) {
-  const s = { id: '', cwd: '', title: '', prompts: [], answers: [], pairs: [], files: new Map(), edited: new Set(), lastAssistant: '', first: null, last: null, turns: 0, lines: [] };
+  const s = { id: '', cwd: '', title: '', prompts: [], answers: [], pairs: [], files: new Map(), edited: new Set(), lastAssistant: '', first: null, last: null, turns: 0, lines: [], gren: '', forelder: '', barn: false, harness: 0 };
   let text = '';
   try { text = fs__default.readFileSync(file, 'utf8'); } catch { return s }
   for (const line of text.split('\n')) {
@@ -166,12 +207,17 @@ function parseCodeSession(file, { maxChars = 300_000 } = {}) {
     let o; try { o = JSON.parse(line); } catch { continue }
     s.id ||= o.sessionId || o.session_id || '';                       // Cowork audit.jsonl: session_id, _audit_timestamp (M17)
     s.cwd ||= o.cwd || '';
+    if (!s.gren && typeof o.gitBranch === 'string' && o.gitBranch && o.gitBranch !== 'HEAD') s.gren = o.gitBranch;   // friksjon 20: grenen samtalen gikk på
     const when = ms(o.timestamp || o._audit_timestamp);
     if (o.type === 'custom-title' && o.customTitle) s.title = String(o.customTitle);
     if (o.isSidechain) continue
     const blocks = Array.isArray(o.message?.content) ? o.message.content : typeof o.message?.content === 'string' ? [{ type: 'text', text: o.message.content }] : [];
     if (o.type === 'user') {
-      const t = stripReminders(blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n'));
+      const rå = blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n');
+      if (rå && !s.forelder) { const f = forelderAv(rå); if (f) s.forelder = f; }   // friksjon 20: startet fra en annen økt
+      if (rå && erBarneØkt(rå)) s.barn = true;
+      const t = stripReminders(rå);
+      if (rå.trim() && !t) s.harness++;                                            // bare systemtekst — ikke et menneskes melding
       if (t && !/^\[Request interrupted/.test(t)) { s.prompts.push(t); s.pairs.push(nyttPar(t, when)); s.turns++; s.first ??= when; s.last = when || s.last; s.lines.push(`**Bruker:** ${t}`); }
     } else if (o.type === 'assistant') {
       const t = blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n').trim();
@@ -190,7 +236,7 @@ function parseCodeSession(file, { maxChars = 300_000 } = {}) {
   s.transcript = full.length > maxChars ? full.slice(0, maxChars) + `\n\n_(forkortet: ${full.length - maxChars} tegn til i øktfila)_` : full;
   s.chars = full.length;
   s.firstUser = s.prompts[0] || '';
-  s.convo = s.title || clip(flat(s.firstUser), 60) || `Code-økt ${s.id.slice(0, 8)}`;
+  s.convo = s.title || clip(flat(s.firstUser), 60) || `Samtale ${s.id.slice(0, 8)}`;   // friksjon 20: ordet «økt» utgår
   s.file = file;
   return s
 }
@@ -280,10 +326,24 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
       const links = repo ? [{ kind: 'repo', href: repo, label: `Repo — ${proj}` }] : [];
       const drift = erTuaRepo(repo);                                            // runde 2d (03-avisen §5 E): en økt i Tua-repoet er en byggeøkt — drift, ikke spor
       const header = `# ${s.convo}\n\n_${srcLabel} · ${s.turns} oppgaver · ${iso(s.first)}${s.last && iso(s.last) !== iso(s.first) ? ` – ${iso(s.last)}` : ''} · ${proj}${repo ? ` · ${repo}` : ''} · øktfil ${path__default.basename(file)}_\n\n`;
-      const { atom, status } = put({
+      // friksjon 20 (4a): koblingen til et arbeid etter regelen — forelder (vert), gren (felles stamme) eller tittel; importen foreslår aldri (historikk skal ikke mase)
+      const filerSkrevet = [...new Set([...s.files.keys(), ...s.edited])].filter((f) => !/\/(node_modules|\.tua)\//.test(f));
+      const kobling = arbeidForslag(atoms, { prosjekt: proj, tittel: s.convo, gren: s.gren, forelder: s.forelder, sid: s.id });
+      // friksjon 20: har hooken alt lagret samtalen (okt:<sid>), er DEN samtale-saken — importen lager ingen dublett, men fyller inn gren og kobling om de mangler
+      const hookSak = atoms.find((a) => a.key === `okt:${s.id}`);
+      let atom, status;
+      if (hookSak) {
+        atom = hookSak; status = 'uendret'; stats.hook = (stats.hook || 0) + 1;
+        let endret = false;
+        if (!atom.gren && s.gren) { atom.gren = s.gren; endret = true; }
+        if (!atom.hørerTil && kobling.hørerTil) { atom.hørerTil = kobling.hørerTil; if (atom.hørerTilForslag !== undefined) atom.hørerTilForslag = ''; endret = true; }
+        if (endret) markDirty(atoms, atom.id);
+      } else ({ atom, status } = put({
         key: `samtale:${s.id}`, kind: 'samtale', name: s.convo, content: header + s.transcript, project: proj, convo: s.convo, source: srcLabel, by: 'regel',
-        tags: ['samtale', source], links, short: samtaleS(s), summary: `${srcLabel}-økt importert fra ${path__default.basename(file)} (${s.turns} oppgaver).`, fanget: true, ...(drift ? { drift } : {}),   // S = siste vending (friksjon 9) · fanget (runde 2c): alt fra en samtalelogg er fanget til det løftes inn; filer Claude skrev (fil:) er dokumenter, med vilje
-      }, s.last);
+        tags: ['samtale', source], links, short: samtaleS(s), medium: samtaleM({ ...s, filer: filerSkrevet, kilde: srcLabel }), summary: `${srcLabel}-økt importert fra ${path__default.basename(file)} (${s.turns} oppgaver).`, fanget: true, ...(drift ? { drift } : {}),   // S = siste vending (friksjon 9) · M etter regel (friksjon 20) · fanget (runde 2c): alt fra en samtalelogg er fanget til det løftes inn; filer Claude skrev (fil:) er dokumenter, med vilje
+        ...(s.gren ? { gren: s.gren } : {}), ...(kobling.hørerTil ? { hørerTil: kobling.hørerTil } : {}),
+      }, s.last));
+      if (kobling.hørerTil) stats.koblet = (stats.koblet || 0) + 1;
       count(status); perProject[proj] = (perProject[proj] || 0) + 1;
       const derived = [{ id: atom.id, version: atom.version || 1, level: 'L' }];
       // M19: prompt-sakene først, så svaret får prompten først i bygget_av og prompten får svaret i ga (V16: prompten bevares med svaret)
@@ -316,7 +376,7 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
         const r = put({
           key: `fil:${fp}`, kind: 'capture', name: titleOf(content, path__default.basename(fp, path__default.extname(fp))), content, project: proj, convo: s.convo, source: 'Claude', by: 'regel',
           tags: ['dokument', 'auto'], links: [{ kind: 'file', href: fp }, ...links], derivedFrom: derived, short: clip(firstPara(content), S_MAX),
-          summary: `Skrevet i Code-økta «${s.convo}» (${fp}).`,
+          summary: `Skrevet i Code-økta «${s.convo}» (${fp}).`, ...(atom.hørerTil ? { hørerTil: atom.hørerTil } : {}),   // friksjon 20: fila henger på samtalens arbeid
         }, s.last);
         if (r.status !== 'uendret') stats.filer++;
       }
@@ -328,11 +388,12 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
   const report = [
     `# ${title}`, '',
     `${srcRoot} · ${list.length} øktfiler · ${new Date().toLocaleString('no-NO')}${dryRun ? ' · **dry-run, ingenting skrevet**' : ''}`, '',
-    `- **Økter:** ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret`,
+    `- **Samtaler:** ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret${stats.hook ? ` (${stats.hook} alt lagret av hooken — samme sak)` : ''}`,
     `- **Hoppet over:** ${stats.korte} under ${minChars} tegn${stats.filtrert ? ` · ${stats.filtrert} utenfor filter` : ''}${stats.tuaprat ? ` · ${stats.tuaprat} Tua-prat om Tua (samtaler som starter med /tua…)` : ''}`,
     `- **Egne atomer:** ${stats.svar} substansielle svar (≥ ${MIN_SVAR} tegn) · ${stats.filer} tekstdokumenter skrevet i øktene${stats.datadump ? ` · ${stats.datadump} data-dumper (mest tall) hoppet over` : ''}`,
     `- **Prompter (V16):** ${stats.prompter} nye/oppdaterte av ${stats.prompterAlle} spørsmål som egne saker (≥ ${PROMPT_MIN} tegn)${stats.korteprompter ? ` · ${stats.korteprompter} korte («ja», «fortsett», kommandoer) hoppet over` : ''}`,
     `- **Prosjekter:** ${projLine}`,
+    ...(stats.koblet ? [`- **Arbeid (friksjon 20):** ${stats.koblet} ${stats.koblet === 1 ? 'samtale koblet' : 'samtaler koblet'} til et arbeid (forelder, gren eller tittel)`] : []),
     `- **Filter:** ${filters}`,
     stats.feil ? `- **Feil:** ${stats.feil} (se loggen)` : null, '',
     'Hver økt er ett atom (kind «samtale») med transkript av brukerens meldinger og Claudes svar (verktøyresultater er ikke med). ' +
@@ -656,6 +717,7 @@ function importParsed(data, {
         key: `samtale:${c.id}`, kind: 'samtale', name: c.title, content: header + c.transcript, project: proj, convo: c.title,
         source: c.source, by: 'regel', tags: ['samtale', ...(c.tags || [])], links,
         short: c.pairs?.length ? samtaleS({ pairs: c.pairs, turns: c.pairs.length, first: c.created, last: c.updated }) : ruleS(c.title, c.firstUser),   // S = siste vending (friksjon 9)
+        medium: c.pairs?.length ? samtaleM({ prompts: c.pairs.map((p) => p.prompt), lastAssistant: c.pairs.at(-1)?.svar || c.pairs.at(-1)?.answers?.at(-1) || '', turns: c.pairs.length, first: c.created, last: c.updated, kilde: c.source }) : undefined,   // friksjon 20: M etter regel
         summary: c.summary ? clip(c.summary, 200) : `Importert fra ${label}${via ? ` via ${via}` : ''}.`, fanget: true,   // runde 2c: samtalen er fanget; artifacts/vedlegg/dokumenter under er laget med vilje
       }, c.updated, { moveFromDefault: !!c.project });
       count(status); perProject[atom.project] = (perProject[atom.project] || 0) + 1;

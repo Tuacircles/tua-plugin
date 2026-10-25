@@ -475,7 +475,7 @@ export function erDirty(atoms, a) { const s = sporFor(atoms); if (!s || !a) retu
 export const dirtyIds = (atoms) => atoms.filter((a) => erDirty(atoms, a)).map((a) => a.id)
 export const harSpor = (atoms) => !!sporFor(atoms)
 export let sisteSave = { skrevet: 0, hoppet: 0, flettet: [], konflikter: [], indeksert: 0 }
-const FELT_FLETT = ['drift', 'fanget', 'beholdt', 'status', 'kind', 'tags', 'refs', 'share', 'links', 'key', 'renders', 'ga', 'derivedFrom', 'ekstra']
+const FELT_FLETT = ['drift', 'fanget', 'beholdt', 'status', 'kind', 'tags', 'refs', 'share', 'links', 'key', 'renders', 'ga', 'derivedFrom', 'ekstra', 'hørerTil', 'hørerTilForslag', 'arbeid', 'gren', 'vert']   // friksjon 20: koblingene flettes som felter
 const KROPP = ['name', 'content', 'summary', 'convo', 'source', 'levels', 'version', 'capturedAt', 'size']
 const jsonAv = (x) => JSON.stringify(x ?? null)
 // Treveis: mem (vårt minne), base (slik vi leste fila), disk (slik fila ligger nå, skrevet av noen andre). Returnerer { atom, konflikt, felter }.
@@ -548,7 +548,7 @@ function saveUnlocked(atoms, { alle = false } = {}) {
       // men mangler i minnet, beholdes. Fila er sannheten (V9); en prosess som ikke kjenner et felt skal ikke kunne slette det.
       try {
         const påDisk = parse(before, { fallbackId: a.id })
-        for (const felt of ['drift', 'fanget', 'beholdt', 'status']) if (a[felt] === undefined && påDisk[felt] !== undefined) a[felt] = påDisk[felt]
+        for (const felt of ['drift', 'fanget', 'beholdt', 'status', 'hørerTil', 'hørerTilForslag', 'arbeid', 'gren', 'vert']) if (a[felt] === undefined && påDisk[felt] !== undefined) a[felt] = påDisk[felt]   // friksjon 20: koblingene også
         if ((!a.kind || a.kind === 'capture') && påDisk.kind && påDisk.kind !== 'capture' && !KINDS_GAMLE.has(påDisk.kind)) a.kind = påDisk.kind
         if (!a.ekstra && påDisk.ekstra) a.ekstra = påDisk.ekstra                 // runde 3c: nøkler vi ikke kjenner, følger med
       } catch {}
@@ -638,7 +638,7 @@ export function setShare(a, project, level) {
 // M19 (skive 8, V16): `ga` = [{id, version}] — svarene en prompt-sak ga. Normaliseres som derivedFrom; upsert slår lista SAMMEN (union på id), aldri erstatter.
 export const normalizeGa = (list) => (Array.isArray(list) ? list : []).filter((g) => g && g.id).map((g) => ({ id: String(g.id), version: Number(g.version) || 1 }))
 export const mergeGa = (gammel = [], ny = []) => { const ut = [...normalizeGa(gammel)]; for (const g of normalizeGa(ny)) { const i = ut.findIndex((x) => x.id === g.id); if (i < 0) ut.push(g); else ut[i] = g } return ut }
-export function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget, drift, beholdt }) {
+export function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget, drift, beholdt, hørerTil, hørerTilForslag, arbeid, gren, vert }) {
   const body = String(content || '').replace(/\r\n?/g, '\n').trim()   // M17: fila leses tilbake uten \r (files.js) — lagre likt, ellers blir hver import en «ny versjon»
   const now = Date.now()
   const a = {
@@ -670,6 +670,12 @@ export function makeAtom({ content, name, source, project, convo, summary, tags,
   if (fanget === true || fanget === false) a.fanget = fanget            // runde 2c: true = fanget automatisk, false = løftet inn — se Fanget-bøtta nederst
   if ((drift === true && !erMenneskeskrevet(a)) || drift === false) a.drift = drift   // runde 2d: Tua om seg selv — aldri på noe et menneske har skrevet
   if (beholdt === true) a.beholdt = true                                   // runde 2d: beholdt av brukeren
+  // friksjon 20: koblingen til arbeidet (hører_til), forslaget, arbeid-flagget og sporene hooken setter (gren, vert)
+  if (typeof hørerTil === 'string' && hørerTil) a.hørerTil = hørerTil
+  if (typeof hørerTilForslag === 'string' && hørerTilForslag) a.hørerTilForslag = hørerTilForslag
+  if (arbeid === true) a.arbeid = true
+  if (typeof gren === 'string' && gren) a.gren = gren
+  if (typeof vert === 'string' && vert) a.vert = vert
   return a
 }
 
@@ -722,6 +728,12 @@ export function upsert(atoms, { key, ...data }) {
   // runde 2d: drift følger samme logikk — har brukeren sagt «dette er arbeid» (drift: false), setter ingen regel det igjen; menneskeskrevet merkes aldri drift.
   const drift = old.drift === false || data.drift === false ? false : data.drift === true && !erMenneskeskrevet(old) ? true : old.drift
   const beholdt = data.beholdt === false ? undefined : data.beholdt === true ? true : old.beholdt   // beholdt tas bare bort eksplisitt
+  // friksjon 20: koblingen til et arbeid beholdes til noen løsner den (settHørerTil/løsne i arbeid.js) — en ny import eller hook-kjøring setter den bare når saken ikke har noen;
+  // forslaget faller når koblingen er satt; arbeid-flagget tas aldri bort av upsert; gren og vert erstattes når nye er sendt
+  const hørerTil = old.hørerTil || (typeof data.hørerTil === 'string' && data.hørerTil ? data.hørerTil : undefined)
+  const hørerTilForslag = hørerTil ? undefined : (old.hørerTilForslag || (typeof data.hørerTilForslag === 'string' && data.hørerTilForslag ? data.hørerTilForslag : undefined))
+  const arbeid = old.arbeid === true || data.arbeid === true ? true : undefined
+  const gren = (typeof data.gren === 'string' && data.gren) ? data.gren : old.gren, vert = (typeof data.vert === 'string' && data.vert) ? data.vert : old.vert
   const attach = (a) => {
     if (levels) a.levels = levels; else delete a.levels
     if (links) a.links = links; else delete a.links
@@ -731,11 +743,16 @@ export function upsert(atoms, { key, ...data }) {
     if (fanget === true || fanget === false) a.fanget = fanget; else delete a.fanget
     if (drift === true || drift === false) a.drift = drift; else delete a.drift
     if (beholdt === true) a.beholdt = true; else delete a.beholdt
+    if (hørerTil) a.hørerTil = hørerTil; else delete a.hørerTil
+    if (hørerTilForslag) a.hørerTilForslag = hørerTilForslag; else if (old.hørerTilForslag) a.hørerTilForslag = ''; else delete a.hørerTilForslag   // tom = tatt bort med vilje (save() beholder ellers det som står i fila)
+    if (arbeid) a.arbeid = true; else if (old.arbeid !== undefined) a.arbeid = false; else delete a.arbeid
+    if (gren) a.gren = gren; else delete a.gren
+    if (vert) a.vert = vert; else delete a.vert
     a.kind = kind
     return a
   }
   if (bodySame) {
-    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt) return { atom: old, status: 'uendret' }
+    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt && hørerTil === old.hørerTil && hørerTilForslag === old.hørerTilForslag && arbeid === old.arbeid && gren === old.gren && vert === old.vert) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old })
     markDirty(atoms, old.id)
     return { atom: atoms[i], status: 'nivåer' }

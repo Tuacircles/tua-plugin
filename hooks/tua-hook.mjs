@@ -13,6 +13,12 @@
 //   Runde 3a (arb. 32, 03-avisen §5): start-modus skriver også «Siden sist i Tua» for prosjektet (dora.js sidenSist) — Tua → Claude i Code.
 //   Runde 2c (arb. 32 §5 sp. 1, 24.10.2026): økt-, prompt- og svar-sakene får `fanget: true` — Fanget-bøtta, utenfor avisen og søket til brukeren løfter dem inn
 //          (Behold / Slå sammen / Kast). fil-modus får det IKKE: et dokument Claude skrev ligger på disk og er laget med vilje (Forsidens «Dokumenter», runde 1).
+//   Friksjon 20 + økt-sakene (25.10.2026): økt-saken er en SAMTALE-sak (kind samtale, kilde «Claude Code», tittel uten «Økt: »). «Oppgaver» har bare det et menneske
+//          skrev (import.stripReminders: systemblokker, [Image: …], bakgrunnstekst fra startøkta og harness-linjer ut), med klokkeslett; L har HELE siste svar og hele
+//          lista over filer som ble skrevet; S = siste vending (samtaleS), M = første spørsmål + siste svar + filene (samtaleM, M_av regel). Og ARBEIDET: ved første
+//          prompt (og ved start når det er noe å si) lages samtale-saken med `gren` og `vert`, og kobles til et arbeid etter regelen i arbeid.js — forelder (startet fra
+//          en annen økt), gren (felles stamme) eller tittel; ellers `hører_til_forslag` = nyeste åpne arbeid i prosjektet (Erik: Tua foreslår med én gang). Siden sist
+//          i appen spør «hører den til …? Ja / Annet / Nei»; i Claude: tua_link(id=<samtale-sak>, arbeid=<arbeid>). Filer skrevet (fil-modus) henger på samme arbeid.
 //
 // Leser hook-input som JSON på stdin. Skriver gjennom samme store.js (og fil-lås) som serveren — ikke via MCP,
 // fordi en hook må kunne filtrere (lengde, filtype) før den eventuelt lagrer, og `mcp_tool`-typen kan ikke det.
@@ -42,7 +48,8 @@ const desk = await import(mod('desktop.js'))
 const dora = await import(mod('dora.js'))                                     // runde 3a: «Siden sist i Tua» som én linje ved øktstart (Tua → Claude)
 const { posix, insideTmp } = await import(mod('platform.js'))
 const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState, mergeGa } = store
-const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts, sha8, promptKey, worthKeeping, promptTitle, promptL, firstSentence, samtaleS } = imp
+const arb = await import(mod('arbeid.js'))                                   // friksjon 20: arbeidet som samler — kobling og forslag
+const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts, sha8, promptKey, worthKeeping, promptTitle, promptL, firstSentence, samtaleS, samtaleM, forelderAv, isTuaCommand } = imp
 
 // 0.5.1: innstillingen «arkivmappe» → ~/.tua/config.json, samme fil og samme skrivemåte som tua_setup (store.chooseArchive),
 // så serveren finner arkivet uten TUA_FILES_ROOT — også i Cowork, der innstillingen aldri når serveren. Bare når innstillingen
@@ -75,10 +82,32 @@ try {
   const sid = input.session_id || ''
   const tr = input.transcript_path ? parseCodeSession(input.transcript_path) : null
   // samtalenavnet: tittelen, ellers første prompt — i prompt-modus er transkriptet ennå uten denne meldingen, så den første prompten er input.prompt
-  const convo = tr?.title || (tr?.prompts[0] ? clip(flat(tr.prompts[0]), 60) : input.prompt ? clip(flat(input.prompt), 60) : `Code-økt ${sid.slice(0, 8)}`)
+  const convo = tr?.title || (tr?.prompts[0] ? clip(flat(tr.prompts[0]), 60) : input.prompt && imp.stripReminders(input.prompt) ? clip(flat(imp.stripReminders(input.prompt)), 60) : `Samtale i ${project} ${new Date().toLocaleDateString('no-NO')}`)   // friksjon 20: aldri «Økt» i tittelen
   const repo = [{ kind: 'repo', href: repoRootOf(cwd), label: `Repo — ${project}` }]   // samme lenke (med etikett) som import.js, så import etter hook gir «uendret»
   // M19: prompt-saken for én brukermelding — samme nøkkel, navn, S og tagger som import.js, så importen etterpå sier «uendret»
-  const promptSak = (atoms, p) => upsert(atoms, { key: promptKey(sid, p), kind: 'prompt', name: promptTitle(p), content: promptL(p), project, convo, source: 'Claude Code', by: 'regel', tags: ['prompt', 'code'], links: repo, short: firstSentence(p), summary: `Spørsmål stilt i Claude Code-økta «${convo}».`, fanget: true })
+  const promptSak = (atoms, p) => upsert(atoms, { key: promptKey(sid, p), kind: 'prompt', name: promptTitle(p), content: promptL(p), project, convo, source: 'Claude Code', by: 'regel', tags: ['prompt', 'code'], links: repo, short: firstSentence(p), summary: `Spørsmål stilt i Claude Code-økta «${convo}».`, fanget: true })   // samme tekst som import.js (ellers bumper importen versjonen)
+  // ── Friksjon 20: samtale-saken (okt:<sid>) og koblingen til et arbeid ──
+  const KILDE = 'Claude Code'
+  const erTuaRepoHer = fs.existsSync(path.join(repoRootOf(cwd), 'tua-plugin', 'server', 'store.js'))   // runde 2d (03-avisen §5 E): en økt i Tua-repoet er en byggeøkt — drift (Tua om seg selv), ikke spor
+  // grenen: fra transkriptet (gitBranch), ellers .git/HEAD i cwd (en worktree har .git som fil med «gitdir: …»)
+  const grenAv = (c) => { try { let g = path.join(c, '.git'); if (fs.statSync(g).isFile()) { const m = fs.readFileSync(g, 'utf8').match(/gitdir:\s*(.+)/); if (!m) return ''; g = path.resolve(c, m[1].trim()) } const h = fs.readFileSync(path.join(g, 'HEAD'), 'utf8').trim(); const m = h.match(/^ref: refs\/heads\/(.+)$/); return m ? m[1] : '' } catch { return '' } }
+  const gren = tr?.gren || grenAv(cwd) || ''
+  const vert = String(process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim()                       // denne øktas verts-id i Desktop-appen (local_…) — barneøkter finner forelderen på den
+  const forelder = tr?.forelder || forelderAv(input.prompt) || ''                                   // startet fra en annen økt: forelderens local_-id står i stien til notatmappa
+  const kobling = (atoms) => arb.arbeidForslag(atoms, { prosjekt: project, tittel: convo, gren, forelder, sid })
+  const klokke = (t) => (t ? new Date(t).toLocaleTimeString('no-NO', { hour: '2-digit', minute: '2-digit' }) : '')
+  const når = (t) => (t ? new Date(t).toLocaleString('no-NO', { dateStyle: 'short', timeStyle: 'short' }) : '')
+  const oppgave = (p) => clip(flat(p), 1000)
+  // samtale-saken: kind samtale, kilde vist, tittel uten «Økt: », gren og vert som spor, kobling eller forslag — innholdet gis av kalleren (stubb ved start/første prompt, hele ved okt)
+  const samtaleSak = (atoms, { content, short, medium, summary, k = kobling(atoms) }) => {
+    const r = upsert(atoms, {
+      key: `okt:${sid}`, kind: 'samtale', name: convo, content, project, convo, source: KILDE, by: 'regel', tags: ['samtale', 'code'], links: repo, short, ...(medium ? { medium } : {}), summary, fanget: true,
+      ...(erTuaRepoHer ? { drift: true } : {}), ...(gren ? { gren } : {}), ...(vert ? { vert } : {}),
+      ...(k.hørerTil ? { hørerTil: k.hørerTil } : k.forslag ? { hørerTilForslag: k.forslag } : {}),
+    })
+    return { ...r, kobling: k }
+  }
+  const stubbInnhold = (p) => [`# ${convo}`, '', `_${KILDE} · samtalen er i gang · ${når(Date.now())}${gren ? ` · gren ${gren}` : ''}_`, '', '## Oppgaver', `- ${klokke(Date.now())} — ${oppgave(p)}`, ''].join('\n')
 
   if (mode === 'start') {
     // Påminnelse — standard i pluginen. Stdout fra SessionStart blir kontekst for Claude.
@@ -115,19 +144,41 @@ try {
     if (root && !fs.existsSync(path.join(root, '.tua-sync.json')) && !insideArchive(root) && offerOnce(root)) extra.push(`repoet «${path.basename(root)}» speiles ikke til Tua ennå (ingen .tua-sync.json) — tilby /tua_auto én gang hvis det passer: node "${path.join(HERE, '..', 'server', 'sync-tua.js')}" --project "${path.basename(root)}" --install-hook`)
     // Runde 3a (03-avisen §5): det som er gjort i Tua-appen for prosjektet de siste 7 dagene (Spør-tråder, konklusjoner, delinger, filer lest inn) — én linje,
     // så Claude og brukeren ser det uten å spørre. Fanget og drift holdes utenfor. Aldri innhold — titler og tall.
-    let siden = ''
-    try { const s = dora.sidenSist(load(), { prosjekt: project }); if (s.noe) siden = `Siden sist i Tua (7 dager, ${project}): ${s.linjer.map((l) => l.tekst).join(' · ')}${s.lagret ? ` · ${s.lagret} ${s.lagret === 1 ? 'sak' : 'saker'} lagret med vilje` : ''} — nevn det i én setning hvis det passer; tua_search(project="${project}") finner sakene` } catch {}
-    if (parts.length || extra.length || siden) process.stdout.write(`Tua: ${[...parts, ...extra, siden].filter(Boolean).join('. ')}. ${parts.length ? 'Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. ' : ''}Ikke kjør noe uten at brukeren sier ja.\n`)
+    let siden = '', arbeidLinje = ''
+    try {
+      const atoms = load()
+      const s = dora.sidenSist(atoms, { prosjekt: project }); if (s.noe) siden = `Siden sist i Tua (7 dager, ${project}): ${s.linjer.map((l) => l.tekst).join(' · ')}${s.lagret ? ` · ${s.lagret} ${s.lagret === 1 ? 'sak' : 'saker'} lagret med vilje` : ''} — nevn det i én setning hvis det passer; tua_search(project="${project}") finner sakene`
+      // Friksjon 20 (Erik: Tua foreslår med én gang): hører samtalen til et arbeid — automatisk (forelder, gren, tittel) eller som forslag — lages samtale-saken nå, så appen og Claude har noe å peke på
+      if (sid && !atoms.some((a) => a.key === `okt:${sid}`)) {
+        const k = kobling(atoms)
+        if (k.hørerTil || k.forslag) {
+          const { atom, status } = samtaleSak(atoms, { content: stubbInnhold(input.prompt || convo), short: `Samtale i ${project} (${KILDE}) — i gang.`, summary: `Samtale i ${KILDE}, lagret automatisk ved start.`, k })
+          if (status !== 'uendret') save(atoms)
+          const w = atoms.find((a) => a.id === (k.hørerTil || k.forslag))
+          arbeidLinje = k.hørerTil ? `Denne samtalen hører til arbeidet «${w?.name || k.hørerTil}» i Tua (koblet via ${k.grunn}); samtale-saken er ${atom.id}`
+            : `Tua foreslår at denne samtalen hører til arbeidet «${w?.name || k.forslag}» (${k.åpne?.[0]?.samtaler ?? 0} samtaler fra før) — sier brukeren ja, eller «hører til …», kall tua_link(id="${atom.id}", arbeid="${k.forslag}"); ellers spør ikke`
+          log({ samtaleSak: atom.id, status, kobling: k.grunn || 'forslag', arbeid: k.hørerTil || k.forslag })
+        } else if (k.åpne?.length) arbeidLinje = `Arbeid i gang i ${project}: ${k.åpne.slice(0, 3).map((r) => `«${r.name}» (${r.samtaler} ${r.samtaler === 1 ? 'samtale' : 'samtaler'})`).join(', ')} — hører denne samtalen til ett av dem, sier brukeren det («hører til …»)`
+      }
+    } catch (e) { log({ error: `start: ${e?.message || e}` }) }
+    if (parts.length || extra.length || siden || arbeidLinje) process.stdout.write(`Tua: ${[...parts, ...extra, siden, arbeidLinje].filter(Boolean).join('. ')}. ${parts.length ? 'Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. ' : ''}Ikke kjør noe uten at brukeren sier ja.\n`)
     log({ pending, pendingCw, desktop: hc?.desktopNew, dokumenter: hc?.dokumenter, inbox: inbox.length, days, daysCw, first: !st.last, repoOffer: extra.length > (st.last ? 0 : 1) })
     if (konfigurert) log({ arkivmappe: konfigurert.root, before: konfigurert.before, note: 'innstillingen «arkivmappe» skrevet til ~/.tua/config.json' })
   } else if (mode === 'prompt') {
     // M19: UserPromptSubmit. Skriver ALDRI til stdout (det ville blitt kontekst i prompten). Svaret kobles på i svar-modus.
-    const p = String(input.prompt || '')
-    if (!worthKeeping(p)) { log({ skipped: 'kort/kommando', len: p.length }); process.exit(0) }
+    const p = imp.stripReminders(String(input.prompt || ''))                                       // friksjon 20: systemtekst (bakgrunn fra startøkta, blokker, markører) er ikke brukerens prompt — samme hash som importen
     const atoms = load()
+    // friksjon 20: første ekte melding i en samtale → samtale-saken finnes fra nå (stubb; okt-modus fyller den), med gren, vert og kobling/forslag til et arbeid —
+    // uavhengig av om meldingen er lang nok til å bli en prompt-sak (≥ 20 tegn, ikke en /tua-kommando, ikke en melding som bare var systemtekst)
+    let stubb = null
+    if (sid && !(tr?.prompts?.length) && p.length >= 20 && !isTuaCommand(p) && !atoms.some((a) => a.key === `okt:${sid}`)) {
+      const r = samtaleSak(atoms, { content: stubbInnhold(p), short: `Samtale i ${project} (${KILDE}) — i gang: «${clip(flat(p), 120)}»`, summary: `Samtale i ${KILDE}, lagret automatisk ved første melding.` })
+      stubb = { id: r.atom.id, status: r.status, kobling: r.kobling.grunn || (r.kobling.forslag ? 'forslag' : null) }
+    }
+    if (!worthKeeping(p)) { if (stubb && stubb.status !== 'uendret') save(atoms); log({ skipped: 'kort/kommando', len: p.length, ...(stubb ? { samtaleSak: stubb.id, kobling: stubb.kobling } : {}) }); process.exit(0) }
     const { atom, status } = promptSak(atoms, p)
-    if (status !== 'uendret') save(atoms)
-    log({ status, id: atom.id, project, len: p.length })
+    if (status !== 'uendret' || (stubb && stubb.status !== 'uendret')) save(atoms)
+    log({ status, id: atom.id, project, len: p.length, ...(stubb ? { samtaleSak: stubb.id, kobling: stubb.kobling } : {}) })
   } else if (mode === 'svar') {
     const msg = String(input.last_assistant_message || '').trim()
     const atoms = load()
@@ -158,33 +209,36 @@ try {
     if (isDataDump(content)) { log({ skipped: 'data-dump', file: fp }); process.exit(0) }
     const atoms = load()
     const old = atoms.find((a) => a.key === `fil:${fp}`)
+    const samtalen = atoms.find((a) => a.key === `okt:${sid}`)                                      // friksjon 20: fila henger på samtalens arbeid
     const { atom, status } = upsert(atoms, {
       key: `fil:${fp}`, name: titleOf(content, path.basename(fp, path.extname(fp))), content, project, convo: old && old.content === content.trim() ? old.convo : convo, source: 'Claude', by: 'regel',   // uendret innhold i ny økt = ikke ny versjon
       tags: ['dokument', 'auto'], links: [{ kind: 'file', href: fp }, ...repo], short: clip(firstPara(content), S_MAX),
-      summary: `Skrevet i Claude Code (${input.tool_name}), lagret automatisk med lenke til fila.`,
+      summary: `Skrevet i Claude Code (${input.tool_name}), lagret automatisk med lenke til fila.`, ...(samtalen?.hørerTil ? { hørerTil: samtalen.hørerTil } : {}),
     })
     if (status !== 'uendret') save(atoms)
     log({ status, id: atom.id, project, file: fp })
   } else if (mode === 'okt') {
-    if (!tr || tr.prompts.length < 2) { log({ skipped: 'for kort økt', prompts: tr?.prompts.length || 0 }); process.exit(0) }
-    const when = (t) => (t ? new Date(t).toLocaleString('no-NO', { dateStyle: 'short', timeStyle: 'short' }) : '')
+    // friksjon 20 (økt-sakene): «Oppgaver» = det et menneske skrev, med klokkeslett og i rekkefølge (parseCodeSession har alt filtrert systemtekst); L har HELE siste svar og HELE fillista
+    if (!tr || tr.prompts.length < 1) { log({ skipped: 'ingen menneskeprompt', prompts: tr?.prompts.length || 0, harness: tr?.harness || 0 }); process.exit(0) }
     const files = [...new Set([...tr.files.keys(), ...tr.edited])].filter((f) => !/\/(node_modules|\.tua)\//.test(f))
     const content = [
-      `# Økt: ${convo}`, '',
-      `_${project} · ${tr.turns} oppgaver · ${when(tr.first)}${tr.last ? ` – ${when(tr.last)}` : ''} · ${input.hook_event_name}${input.reason ? ` (${input.reason})` : input.trigger ? ` (${input.trigger})` : ''}_`, '',
-      '## Oppgaver', ...tr.prompts.slice(0, 30).map((p) => `- ${clip(flat(p), 160)}`), tr.prompts.length > 30 ? `- … og ${tr.prompts.length - 30} til` : null, '',
-      files.length ? '## Filer skrevet' : null, ...files.slice(0, 40).map((f) => `- ${f}`), files.length ? '' : null,
-      tr.lastAssistant ? '## Siste svar' : null, tr.lastAssistant ? clip(tr.lastAssistant.trim(), 1500) : null,
+      `# ${convo}`, '',
+      `_${KILDE} · ${tr.turns} oppgaver · ${når(tr.first)}${tr.last && når(tr.last) !== når(tr.first) ? ` – ${når(tr.last)}` : ''} · ${project}${gren ? ` · gren ${gren}` : ''} · ${input.hook_event_name}${input.reason ? ` (${input.reason})` : input.trigger ? ` (${input.trigger})` : ''}_`, '',
+      '## Oppgaver', ...tr.pairs.map((p) => `- ${klokke(p.at)} — ${oppgave(p.prompt)}`), '',
+      files.length ? '## Filer skrevet' : null, ...files.map((f) => `- ${f}`), files.length ? '' : null,
+      tr.lastAssistant ? '## Siste svar' : null, tr.lastAssistant ? tr.lastAssistant.trim() : null,
     ].filter((l) => l !== null).join('\n')
     const atoms = load()
-    const { atom, status } = upsert(atoms, {
-      key: `okt:${sid}`, name: `Økt: ${convo}`, content, project, convo, source: 'Claude', by: 'regel', tags: ['økt', 'auto'], links: repo,
-      short: samtaleS(tr),   // friksjon 9 (24.10.2026): S = siste vending («Sist: … → …», antall og periode), samme regel som importen — ikke første prompt
-      summary: `Økt-sammendrag laget automatisk ved ${input.hook_event_name}.`, fanget: true,
-      ...(fs.existsSync(path.join(repoRootOf(cwd), 'tua-plugin', 'server', 'store.js')) ? { drift: true } : {}),   // runde 2d (03-avisen §5 E): en økt i Tua-repoet er en byggeøkt — drift (Tua om seg selv), ikke spor
+    const { atom, status, kobling: k } = samtaleSak(atoms, {
+      content, short: samtaleS(tr),   // friksjon 9 (24.10.2026): S = siste vending («Sist: … → …», antall og periode), samme regel som importen — ikke første prompt
+      medium: samtaleM({ ...tr, filer: files, kilde: KILDE }),   // friksjon 20: M = første spørsmål + siste svar + filene (regel; gemma kan skrive den på nytt fra Innstillinger)
+      summary: `Samtale i ${KILDE}, lagret automatisk ved ${input.hook_event_name}.`,
     })
-    if (status !== 'uendret') save(atoms)
-    log({ status, id: atom.id, project, turns: tr.turns })
+    if (tr.first && atom.createdAt !== tr.first) { atom.createdAt = tr.first; store.markDirty(atoms, atom.id) }   // samtalen begynte da første melding kom — løpet ordner samtalene etter det
+    // filene denne samtalen skrev henger på samme arbeid (de som finnes som saker nå — fil-modus tar de neste)
+    if (atom.hørerTil) for (const f of files) { const fa = atoms.find((a) => a.key === `fil:${f}`); if (fa && !fa.hørerTil) { fa.hørerTil = atom.hørerTil; store.markDirty(atoms, fa.id) } }
+    if (status !== 'uendret' || store.dirtyIds(atoms).length) save(atoms)
+    log({ status, id: atom.id, project, turns: tr.turns, filer: files.length, harness: tr.harness, kobling: k.grunn || (k.forslag ? 'forslag' : null) })
   }
 } catch (e) {
   log({ error: String(e?.message || e) })
