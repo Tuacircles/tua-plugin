@@ -16,6 +16,8 @@
 // Runde 2c (app): regler.nesteRad (j/k), fangetTekst, innlesingTekst, slippProsjekt, sidenSist med fanget, lesHash #fanget; broen: POST /api/les med fila som rå kropp
 // (dra og slipp) — SSE med side {side, av} for PDF, lander i «Uten prosjekt»; POST /api/flytt (dra en sak til en mappe); /api/search bærer fangetUtenfor;
 // POST /api/konklusjon {strøm: true} som SSE (vurderer {svar: N} → forskjeller → konklusjon-del → konklusjon → slutt).
+// Friksjon 18 (25.10.2026): tallene i bryteren «Avis · N Mapper · N Filer» regnet av /api/atoms og /api/mappe (regler.mapperMed/tellVisning), Filer-lista (regler.filerFlat)
+// sortert dato sist først med mappefiler på mtime, klasse-regelen (spor og drift bare med «ta med» — i Mapper alltid), og passerFil (filter på mappefiler).
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
 
@@ -286,6 +288,39 @@ try {
   ok('sti som står i teksten men ikke finnes → 403', (await åpne({ id: lenkeliste.id, href: path.join(HJEM, 'pakke-finnes-ikke.zip') })).status === 403)
   ok('uten id: broen finner saken som nevner stien → vist; ukjent sti → 403', (await åpne({ href: path.join(MAPPE, 'Anke-v3.docx') })).status === 200 && (await åpne({ href: path.join(HJEM, 'hemmelig.txt') })).status === 403)
   ok('sakens egen fil virker som før', (await åpne({ id: lenkeliste.id })).status === 200)
+
+  // ── 6) friksjon 18: «Avis · N Mapper · N Filer» med ekte tall, Filer som flat liste, klasse-regelen, filter på mappefiler ─
+  const LAGER = path.join(ROOT, 'Lager'), DAG = 86400e3, nå = Date.now()
+  fs.writeFileSync(path.join(LAGER, 'Leieavtale-signert.pdf'), '%PDF-1.4 ' + 'x'.repeat(5000)); fs.utimesSync(path.join(LAGER, 'Leieavtale-signert.pdf'), new Date('2020-03-01T10:00:00Z'), new Date('2020-03-01T10:00:00Z'))
+  fs.writeFileSync(path.join(LAGER, 'Oversikt.html'), '<html><body><h1>Oversikt</h1></body></html>')
+  fs.mkdirSync(path.join(LAGER, 'Vedlegg'), { recursive: true }); fs.writeFileSync(path.join(LAGER, 'Vedlegg', 'Notat.docx'), Buffer.alloc(3000)); fs.utimesSync(path.join(LAGER, 'Vedlegg', 'Notat.docx'), new Date(nå - 3 * DAG), new Date(nå - 3 * DAG))
+  { const at6 = load(); upsert(at6, { key: 'svar:hook:fanget1', name: 'Fanget svar fra en Code-økt', content: 'Et svar hooken fanget. '.repeat(30), project: 'Lager', fanget: true, by: 'regel', short: 'Et svar hooken fanget.' }); upsert(at6, { key: 'commit-logg', name: 'Commit-logg', content: 'Speilet fra repoet. '.repeat(20), project: 'Lager', drift: true, by: 'regel', short: 'Commit-logg speilet fra repoet.' }); save(at6) }
+  const at6 = JSON.parse((await hent('/api/atoms')).tekst).atoms
+  const mp = JSON.parse((await hent('/api/mappe')).tekst).prosjekter
+  const lagerInfo = mp.find((p) => p.navn === 'Lager')
+  ok('friksjon 18: GET /api/mappe teller filene som ikke er saker per prosjekt (Lager: 3 — pdf, html og docx i undermappe; .md teller som sak, ikke fil)', lagerInfo?.filer === 3 && lagerInfo.saker === at6.filter((a) => a.project === 'Lager').length, JSON.stringify(lagerInfo))
+  const filer6 = []   // slik appen gjør det: filene hentes for hvert prosjekt som har noen
+  for (const p of mp) if (p.filer > 0) { const j = JSON.parse((await hent(`/api/mappe?prosjekt=${encodeURIComponent(p.navn)}`)).tekst); for (const f of j.filer) filer6.push({ ...f, project: p.navn }) }
+  ok('friksjon 18: GET /api/mappe?prosjekt gir mtime (tall) og sti på hver fil, nyeste først', filer6.length === 3 && filer6.every((f) => typeof f.mtime === 'number' && f.mtime > 0 && typeof f.sti === 'string') && filer6.find((f) => f.navn === 'Notat.docx')?.sti === 'Vedlegg/Notat.docx', JSON.stringify(filer6.map((f) => [f.navn, f.sti])))
+  const mapperL = regler.mapperMed(at6, filer6), flatAlle = regler.filerFlat(regler.utvalg(at6), filer6), tallene = regler.tellVisning(mapperL, flatAlle)
+  const prosjekterMedFil = new Set([...at6.map((a) => a.project), ...filer6.map((f) => f.project)])
+  ok('friksjon 18: tallet på Mapper-knappen = prosjekter med minst én fil (saker eller mappefiler) — regnet av /api/atoms + /api/mappe', tallene.mapper === prosjekterMedFil.size && tallene.mapper === mp.filter((p) => p.saker + p.filer > 0).length, `${tallene.mapper} · ${prosjekterMedFil.size} · ${mp.filter((p) => p.saker + p.filer > 0).length}`)
+  ok('friksjon 18: tallet på Filer-knappen = saker etter klasse-regelen + mappefiler; Mapper-raden «Lager · N» = alle saker i mappa + 3 filer', tallene.filer === regler.utvalg(at6).length + 3 && mapperL.find((m) => m.navn === 'Lager')?.antall === at6.filter((a) => a.project === 'Lager').length + 3, `${tallene.filer} · ${mapperL.find((m) => m.navn === 'Lager')?.antall}`)
+  ok('friksjon 18: Filer-lista er dato sist først — mappefiler på mtime: Oversikt.html (nå) først, Leieavtale-signert.pdf (2020) sist', flatAlle.every((r, i) => i === 0 || flatAlle[i - 1].tid >= r.tid) && flatAlle[0].slag === 'fil' && flatAlle[0].fil.navn === 'Oversikt.html' && flatAlle.at(-1).fil?.navn === 'Leieavtale-signert.pdf', flatAlle.slice(0, 3).map((r) => r.navn).join(' | '))
+  ok('friksjon 18: én linje per fil — saker i Filer er ikke slått sammen til tråder (prompt-saken står ikke, svarene i tråden står som filer i treff)', !flatAlle.some((r) => r.slag === 'sak' && r.sak.kind === 'prompt') && regler.filerFlat(regler.utvalg(at6, { treff: true }), []).some((r) => r.sak?.kind === 'svar'))
+  const fanget6 = at6.find((a) => a.key === 'svar:hook:fanget1'), drift6 = at6.find((a) => a.key === 'commit-logg')
+  ok('friksjon 18: klasse-regelen i Filer — fanget og drift står utenfor uten «ta med» …', !!fanget6 && !!drift6 && !flatAlle.some((r) => r.sak?.id === fanget6.id || r.sak?.id === drift6.id))
+  const flatMed = regler.filerFlat(regler.utvalg(at6, { med: true }), filer6)
+  const u6 = regler.utenfor(at6)   // arkivet har alt fangede og drift fra importen over — tallet vokser med akkurat det utenfor-linja sier
+  ok('… og er med når «ta med» er på; tallet på Filer-knappen vokser med det som sto utenfor', flatMed.some((r) => r.sak?.id === fanget6.id) && flatMed.some((r) => r.sak?.id === drift6.id) && regler.tellVisning(mapperL, flatMed).filer === tallene.filer + u6.fanget + u6.drift, `${tallene.filer} → ${regler.tellVisning(mapperL, flatMed).filer} (${u6.fanget} fangede, ${u6.drift} drift)`)
+  ok('friksjon 18: Mapper viser alt i mappa, som Finder — fanget og drift ligger under Lager uansett', mapperL.find((m) => m.navn === 'Lager').saker.some((a) => a.id === fanget6.id) && mapperL.find((m) => m.navn === 'Lager').saker.some((a) => a.id === drift6.id))
+  ok('friksjon 18: en mappe med bare mappefiler er også en mappe (teller på Mapper-knappen), og antall = filene', regler.mapperMed([], filer6).find((m) => m.navn === 'Lager')?.antall === 3 && regler.tellVisning(regler.mapperMed([], filer6), []).mapper === 1)
+  ok('friksjon 18: utenfor-linja under Filer sier det samme som knappen holder utenfor («N fangede · N drift holdt utenfor»)', u6.fanget >= 1 && u6.drift >= 1 && regler.utenforTekst(u6) === `${u6.fanget} ${u6.fanget === 1 ? 'fanget' : 'fangede'} · ${u6.drift} drift holdt utenfor`, regler.utenforTekst(u6))
+  const pdf6 = filer6.find((f) => f.navn === 'Leieavtale-signert.pdf'), html6 = filer6.find((f) => f.navn === 'Oversikt.html'), docx6 = filer6.find((f) => f.navn === 'Notat.docx')
+  ok('friksjon 18: passerFil — navnefilteret treffer filnavn og sti (uavhengig av store/små bokstaver)', regler.passerFil(pdf6, { q: 'leieavtale' }) && !regler.passerFil(html6, { q: 'leieavtale' }) && regler.passerFil(docx6, { q: 'vedlegg' }))
+  ok('friksjon 18: passerFil — perioden gjelder filas tid: siste 7 dager tar html og docx, ikke PDF-en fra 2020; egen periode med til-dato', regler.passerFil(html6, { fra: nå - 7 * DAG }) && regler.passerFil(docx6, { fra: nå - 7 * DAG }) && !regler.passerFil(pdf6, { fra: nå - 7 * DAG }) && regler.passerFil(pdf6, { fra: Date.parse('2020-01-01'), til: Date.parse('2020-06-01') }) && !regler.passerFil(html6, { fra: Date.parse('2020-01-01'), til: Date.parse('2020-06-01') }))
+  ok('friksjon 18: passerFil — prosjektfilteret på mappa; type/samtale/tagg er sakens egenskaper og holder mappefiler utenfor', regler.passerFil(pdf6, { prosjekt: 'Lager' }) && !regler.passerFil(pdf6, { prosjekt: 'Hytta' }) && !regler.passerFil(pdf6, { type: 'dokument' }) && !regler.passerFil(pdf6, { samtale: 'x' }) && !regler.passerFil(pdf6, { tagg: 'x' }))
+  ok('friksjon 18: tallene følger filteret — med «leieavtale» i navnefilteret er bare PDF-en med blant mappefilene', regler.tellVisning(regler.mapperMed([], filer6.filter((f) => regler.passerFil(f, { q: 'leieavtale' }))), regler.filerFlat([], filer6.filter((f) => regler.passerFil(f, { q: 'leieavtale' })))).filer === 1)
 } finally { bro.kill() }
 
 console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT}`)
