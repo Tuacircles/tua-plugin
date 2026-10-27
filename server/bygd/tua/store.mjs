@@ -299,7 +299,7 @@ function logDelivery(entry) {
 function deliveries(id, limit = 10) {
   try {
     return fs__default.readFileSync(DELIVERY(), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } })
-      .filter((e) => e && (!id || e.id === id || (Array.isArray(e.saker) && e.saker.some((s) => s && s.id === id)))).slice(-limit)
+      .filter((e) => e && (!id || e.id === id || (Array.isArray(e.saker) && e.saker.some((s) => s && s.id === id)) || e.prompt === id || e.svar === id || e.samtale === id || (Array.isArray(e.vendinger) && e.vendinger.some((v) => v && v.id === id)))).slice(-limit)   // skive 1 (arb. 33): også sendinger der saken var spørsmålet, svaret, samtalen eller en vending
   } catch { return [] }
 }
 // Runde 1: Spørs biprodukter som ÉN tråd. Ett spørsmål til to modeller gir fem saker (prompt, to svar, Forskjeller, konklusjon); i avisen, Oppslag,
@@ -889,5 +889,10 @@ function ensureArchive() {
 const MASKINKILDE = /claude|chatgpt|gpt|gemini|ollama|^tua\b|tua$|test|perplexity|cowork|desktop|sync|agent|design|copilot|cursor|mistral|llama|regel|^$/i;
 const erMenneskeskrevet = (a) => !!a && (a.levels?.S?.by === 'menneske' || a.levels?.M?.by === 'menneske' || !MASKINKILDE.test(String(a.source || '').trim()));
 const erTuaRepo = (root) => !!root && fs__default.existsSync(path__default.join(String(root), 'tua-plugin', 'server', 'store.js'));
+// Claude-øktene (03-avisen §5, E): én linje per økt. Økt-id leses av nøkkelen — okt:<økt> (hook), samtale:<økt> (import), svar:<økt8>:… og prompt:<økt8>:… — og
+// normaliseres til de åtte første tegnene, så hookens og importens saker fra samme økt lander i samme linje. Filene Claude skrev (fil:…) har ingen økt i nøkkelen;
+// de knyttes til økta via samtalenavnet (convo) i samme prosjekt. Bare metadata og id-er — enkeltsakene er fanget til brukeren løfter dem inn.
+const ØKT_NØKKEL = /^(?:okt|samtale):([^:]+)$|^(?:svar|prompt):(?!spor:)([^:]+):/;
+const øktIdAv = (key) => { const m = ØKT_NØKKEL.exec(String(key || '')); const id = m ? (m[1] || m[2]) : null; return id ? id.slice(0, 8) : null };
 
-export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaRepo, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, hashOf, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, markDirty, maxLevel, mergeGa, needsLevel, noteImport, onboardingActive, projectOf, projects, readConfig, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sha8, sources, staleSources, statusOf, tråder, upsert, vaultClamp, versions, visibleIn, welcomeAtom };
+export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaRepo, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, hashOf, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, markDirty, maxLevel, mergeGa, needsLevel, noteImport, onboardingActive, projectOf, projects, readConfig, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sha8, sources, staleSources, statusOf, tråder, upsert, vaultClamp, versions, visibleIn, welcomeAtom, øktIdAv };

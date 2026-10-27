@@ -6,6 +6,7 @@ import { FILE_MANAGER, openSpawn } from './platform.mjs';
 import { N3, K3, p } from '../vendor/@modelcontextprotocol/ext-apps/src/server/index.mjs';
 import { load, visibleIn, hasExternalEdits, save, search, vaultClamp, maxLevel, related, linksFor, isStale, fileOf, renderStatus, sources, isVault, fmtTime } from './store.mjs';
 import { skjermerFor, lever } from './motor.mjs';
+import { vendingerFor, sistI, antallVendinger, erTuaSamtale } from './samtale.mjs';
 import { delingerFor, lenkerFor } from './deling.mjs';
 import { trådFørst as tr_dF_rst, skalVise, sidenSist, instruksFor } from './dora.mjs';
 import { booleanType, numberType, stringType, enumType } from '../vendor/zod/v3/types.mjs';
@@ -170,6 +171,7 @@ function registerApps(server, { client = 'Claude' } = {}) {
         id: a.id, name: sk.skjerm(a.name), project: a.project, date: date(a.capturedAt), version: a.version || 1, kind: a.kind || 'capture',
         S: S.level === 'S' ? sk.skjerm(S.text) : '', snippet: sk.skjerm(snippet || ''), max, tags: (a.tags || []).slice(0, 4),
         ...(tråd ? { thread: { svar: tråd.svar.length, konklusjon: tråd.konklusjon ? tråd.konklusjon.status : '' } } : {}),
+        ...(a.kind === 'samtale' ? (() => { const v = vendingerFor(atoms, a); return { samtale: { kilde: erTuaSamtale(a) ? 'Tua' : a.source || 'Claude', vendinger: antallVendinger(v), siste: date(sistI(a, v)) } } })() : {}),   // skive 1 (arb. 33)
       }));
       const prosjekt = project || context || '';
       const siden = skalVise(prosjekt) ? sidenSist(atoms, { prosjekt }) : null;
@@ -178,7 +180,7 @@ function registerApps(server, { client = 'Claude' } = {}) {
       const sc = { mode: 'list', query: query || '', project: project || '', total: hits.total, items, ...(sidenSc ? { sidenSist: sidenSc } : {}), ...(instruks ? { instruks: instruks.tekst, instruksProsjekt: instruks.prosjekt } : {}) };
       const txt = (items.length
         ? `${hits.total} treff${query ? ` på «${query}»` : ''}${project ? ` i ${project}` : ''} (viser ${items.length}${hits.tråder ? `, ${hits.tråder} tråder fra Spør øverst` : ''}):\n` +
-          items.map((i) => `- [${i.id}] ${i.name} — ${i.project} · ${i.date}${i.thread ? ` · tråd: ${i.thread.svar} svar${i.thread.konklusjon ? `, konklusjon ${i.thread.konklusjon}` : ''}` : ''}${i.S ? `\n  ${i.S}` : ''}`).join('\n')
+          items.map((i) => `- [${i.id}] ${i.name} — ${i.project} · ${i.date}${i.thread ? ` · tråd: ${i.thread.svar} svar${i.thread.konklusjon ? `, konklusjon ${i.thread.konklusjon}` : ''}` : ''}${i.samtale ? ` · samtale ${i.samtale.kilde === 'Tua' ? 'i Tua' : `fra ${i.samtale.kilde}`}: ${i.samtale.vendinger} vendinger, siste ${i.samtale.siste}` : ''}${i.S ? `\n  ${i.S}` : ''}`).join('\n')
         : `Ingen treff${query ? ` på «${query}»` : ''}.`) +
         (sk.treff ? `\nSkjermet: ${sk.treff} (plassholdere — bruk dem uendret).` : '') +
         (siden ? `\n\n${sk.skjerm(siden.tekst)}` : '');

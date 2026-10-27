@@ -8,6 +8,7 @@ import { ensureArchive, archiveOptions, FILES_ROOT, filesMode, rootLabel, choose
 import { DEFAULT_MIN, processInbox, processInboxShares, inboxPending, importShare, importDesktop, importFinder, importAll, historyCounts, importCode, watchInbox, watchDesktop, historyLine } from './bygd/tua/import.mjs';
 import { watchFinder } from './bygd/tua/finder.mjs';
 import { skjermerFor, lever, endepunkt, maksNivå as maksNiv_, anslåTokens as ansl_Tokens, ord, del } from './bygd/tua/motor.mjs';
+import { vendingerFor, antallVendinger, sistI, erTuaSamtale } from './bygd/tua/samtale.mjs';
 import { instruksFor, trådFørst as tr_dF_rst, trådLinje as tr_dLinje, skalVise, sidenSist } from './bygd/tua/dora.mjs';
 import { lesInnInnboks } from './bygd/tua/innlesing.mjs';
 import { enumType, stringType, booleanType, numberType, arrayType, objectType, unionType } from './bygd/vendor/zod/v3/types.mjs';
@@ -323,6 +324,9 @@ server.registerTool(
   },
 );
 
+// Skive 1 (arb. 33, V22): én linje om en samtale-sak i treffene — kilde, antall vendinger, siste vending. Tua-samtaler (ført i appen) er samtaler på lik linje med Code/Cowork/Desktop.
+const samtaleLinje = (atoms, a) => { const v = vendingerFor(atoms, a); const n = antallVendinger(v); const sist = sistI(a, v); return `Samtale ${erTuaSamtale(a) ? 'i Tua' : `fra ${a.source || 'Claude'}`}: ${n} ${n === 1 ? 'vending' : 'vendinger'}, siste ${new Date(sist).toLocaleDateString('no-NO', { day: 'numeric', month: 'numeric', year: 'numeric' })}${v.some((x) => x.rolle === 'konklusjon' && x.låst) ? ' · konklusjon låst' : ''}` };
+
 server.registerTool(
   'tua_search',
   {
@@ -359,6 +363,7 @@ server.registerTool(
     const lines = hits.map(({ atom: a, S, max, snippet: s, tråd }, i) =>
       `${i + 1}. [${a.id}] ${sk.skjerm(a.name)}\n   ${a.project}${refMark(a, max)} · ${sk.skjerm(a.convo || '—')} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
       (tråd ? `\n   ${sk.skjerm(tr_dLinje(tråd))}${tråd.traff.length > 1 ? ` · traff også: ${tråd.traff.filter((id) => id !== a.id).map((id) => `[${id}]`).join(' ')}` : ''}` : '') +
+      (a.kind === 'samtale' ? `\n   ${samtaleLinje(atoms, a)}` : '') +   // skive 1 (arb. 33): «Samtale i Tua: 4 vendinger, siste 27.10.2026»
       `\n   ${sLabel(S)}: ${sk.skjerm(S.text)}${staleNote(a, 'S')}` +
       (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${sk.skjerm(a.summary)}` : '') +
       (s ? `\n   Treff: ${sk.skjerm(s)}` : '') +

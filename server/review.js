@@ -33,6 +33,9 @@
 //   «Merk arkivet» i Innstillinger › Arkivsted (POST /api/arkiv/merk) — det er Erik som trykker. Skrivingen går gjennom saveAll (én skriver: bare det som er
 //   endret skrives, og en fil en annen prosess har endret siden lesing flettes treveis, aldri overskrives).
 //
+//   node review.js --traader              skive 1 i arbeidsstykke 33 (V22, 27.10.2026): gamle Tua-tråder (prompt:spor:-saker uten samtale-sak — 16 i Eriks arkiv) får en
+//                                         samtale-sak med kilde Tua (nøkkel samtale:tua:<hash av prosjekt+samtalenavn>, transkript, S/M, start = første spørsmål), og prompt,
+//                                         svar, Forskjeller og konklusjon får bygget_av → samtalen. DRY-RUN som standard (viser, skriver ingenting); --skriv gjør det.
 //   node review.js --rydd                 runde 3c: Tuas ryddeforslag (store.ryddeforslag) — duplikater (identisk innhold · samme ingress · samme tittel i samme prosjekt),
 //                                         «---»-titler og tomme saker. Viser bare; utføres i appen (Slå sammen / Kast per forslag) eller med --rydd --kast-tomme.
 
@@ -84,6 +87,19 @@ if (args.includes('--fanget')) {
   if (tall.nye > vis.length) console.log(`  … og ${tall.nye - vis.length} til`)
   if (!dryRun && tall.nye) { const written = saveAll(atoms); console.log(`\n${tall.nye} saker merket fanget · ${written} filer skrevet. Angre per sak: Behold i appen (POST /api/fanget/behold {id}).`) }
   else if (!dryRun) console.log('\nIngenting å skrive.')
+  process.exit(0)
+}
+
+if (args.includes('--traader')) {
+  const { gamleTråder, gjørOmTråd } = await import('./samtale.js')
+  const skriv = args.includes('--skriv')
+  const grupper = gamleTråder(atoms)
+  const alleSamtaler = atoms.filter((a) => a.kind === 'samtale'), tua = alleSamtaler.filter((a) => String(a.source || '') === 'Tua')
+  console.log(`${atoms.length} saker · ${alleSamtaler.length} samtale-saker (${tua.length} ført i Tua) · ${grupper.length} gamle Tua-tråder uten samtale-sak${skriv ? '' : ' · DRY-RUN, ingenting skrevet (legg til --skriv)'}`)
+  for (const g of grupper.slice(0, 30)) console.log(`  ${g.project} / «${g.convo}»  ${g.prompter.length} spørsmål · ${g.saker.length} saker får bygget_av → samtalen${g.hørerTil ? ' · hører til et arbeid' : ''}`)
+  if (grupper.length > 30) console.log(`  … og ${grupper.length - 30} til`)
+  if (skriv && grupper.length) { const laget = grupper.map((g) => gjørOmTråd(atoms, g)); const written = save(atoms); console.log(`\n${laget.length} samtale-saker laget · ${written} filer skrevet`) }
+  else if (skriv) console.log('\nIngenting å skrive.')
   process.exit(0)
 }
 

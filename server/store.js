@@ -326,7 +326,7 @@ export function logDelivery(entry) {
 export function deliveries(id, limit = 10) {
   try {
     return fs.readFileSync(DELIVERY(), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } })
-      .filter((e) => e && (!id || e.id === id || (Array.isArray(e.saker) && e.saker.some((s) => s && s.id === id)))).slice(-limit)
+      .filter((e) => e && (!id || e.id === id || (Array.isArray(e.saker) && e.saker.some((s) => s && s.id === id)) || e.prompt === id || e.svar === id || e.samtale === id || (Array.isArray(e.vendinger) && e.vendinger.some((v) => v && v.id === id)))).slice(-limit)   // skive 1 (arb. 33): også sendinger der saken var spørsmålet, svaret, samtalen eller en vending
   } catch { return [] }
 }
 // Runde 1 (arbeidsstykke 32 §6, 24.10.2026): hvor mange sendinger hver sak har vært med i — én lesing av loggen for hele arkivet (til /api/atoms,
@@ -941,7 +941,7 @@ export function ensureArchive() {
 //   slåSammen(…)  innholdet legges som ny versjon av en annen sak (kildepeker i bygget_av), den fangede går i papirkurven
 //   kast(…)       fila flyttes til <arkiv>/.tua/papirkurv/<prosjekt>/ med indeks — aldri slett; angre(…) flytter den tilbake
 // Regelen for engangs-merkingen av det som alt ligger i arkivet (review.js --fanget): nøkkelen sier hvor saken kom fra.
-export const FANGET_NØKLER = /^(svar|okt|samtale):|^prompt:(?!spor:)/      // svar:<økt8>:… og prompt:<økt8>:… (hook/import), okt:<økt> (hook), samtale:<id> (import); prompt:spor: er Spør
+export const FANGET_NØKLER = /^(svar|okt):|^samtale:(?!tua:)|^prompt:(?!spor:)/      // svar:<økt8>:… og prompt:<økt8>:… (hook/import), okt:<økt> (hook), samtale:<id> (import); prompt:spor: er Spør og samtale:tua: er en samtale ført i Tua (skive 1, arb. 33) — aldri fangst
 export const harFangetNøkkel = (a) => !!a && ((!!a.key && FANGET_NØKLER.test(a.key)) || erØktUtenNøkkel(a))   // runde 3c: «Økt: …» uten okt:-nøkkel er også fangst
 export function erFangetEtterRegel(a, { utlevert = 0 } = {}) {
   if (a?.fanget === false) return false                                                   // løftet inn med Behold — brukerens valg, regelen rører den aldri igjen
@@ -1166,7 +1166,7 @@ export const erMenneskeskrevet = (a) => !!a && (a.levels?.S?.by === 'menneske' |
 // Tuas eget prosjekt: et prosjekt hvis registrerte repo ER Tua-repoet (tua-plugin/server/store.js finnes der), eller prosjektet «Tua» (pluginens eget).
 // PDF-dokumenterte arbeidsstykker (dok:…) er arbeid, ikke drift. En sak med drift: false (Behold) eller noe menneskeskrevet merkes aldri.
 export const DRIFT_NØKLER = /^(commit-logg|manifest|status|lenker|beslutningslogg|import:|helsesjekk:)/
-export const BYGGEØKT_NØKLER = /^(okt|samtale|svar):|^prompt:(?!spor:)/
+export const BYGGEØKT_NØKLER = /^(okt|svar):|^samtale:(?!tua:)|^prompt:(?!spor:)/   // samtale:tua: (ført i Tua, skive 1 arb. 33) er ikke en byggeøkt
 // Runde 3c (03-avisen, restene; STATUS 24.10 kveld): to klasser strammes. (1) `dok:`-saker (dokumenter speilet av sync) i Tuas EGNE prosjekter er byggeøktenes
 // overleveringsnotater og arbeidsstykker om Tua selv — drift der, arbeid i alle andre prosjekter (en PDF speilet fra Skigaarden-repoet er arbeid). (2) En sak med
 // tittel «Økt: …» fra en maskinkilde UTEN hook-nøkkel (okt:) er en økt-rapport som kom inn på en annen vei (eldre hook, kopi) — drift i Tuas prosjekter, fanget ellers.

@@ -138,7 +138,8 @@ import { watchInbox, watchDesktop, importAlt, IMPORT_STEG, historyCounts, countP
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
 import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, settStandard as ollamaStandard, lokale as ollamaLokale } from './ollama.js'   // friksjon 12: modellene i Ollama
-import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer, del, trekkDeling, beOmHele, mottakersideFor } from './motor.js'   // M20a/M20b: motoren — eneste vei ut til en modell
+import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer, del, trekkDeling, beOmHele, mottakersideFor, standardFor } from './motor.js'
+import { finnSamtale, vendingerFor, erTuaSamtale, nySamtaleId, samtaleNøkkel, antallVendinger, sistI } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak — GET /api/samtale, POST /api/samtale/ny   // M20a/M20b: motoren — eneste vei ut til en modell
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks
 import { inboxPending, inboxShareFiles } from './import.js'
 import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
@@ -706,13 +707,44 @@ http
         if (id && !sak) return json(res, 404, { error: `fant ikke sak ${id}` })
         return json(res, 200, { id: id || null, vault: sak ? isVault(sak) : false, ...standardNivåer(ms, sak) })
       }
+      // ── Skive 1 i arbeidsstykke 33 (V22 «Samtalen først», 27.10.2026): samtalen som sak ──
+      //   GET  /api/samtale?id=<samtale-sak, reservert id, eller en sak i samtalen> → { id, key, tittel, prosjekt, kilde, tua, start, sist, versjon, antall, hører_til, del_av, lenker, S,
+      //        vendinger: [{id, rolle: bruker|modell|konklusjon, modell, kilde, nivå, tid, S, L, tegn, versjon, beholdt, låst, status, prompt, forskjeller}],
+      //        standard: { <mottaker>: {vendinger: [id…], utenfor: [{id, hvorfor}], tokens, budsjett} } per mottaker som er klar · mottakere: [{id, label, aktiv, budsjett, standard, local}] }
+      //        Standardvalget regnes i motoren (samtale.standardVendinger): alt etter siste låste konklusjon, begrenset bakfra av mottakerens budsjett — ingenting kuttes stille.
+      //   POST /api/samtale/ny {prosjekt, hørerTil?} → { id, key, prosjekt, hørerTil }  reserverer en id; samtale-saken lagres ved første POST /api/spor med samtale: id
+      //   POST /api/spor og /api/spor/forhandsvis tar `vendinger: [{id, rolle}]` og `samtale`; forhåndsvis gir `meldinger` (hele messages slik modellen får dem), `budsjett` per mottaker.
+      //   Hendelsene skjermet/ferdig/slutt i /api/spor har `samtale` (samtale-sakens id) og skjermet har `meldinger`, `vendinger` og `budsjett`.
+      if (req.method === 'GET' && url.pathname === '/api/samtale') {
+        const id = String(url.searchParams.get('id') || '').trim()
+        if (!id) return json(res, 400, { error: 'id kreves — samtale-sakens id, en reservert id fra /api/samtale/ny, eller en sak i samtalen' })
+        const alle = load()
+        const s = finnSamtale(alle, id)
+        if (!s) return json(res, 404, { error: `fant ingen samtale for ${id}`, ...(/^t_/.test(id) ? { ny: true, hint: 'samtalen lagres ved første spørsmål (POST /api/spor med samtale)' } : {}) })
+        const vend = vendingerFor(alle, s)
+        const ms = await mottakere()
+        const standard = Object.fromEntries(ms.filter((m) => m.aktiv).map((m) => [m.id, standardFor(vend, m.id)]))
+        return json(res, 200, { id: s.id, key: s.key || null, tittel: s.name, prosjekt: s.project, kilde: s.source || '', kind: s.kind, tua: erTuaSamtale(s), start: s.createdAt || s.capturedAt, sist: sistI(s, vend), versjon: s.version || 1, antall: antallVendinger(vend),
+          hører_til: s.hørerTil || null, del_av: delAv(alle, s, følgereAv(alle)), lenker: linksFor(s), fanget: s.fanget === true, drift: s.drift === true, S: levelOf(s, 'S').text,
+          vendinger: vend, standard, mottakere: ms.map(({ id: mid, label, aktiv, budsjett, standard: std, local }) => ({ id: mid, label, aktiv, budsjett: budsjett || null, standard: std, local })) })
+      }
+      if (req.method === 'POST' && url.pathname === '/api/samtale/ny') {
+        const b = await readBody(req)
+        const prosjekt = String(b.prosjekt || '').replace(/\s+/g, ' ').trim()
+        if (!prosjekt) return json(res, 400, { error: 'prosjekt kreves — samtalen lagres i prosjektets mappe (se /api/prosjekter)' })
+        const hørerTil = b.hørerTil || b.hører_til ? String(b.hørerTil || b.hører_til) : null
+        if (hørerTil && !load().some((a) => a.id === hørerTil)) return json(res, 404, { error: `fant ikke arbeidet ${hørerTil}` })
+        const id = nySamtaleId()
+        return json(res, 200, { id, key: samtaleNøkkel(id), prosjekt, hørerTil, lagres: 'ved første POST /api/spor med samtale: id' })
+      }
       // Friksjon 15: «før du sender, ser du hva som sendes» — samme trinn som spor() fram til sendingen, ingenting sendes eller logges
       if (req.method === 'POST' && url.pathname === '/api/spor/forhandsvis') {
         const b = await readBody(req)
         const mottakerIds = [...new Set([...(Array.isArray(b.mottakere) ? b.mottakere : []), ...(b.mottaker ? [b.mottaker] : [])].map((x) => String(x || '').trim()).filter(Boolean))]
         if (!mottakerIds.length) return json(res, 400, { error: 'mottaker kreves (se /api/mottakere)' })
         const saker = Array.isArray(b.saker) ? b.saker.filter((s) => s && s.id) : []
-        try { return json(res, 200, forhåndsvis({ melding: String(b.melding || ''), saker, mottakere: mottakerIds, prosjekt: b.prosjekt ? String(b.prosjekt) : undefined })) }
+        const vendinger = Array.isArray(b.vendinger) ? b.vendinger.filter((v) => v && (typeof v === 'string' || v.id)) : []   // skive 1: vendingene som skal med, i rekkefølge
+        try { return json(res, 200, forhåndsvis({ melding: String(b.melding || ''), saker, mottakere: mottakerIds, prosjekt: b.prosjekt ? String(b.prosjekt) : undefined, vendinger, samtale: b.samtale ? String(b.samtale) : null })) }
         catch (e) { return json(res, e instanceof MotorFeil ? 400 : 500, { error: e.message }) }
       }
       if (req.method === 'POST' && url.pathname === '/api/spor') {
@@ -732,7 +764,8 @@ http
         req.on('close', () => ctl.abort())
         if (kjøring) kjøringer.set(kjøring, ctl)
         try {
-          const r = await spor({ melding: String(b.melding), saker, mottakere: mottakerIds, prosjekt, samtale: b.samtale || undefined, prompt: b.prompt || undefined, hørerTil: b.hørerTil || b.hører_til || null, klient: 'app', signal: ctl.signal, på: hendelse })   // friksjon 20: hørerTil = arbeidet spørsmålet stilles inne i
+          const vendinger = Array.isArray(b.vendinger) ? b.vendinger.filter((v) => v && (typeof v === 'string' || v.id)) : []   // skive 1 (arb. 33): de avkryssede vendingene, i rekkefølge — motoren bygger `messages`
+          const r = await spor({ melding: String(b.melding), saker, mottakere: mottakerIds, prosjekt, samtale: b.samtale || undefined, vendinger, prompt: b.prompt || undefined, hørerTil: b.hørerTil || b.hører_til || null, klient: 'app', signal: ctl.signal, på: hendelse })   // friksjon 20: hørerTil = arbeidet spørsmålet stilles inne i
           if (Array.isArray(r.svar)) console.error(`[tua-bro] spor → ${mottakerIds.join('+')} · ${prosjekt} · ${saker.length} saker · ${r.svar.length} svar${r.feilet?.length ? ` · ${r.feilet.length} feilet` : ''}${ctl.signal.aborted ? ' · STOPPET' : ''} · forskjeller ${r.forskjeller ? (r.forskjeller.tilgjengelig ? `${r.forskjeller.enig.length}/${r.forskjeller.uenig.length}/${r.forskjeller.unikt.length} (${r.forskjeller.vurdert_av})` : 'ikke tilgjengelig') : '—'} · konklusjon ${r.konklusjon?.id || '—'}`)
           else console.error(`[tua-bro] spor → ${mottakerIds[0]} · ${prosjekt} · ${saker.length} saker · svar ${r.svar}${r.avbrutt ? ' (avbrutt)' : ''} · tokens ca. ${r.tokens.ca}${r.tokens.inn != null ? ` (eksakt ${r.tokens.inn}+${r.tokens.ut})` : ''}`)
         } catch (e) {

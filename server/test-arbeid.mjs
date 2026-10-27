@@ -237,9 +237,9 @@ let vurderPrompt = null
   try {
     const a = await get('/api/atoms')
     const P = a.json.atoms.find((x) => x.id === P_ID), C = a.json.atoms.find((x) => x.id === C_ID)
-    ok('GET /api/atoms: arbeidet har arbeid: true med arbeid_tall; barneøkta har hører_til og del_av; en sak uten kobling har hører_til null', P?.arbeid === true && P.arbeid_tall?.samtaler === 4 && P.arbeid_tall.tråder === 1 && C?.hører_til === P_ID && C.del_av?.tekst === 'Del av: Anken til Energima · samtale 1 av 4' && a.json.atoms.some((x) => x.hører_til === null && !x.arbeid), JSON.stringify([P?.arbeid_tall, C?.del_av]))
+    ok('GET /api/atoms: arbeidet har arbeid: true med arbeid_tall; barneøkta har hører_til og del_av; en sak uten kobling har hører_til null', P?.arbeid === true && P.arbeid_tall?.samtaler === 5 && P.arbeid_tall.tråder === 1 && C?.hører_til === P_ID && C.del_av?.tekst === 'Del av: Anken til Energima · samtale 1 av 5' && a.json.atoms.some((x) => x.hører_til === null && !x.arbeid), JSON.stringify([P?.arbeid_tall, C?.del_av]))
     const l = await get(`/api/arbeid?id=${P_ID}`)
-    ok('GET /api/arbeid?id: løpet med samtaler, tråder, filer, tidslinje og tall', l.status === 200 && l.json.samtaler.length === 4 && l.json.tråder.length === 1 && l.json.filer.length >= 2 && l.json.tidslinje.length > 6 && l.json.tall.samtaler === 4, JSON.stringify(l.json.tall))
+    ok('GET /api/arbeid?id: løpet med samtaler, tråder, filer, tidslinje og tall', l.status === 200 && l.json.samtaler.length === 5 && l.json.tråder.length === 1 && l.json.filer.length >= 2 && l.json.tidslinje.length > 6 && l.json.tall.samtaler === 5 && l.json.samtaler.some((s) => s.kilde === 'Tua'), JSON.stringify(l.json.tall))
     ok('GET /api/arbeid (liste): arbeidene i prosjektet', (await get('/api/arbeid?prosjekt=Energima')).json.arbeider.some((r) => r.id === P_ID))
     ok('GET /api/arbeid?id=finnes-ikke → 404', (await get('/api/arbeid?id=a_finnes_ikke')).status === 404)
     const s = await get(`/api/sak?id=${C_ID}`)
@@ -259,7 +259,7 @@ let vurderPrompt = null
     // Siden sist
     const ss = await get('/api/siden-sist?dager=7')
     const ai = ss.json.arbeider.find((r) => r.id === P_ID)
-    ok('GET /api/siden-sist: «Arbeid i gang: Anken til Energima — 4 samtaler, 1 tråd, N filer, sist i dag»; forslagslinja for stubben fra start', ai && /^Arbeid i gang: Anken til Energima — 4 samtaler, 1 tråd, \d+ filer, sist i dag$/.test(ai.tekst) && ss.json.arbeidForslag.some((f) => f.arbeid.id === P_ID && /hører den til «Anken til Energima»\?$/.test(f.tekst)), JSON.stringify([ai?.tekst, ss.json.arbeidForslag.map((f) => f.tekst)]))
+    ok('GET /api/siden-sist: «Arbeid i gang: Anken til Energima — 4 samtaler, 1 tråd, N filer, sist i dag»; forslagslinja for stubben fra start', ai && /^Arbeid i gang: Anken til Energima — 5 samtaler, 1 tråd, \d+ filer, sist i dag$/.test(ai.tekst) && ss.json.arbeidForslag.some((f) => f.arbeid.id === P_ID && /hører den til «Anken til Energima»\?$/.test(f.tekst)), JSON.stringify([ai?.tekst, ss.json.arbeidForslag.map((f) => f.tekst)]))
     // vurder
     const v = await post('/api/arbeid/vurder', { id: P_ID })
     ok('POST /api/arbeid/vurder: pakken med kilder (ord/tegn/max/vault), prompt, hørerTil og mottakere (standard)', v.status === 200 && v.json.kilder.length >= 3 && v.json.kilder.every((x) => x.ord && x.tegn && x.max === 'L') && v.json.prompt === arb.VURDERING_STANDARD && v.json.hørerTil === P_ID && Array.isArray(v.json.mottakere), JSON.stringify([v.json.kilder.length, v.json.mottakere, v.json.standardMottaker]))

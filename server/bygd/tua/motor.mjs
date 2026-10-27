@@ -2,7 +2,7 @@
 import fs__default from 'node:fs';
 import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LONG_L, load, logDelivery, LEVELS, filesMode, FILES_ROOT, DATA_DIR, clampLevel, maxLevel, isVault, levelOf, upsert, save } from './store.mjs';
+import { LONG_L, load, logDelivery, LEVELS, filesMode, FILES_ROOT, DATA_DIR, readConfig, clampLevel, maxLevel, isVault, levelOf, upsert, save } from './store.mjs';
 import { hasKey, ollamaStatus, readKey } from './keychain.mjs';
 import { OLLAMA_VERT, OLLAMA_URL } from './ollama.mjs';
 import { løsMottakere as l_sMottakere, delingerFor, nyttToken, lenkerFor, eier, lagreDeling, registrerDeling, skrivMottakere } from './deling.mjs';
@@ -69,6 +69,13 @@ const ord = (t) => (String(t || '').match(/\S+/g) || []).length;
 // Mistral: 3,0 er et anslag (ikke målt ennå — rettes etter første ekte sending; eksakt usage kommer tilbake i Utlevert).
 const TEGN_PER_TOKEN = { claude: 1.9, ollama: 3.5, mistral: 3.0, test: 3.5, test2: 3.5 };
 const anslåTokens = (t, mottaker) => Math.round(String(t || '').length / (TEGN_PER_TOKEN[mottaker] || 3.5));
+// Skive 1 (arb. 33, V22): BUDSJETT per mottaker i tokens — hvor mye av en samtale (vendinger + kilder + spørsmålet) som får plass i ett kall. Claude og Mistral
+// har store vinduer (200k/128k; vi holder igjen plass til svaret). Ollama: modellens kontekstvindu slik Ollama kjører den — standard num_ctx er 4096 uansett
+// modell (gemma3:4b får ikke mer før det er satt opp), så 3 000 til det som sendes; rettes i ~/.tua/config.json → ollama.kontekst (eller TUA_OLLAMA_KONTEKST).
+// Test-mottakerne har et lite budsjett med vilje, så kuttet bakfra kan prøves uten modell. standardVendinger (samtale.js) kutter bakfra og sier hva som falt utenfor.
+const BUDSJETT = { claude: 150_000, mistral: 100_000, test: 1_500, test2: 1_500, testlokal: 1_500 };
+const budsjettOllama = () => { const k = Number(process.env.TUA_OLLAMA_KONTEKST) || Number(readConfig().ollama?.kontekst) || 4096; return Math.max(500, Math.round(k * 0.75)) };
+const budsjettFor = (id) => (id === 'ollama' ? budsjettOllama() : BUDSJETT[id] || null);
 
 // ── 1) Skjerming ────────────────────────────────────────────────────────────
 // Fornavn-lista oppdager «Fornavn Etternavn» i tekst (K5: navn uten typisk etternavnsending slapp gjennom). Ikke uttømmende —
@@ -251,6 +258,9 @@ const SYSTEM = 'Du svarer på norsk, kort og presist. Teksten under «Kontekst»
   'plassholdere som [Person A], [E-post 1] eller [Adresse 1]. Det er skjermede opplysninger: bruk plassholderne uendret i svaret, ' +
   'og ikke gjett hva de står for.';
 const byggMelding = (melding, kontekst) => (kontekst ? `${melding.trim()}\n\n---\n\nKontekst\n\n${kontekst}` : melding.trim());
+// Teksten slik den sendes, til tokens, ord, «se hva som sendes» og test-ekkoet: én melding = selve innholdet (som før); flere = merket per rolle.
+const tekstAv = (messages) => (messages.length === 1 ? messages[0].content : messages.map((m) => `[${m.role === 'user' ? 'Du' : 'Modellen'}]\n${m.content}`).join('\n\n'));
+const meldingerAv = ({ messages, melding, kontekst }) => (Array.isArray(messages) && messages.length ? messages : [{ role: 'user', content: byggMelding(melding || '', kontekst || '') }]);
 // Skive 6: send() tar også `json` (svaret skal være ett JSON-objekt — Ollama får format: json, Claude får det i system-teksten) og `oppgave`
 // ('forskjeller' | 'konklusjon' — bare test-mottakeren bryr seg: den svarer med et fast, tolkbart svar så testene aldri trenger en modell).
 const JSON_KRAV = ' Svar BARE med ett gyldig JSON-objekt — ingen tekst før eller etter, ingen kodeblokk.';
@@ -259,7 +269,7 @@ const CLAUDE_MODELL = 'claude-opus-5-5';
 // Claude via egen nøkkel (D2'). Nøkkelen leses fra Keychain i selve kallet og lever bare i klient-objektet til kallet er ferdig.
 // Strømmer tekstbiter til onDel; adaptiv tenkning; server-side fallback «default» slik at et avslag fra sikkerhetsklassifisering
 // kjøres på nytt på modellen Anthropic anbefaler (beta server-side-fallback-2026-07-01). Avslag etter fallback → MotorFeil.
-async function sendClaude({ system, melding, kontekst, json }, { onDel = () => {}, signal } = {}) {
+async function sendClaude({ system, melding, kontekst, json, messages }, { onDel = () => {}, signal } = {}) {
   let nøkkel = readKey('claude');
   if (!nøkkel) throw new MotorFeil('Ingen API-nøkkel for Claude i Keychain. Legg den inn under Innstillinger › AI-mottakere (console.anthropic.com › API keys).')
   const { default: Anthropic } = await import('../vendor/@anthropic-ai/sdk/index.mjs');
@@ -268,7 +278,7 @@ async function sendClaude({ system, melding, kontekst, json }, { onDel = () => {
   const stream = client.beta.messages.stream({
     model: CLAUDE_MODELL, max_tokens: 64000, thinking: { type: 'adaptive' },
     betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
-    system: json ? system + JSON_KRAV : system, messages: [{ role: 'user', content: byggMelding(melding, kontekst) }],
+    system: json ? system + JSON_KRAV : system, messages: meldingerAv({ messages, melding, kontekst }),   // skive 1 (arb. 33): hele samtalen, ikke én melding
   }, { signal });
   for await (const ev of stream) if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') onDel(ev.delta.text);
   const fm = await stream.finalMessage();
@@ -279,11 +289,11 @@ async function sendClaude({ system, melding, kontekst, json }, { onDel = () => {
 
 // Ollama lokalt (V18: lokal modell først når den finnes). Modell (friksjon 12): den som er valgt som standard i Innstillinger › AI-mottakere › Modeller
 // (~/.tua/config.json → ollama.modell), TUA_OLLAMA_MODELL foran (bare tester), ellers den første i lista — ollama.js: standardModell(). NDJSON-strøm fra /api/chat.
-async function sendOllama({ system, melding, kontekst, json }, { onDel = () => {}, signal } = {}) {
+async function sendOllama({ system, melding, kontekst, json, messages }, { onDel = () => {}, signal } = {}) {
   const st = await ollamaStatus();
   if (!st.running || !st.models.length) throw new MotorFeil(`Ollama kjører ikke på ${OLLAMA_VERT}, eller har ingen modell (hent én under Innstillinger › AI-mottakere › Modeller).`)
   const model = st.modell || st.models[0];
-  const body = { model, stream: true, messages: [{ role: 'system', content: json ? system + JSON_KRAV : system }, { role: 'user', content: byggMelding(melding, kontekst) }], ...(json ? { format: 'json' } : {}) };
+  const body = { model, stream: true, messages: [{ role: 'system', content: json ? system + JSON_KRAV : system }, ...meldingerAv({ messages, melding, kontekst })], ...(json ? { format: 'json' } : {}) };
   const r = await fetch(OLLAMA_URL + '/api/chat', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!r.ok || !r.body) throw new MotorFeil(`Ollama svarte ${r.status}`)
   let tekst = '', rest = '', usage = { input_tokens: null, output_tokens: null };
@@ -307,13 +317,13 @@ async function sendOllama({ system, melding, kontekst, json }, { onDel = () => {
 // usage. json → response_format json_object + JSON_KRAV i systemet. Modell: TUA_MISTRAL_MODELL eller mistral-large-latest. Aldri kalt i tester
 // (nøkkelen finnes ikke under testprefikset).
 const MISTRAL_MODELL = process.env.TUA_MISTRAL_MODELL || 'mistral-large-latest';
-async function sendMistral({ system, melding, kontekst, json }, { onDel = () => {}, signal } = {}) {
+async function sendMistral({ system, melding, kontekst, json, messages }, { onDel = () => {}, signal } = {}) {
   let nøkkel = readKey('mistral');
   if (!nøkkel) throw new MotorFeil('Ingen API-nøkkel for Mistral i Keychain. Legg den inn under Innstillinger › AI-mottakere (console.mistral.ai › API keys).')
   const r = await fetch('https://api.mistral.ai/v1/chat/completions', {
     method: 'POST', signal, headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${nøkkel}` },
     body: JSON.stringify({ model: MISTRAL_MODELL, stream: true, ...(json ? { response_format: { type: 'json_object' } } : {}),
-      messages: [{ role: 'system', content: json ? system + JSON_KRAV : system }, { role: 'user', content: byggMelding(melding, kontekst) }] }),
+      messages: [{ role: 'system', content: json ? system + JSON_KRAV : system }, ...meldingerAv({ messages, melding, kontekst })] }),
   });
   nøkkel = null;
   if (!r.ok || !r.body) { const t = await r.text().catch(() => ''); throw new MotorFeil(`Mistral svarte ${r.status}${t ? `: ${t.slice(0, 200)}` : ''}`) }
@@ -344,8 +354,8 @@ async function sendMistral({ system, melding, kontekst, json }, { onDel = () => 
 const avbruttFeil = () => { const e = new Error('avbrutt'); e.name = 'AbortError'; return e };
 const strøm = async (ut, onDel, signal) => { for (const b of ut.match(/[\s\S]{1,120}/g) || []) { if (signal?.aborted) throw avbruttFeil(); await new Promise((r) => setTimeout(r, 2)); onDel(b); } };
 const testSvar = (ut, inn, id) => ({ tekst: ut, modell: 'ekko', usage: { input_tokens: anslåTokens(inn, id), output_tokens: anslåTokens(ut, id) }, stopp: 'end_turn' });
-async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => {}, signal } = {}) {
-  const inn = system + melding + kontekst;
+async function sendTest({ system, melding, kontekst, oppgave, messages }, { onDel = () => {}, signal } = {}) {
+  const inn = system + (messages?.length ? tekstAv(messages) : melding + kontekst);
   if (oppgave === 'forskjeller') {
     const bokstaver = [...String(kontekst).matchAll(/^## Svar ([A-Z]+)\b/gm)].map((m) => m[1]);
     const ut = JSON.stringify({
@@ -364,7 +374,7 @@ async function sendTest({ system, melding, kontekst, oppgave }, { onDel = () => 
     const ut = JSON.stringify({ S: `Test-ingress: ${flat.slice(0, 200)}`, M: `Test-sammendrag (ingenting sendt ut av maskinen): ${flat.slice(0, 1200)}` });
     await strøm(ut, onDel); return testSvar(ut, inn, 'test')
   }
-  const ut = `Ekko fra test-mottakeren (ingenting er sendt ut av maskinen).\n\nSystem: ${system}\n\n${byggMelding(melding, kontekst)}`;
+  const ut = `Ekko fra test-mottakeren (ingenting er sendt ut av maskinen).\n\nSystem: ${system}\n\n${tekstAv(meldingerAv({ messages, melding, kontekst }))}`;   // skive 1: med vendinger ekkoes hele lista, merket per rolle
   await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
 }
 async function sendTest2({ melding, kontekst }, { onDel = () => {}, signal } = {}) {
@@ -393,6 +403,7 @@ function lagMottakere() {
   if (tm === '2' || tm === '3') liste.push({ id: 'test2', label: 'Test 2 (ekko B — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test 2', 'Tua selv: andre ekko-mottaker i motor.js (TUA_TESTMOTTAKERE=2) — svarer annerledes enn Test så Forskjeller kan testes uten modell.'), test: true, status: async () => ({ klar: true }), send: sendTest2 });
   // friksjon 15 (TUA_TESTMOTTAKERE=3): en LOKAL ekko-mottaker med Trust 5 — så testene kan vise at standardnivået blir L og at L faktisk sendes, uten Ollama.
   if (tm === '3') liste.push({ id: 'testlokal', label: 'Test lokal (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: { ...TEST_TRUST('Test lokal', 'Tua selv: lokal ekko-mottaker i motor.js (TUA_TESTMOTTAKERE=3) — Trust 5 som Ollama, så standardnivå L kan testes uten modell.'), score: 5 }, local: true, test: true, status: async () => ({ klar: true }), send: sendTest });
+  for (const m of liste) m.budsjett = budsjettFor(m.id);   // skive 1 (arb. 33): budsjettet i tokens per mottaker — standardVendinger kutter bakfra mot det
   return liste
 }
 

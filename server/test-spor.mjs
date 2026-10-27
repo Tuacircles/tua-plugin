@@ -69,7 +69,7 @@ const iMappe = (a, mappe) => fileOf(a).startsWith(path.join(ROOT, mappe) + path.
   const ctl2 = new AbortController(); ctl2.abort()
   let e = null; const før = load().length
   try { await spor({ melding: 'Hei', saker: [], mottaker: 'test', prosjekt: 'Energima', signal: ctl2.signal }) } catch (x) { e = x }
-  ok('spor med signal avbrutt FØR noe kom: feil kastes, bare prompt-saken lagret (V16), ingen svar-sak', e?.name === 'AbortError' && load().length === før + 1 && !load().some((a) => a.kind === 'svar' && a.name.includes('Hei')), e?.message)
+  ok('spor med signal avbrutt FØR noe kom: feil kastes, bare prompt-saken og samtale-saken lagret (V16; skive 1 arb. 33), ingen svar-sak', e?.name === 'AbortError' && load().length === før + 2 && !load().some((a) => a.kind === 'svar' && a.name.includes('Hei')), e?.message)
   e = null
   try { await spor({ melding: 'x', saker: [], mottaker: 'test', prosjekt: 'Energima', prompt: 'a_finnes_ikke' }) } catch (x) { e = x }
   ok('spor med ukjent prompt-sak → MotorFeil (som før)', e instanceof MotorFeil)

@@ -119,7 +119,7 @@ let promptId, svarIds, konkId
   ok('forskjeller: svar-lista med bokstav per mottaker (til kolonnene i Spør)', f.svar?.length === 2 && f.svar[0].bokstav === 'A' && f.svar[1].bokstav === 'B' && f.svar[1].mottaker === 'test2')
   // Forskjeller som egen sak (tillegg)
   const fa = all.find((a) => a.id === f.sak)
-  ok('forskjeller: lagret som sak — kind svar, tagg forskjeller og vurdereren, bygget_av → begge svar-sakene på M, nøkkel forskjeller:<prompt>', fa && fa.kind === 'svar' && fa.tags.includes('forskjeller') && fa.tags.includes('test') && fa.derivedFrom.length === 2 && r.svar.every((id) => fa.derivedFrom.some((d) => d.id === id && d.level === 'M')) && fa.key === `forskjeller:${p.id}` && fa.name.startsWith('Forskjeller:'), JSON.stringify([fa?.name, fa?.tags, fa?.key]))
+  ok('forskjeller: lagret som sak — kind svar, tagg forskjeller og vurdereren, bygget_av → begge svar-sakene på M, nøkkel forskjeller:<prompt>', fa && fa.kind === 'svar' && fa.tags.includes('forskjeller') && fa.tags.includes('test') && fa.derivedFrom.length === 3 && fa.derivedFrom.at(-1).id === r.samtale && r.svar.every((id) => fa.derivedFrom.some((d) => d.id === id && d.level === 'M')) && fa.key === `forskjeller:${p.id}` && fa.name.startsWith('Forskjeller:'), JSON.stringify([fa?.name, fa?.tags, fa?.key]))
   ok('forskjeller-saken: lesbar markdown med Enig/Uenig/Unikt og mottakernavn, i spørsmålets prosjekt og samtale, utkast', /## Enig\n/.test(fa.content) && /## Uenig\n/.test(fa.content) && /## Unikt\n/.test(fa.content) && /\(Test 2/.test(fa.content) && fa.project === p.project && fa.convo === p.convo && statusOf(fa) === 'utkast', fa.content.slice(0, 120))
   ok('Utlevert: forskjeller-linja peker til Forskjeller-saken', u.some((x) => x.tool === 'forskjeller' && x.forskjeller === fa.id))
   // konklusjon
@@ -127,7 +127,7 @@ let promptId, svarIds, konkId
   konkId = k.id
   const ka = all.find((a) => a.id === k.id)
   ok('konklusjon: tilgjengelig, sak kind konklusjon med status utkast i fila', k.tilgjengelig && k.status === 'utkast' && ka?.kind === 'konklusjon' && ka.status === 'utkast' && fs.readFileSync(fileOf(ka), 'utf8').includes('status: "utkast"') && fs.readFileSync(fileOf(ka), 'utf8').includes('kind: "konklusjon"'), JSON.stringify(k))
-  ok('konklusjon: bygget_av → prompten, begge svar-sakene og Forskjeller-saken (nivå M hos test-vurdereren)', ka.derivedFrom.length === 4 && ka.derivedFrom[0].id === p.id && r.svar.every((id) => ka.derivedFrom.some((d) => d.id === id && d.level === 'M')) && ka.derivedFrom.some((d) => d.id === f.sak) && k.nivå === 'M', JSON.stringify(ka.derivedFrom))
+  ok('konklusjon: bygget_av → prompten, begge svar-sakene og Forskjeller-saken (nivå M hos test-vurdereren)', ka.derivedFrom.length === 5 && ka.derivedFrom.at(-1).id === r.samtale && ka.derivedFrom[0].id === p.id && r.svar.every((id) => ka.derivedFrom.some((d) => d.id === id && d.level === 'M')) && ka.derivedFrom.some((d) => d.id === f.sak) && k.nivå === 'M', JSON.stringify(ka.derivedFrom))
   ok('konklusjon: nøkkel konklusjon:<prompt> så «kjør igjen» gir ny versjon av samme sak', ka.key === `konklusjon:${p.id}` && ka.version === 1)
   ok('konklusjon-del strømmet teksten', h.some((x) => x[0] === 'konklusjon-del') && h.filter((x) => x[0] === 'konklusjon-del').map((x) => x[1].tekst).join('') === k.tekst)
   const slutt = h.at(-1)[1]
@@ -165,7 +165,7 @@ let promptId, svarIds, konkId
   // lås
   const atoms = load(); const ka = atoms.find((x) => x.id === konkId); setStatus(ka, 'endelig'); save(atoms)
   const låst = load().find((x) => x.id === konkId)
-  ok('lås: status endelig i fila, bygget_av urørt', låst.status === 'endelig' && fs.readFileSync(fileOf(låst), 'utf8').includes('status: "endelig"') && låst.derivedFrom.length === 4)
+  ok('lås: status endelig i fila, bygget_av urørt', låst.status === 'endelig' && fs.readFileSync(fileOf(låst), 'utf8').includes('status: "endelig"') && låst.derivedFrom.length === 5)
 }
 
 // ── 6) broen ───────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ try {
   ok('POST /api/konklusjon {prompt}: kjør igjen → forskjeller + nytt utkast, samme sak, versjon 3', igjen.status === 200 && igjen.json.forskjeller.tilgjengelig && igjen.json.konklusjon.id === k.id && igjen.json.konklusjon.version === 3, JSON.stringify([igjen.status, igjen.json.konklusjon?.version, igjen.json.error]))
   ok('POST /api/konklusjon uten noe → 400, ukjent prompt → 404', (await post('/api/konklusjon', {})).status === 400 && (await post('/api/konklusjon', { prompt: 'a_finnes_ikke' })).status === 404)
   const lås = await post('/api/status', { id: k.id, status: 'endelig' })
-  ok('POST /api/status på konklusjonen: utkast → endelig, bygget_av med prompt, begge svar og Forskjeller-saken', lås.status === 200 && lås.json.atom.status === 'endelig' && lås.json.før === 'utkast' && lås.json.atom.derivedFrom.length === 4 && lås.json.atom.kind === 'konklusjon', JSON.stringify(lås.json.atom?.derivedFrom))
+  ok('POST /api/status på konklusjonen: utkast → endelig, bygget_av med prompt, begge svar og Forskjeller-saken', lås.status === 200 && lås.json.atom.status === 'endelig' && lås.json.før === 'utkast' && lås.json.atom.derivedFrom.length === 5 && lås.json.atom.kind === 'konklusjon', JSON.stringify(lås.json.atom?.derivedFrom))
   const at = await (await fetch(`http://127.0.0.1:${PORT}/api/atoms`)).json()
   const pa = at.atoms.find((x) => x.id === ferdige[0].prompt)
   ok('GET /api/atoms: prompt-saken har `ga` med begge svarene, konklusjonen har status', pa?.ga?.length === 2 && at.atoms.find((x) => x.id === k.id)?.status === 'endelig', JSON.stringify(pa?.ga))
