@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-27. IKKE REDIGER: kilden er server/*.js og node_modules.
 globalThis.__TUA_BUNDLE = true;
 import { McpServer } from './bygd/vendor/@modelcontextprotocol/sdk/server/mcp.mjs';
 import { StdioServerTransport } from './bygd/vendor/@modelcontextprotocol/sdk/server/stdio.mjs';
@@ -282,12 +282,12 @@ server.registerTool(
         .describe('Kildeatomene en leveranse er bygget av: id, versjonen du leste, nivået du leste på. tua_compose fyller dette selv; send det når du bygde leveransen av tua_get-resultater for hånd.'),
       renders: arrayType(objectType({ format: stringType().optional(), path: stringType().optional(), url: stringType().optional(), sha256: stringType().optional() })).optional()
         .describe('Gjengivelser av dette atomet: html/pdf som absolutt sti (sha256 regnes ut), eller artifact som url. Fila er en gjengivelse — atomet (markdown) er sannheten. Send med samme key når du har rendret.'),
-      hører_til: stringType().optional().describe('Arbeidet saken hører til (sak-id, eller tittelen på et arbeid i samme prosjekt) — når brukeren sier «dette hører til Anken». Et arbeid er en sak som samtaler, tråder og saker henger på.'),
+      hoerer_til: stringType().optional().describe('Arbeidet saken hører til (sak-id, eller tittelen på et arbeid i samme prosjekt) — når brukeren sier «dette hører til Anken». Et arbeid er en sak som samtaler, tråder og saker henger på.'),
     },
   },
   async (args) => {
     const atoms = load();
-    const { hører_til: hørerTilArg, ...rest } = args;
+    const { hoerer_til: hørerTilArg, ...rest } = args;   // ASCII-navn: MCP-klientene avviser æøå i parameternavn
     const hørerTil = hørerTilArg ? finnArbeid(atoms, hørerTilArg, rest.project)?.id : null;   // friksjon 20
     const { atom, status } = upsert(atoms, { ...rest, by: args.source || 'Claude', ...(hørerTil ? { hørerTil } : {}) });
     if (hørerTil && atom.hørerTil !== hørerTil && atom.id !== hørerTil) { try { settH_rerTil(atoms, atom.id, hørerTil); } catch {} }
