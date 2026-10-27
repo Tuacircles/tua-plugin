@@ -18,6 +18,8 @@
 // POST /api/konklusjon {strøm: true} som SSE (vurderer {svar: N} → forskjeller → konklusjon-del → konklusjon → slutt).
 // Friksjon 18 (25.10.2026): tallene i bryteren «Avis · N Mapper · N Filer» regnet av /api/atoms og /api/mappe (regler.mapperMed/tellVisning), Filer-lista (regler.filerFlat)
 // sortert dato sist først med mappefiler på mtime, klasse-regelen (spor og drift bare med «ta med» — i Mapper alltid), og passerFil (filter på mappefiler).
+// Arbeidsstykke 33 skive 2 (27.10.2026, V22): Arbeid-tilstanden — regler.sidefeltTre/sistBrukt/leggSistBrukt (prosjekt › arbeid › samtaler, sist brukt), standardValg/utenforFor
+// (avkryssingen fra standard[<mottaker>]), vendingHode, sendesTekst (Sendes-linja, kort på mobil), lesHash #samtale/ og #arbeid/; og at kurven, samtalespalta og SporISak er borte.
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
 
@@ -369,6 +371,54 @@ try {
   ok('treMedArbeid: ett arbeid med samtalen og fila som hører til, resten av samtalene og filene står i prosjektet, arbeidet selv er ikke en fil under seg selv', t2[0].arbeider.length === 1 && t2[0].arbeider[0].navn === 'Anken til Energima' && t2[0].arbeider[0].samtaler.length === 1 && t2[0].arbeider[0].filer.length === 1 && t2[0].arbeider[0].sak?.id === 'w1' && t2[0].samtaler.length === 2 && t2[0].filer.length === 1 && t2[0].filer[0].slag === 'fil', JSON.stringify(t2[0].arbeider[0]))
   ok('treMedArbeid: uten koblinger er treet som før (arbeider tomt)', regler.treMedArbeid([{ navn: 'X', samtaler: [{ navn: 'a', saker: [{ id: 'q' }], logg: null }], filer: [] }])[0].arbeider.length === 0)
   ok('erArbeidSak: feltet fra broen', regler.erArbeidSak({ arbeid: true }) && !regler.erArbeidSak({ hører_til: 'w1' }))
+}
+
+// ── Arbeidsstykke 33 skive 2 (27.10.2026, V22 «Samtalen først»): Arbeid-tilstanden — reglene appen bruker, og det Finn mistet ───────────────────────────
+{
+  // adressene: #samtale/<id> og #arbeid/<id> er Arbeid; #sak/<id> er fortsatt Finn
+  ok('lesHash: #samtale/<id> og #arbeid/<id> leses; erArbeidHash skiller Arbeid fra Finn; adressene lages med encodeURIComponent', regler.lesHash('#samtale/a_1').samtale === 'a_1' && regler.lesHash('#arbeid/w1').arbeid === 'w1' && regler.erArbeidHash('#samtale/t_x_y') && regler.erArbeidHash('#arbeid/w1') && !regler.erArbeidHash('#sak/a_1') && !regler.erArbeidHash('') && regler.samtaleAdresse('a 1') === '/#samtale/a%201' && regler.arbeidAdresse('w1') === '/#arbeid/w1')
+  // sidefeltets tre: prosjekt › arbeid › samtaler, nyeste først, «+ N til» over fem, drift aldri
+  const t = (n) => Date.parse('2026-10-01T10:00:00Z') + n * 3600e3
+  const W = { id: 'w1', name: 'Anken til Energima', project: 'Energima', kind: 'capture', capturedAt: t(0), arbeid: true }
+  const samt = (id, project, n, ekstra = {}) => ({ id, name: `Samtale ${id}`, project, kind: 'samtale', convo: `Samtale ${id}`, source: 'Claude Code', capturedAt: t(n), levels: { S: { text: `Sist: x → y · ${n} vendinger · 1.10.2026` } }, ...ekstra })
+  const alle = [W,
+    samt('s1', 'Energima', 1, { hører_til: 'w1' }), samt('s2', 'Energima', 2, { hører_til: 'w1' }), samt('s3', 'Energima', 3),
+    samt('s4', 'Skigaarden', 9), samt('s5', 'Skigaarden', 5), samt('s6', 'Skigaarden', 6), samt('s7', 'Skigaarden', 7), samt('s8', 'Skigaarden', 8), samt('s9', 'Skigaarden', 4),
+    samt('d1', 'Tua_tua', 20, { drift: true, klasse: 'drift' }),
+    { id: 'p1', name: 'Hva er fristen?', content: 'Hva er fristen?', project: 'Energima', kind: 'prompt', key: 'prompt:spor:abc', source: 'Tua', capturedAt: t(10), tråd: 'p1', hører_til: 'w1' },
+    { id: 'sv1', name: 'Svar fra Test', content: 'Tre uker.', project: 'Energima', kind: 'svar', source: 'Test (ekko)', capturedAt: t(10.5), tråd: 'p1', derivedFrom: [{ id: 'p1' }] },
+  ]
+  const tre = regler.sidefeltTre(alle)
+  const en = tre.find((p) => p.navn === 'Energima'), sk = tre.find((p) => p.navn === 'Skigaarden')
+  ok('sidefeltTre: prosjektene nyeste først (Skigaarden sist rørt 9 > Energima 10.5? — nei: tråden i Energima er nyest), drift-prosjektet er ikke med', tre.map((p) => p.navn).join() === 'Energima,Skigaarden' && !tre.some((p) => p.navn === 'Tua_tua'), tre.map((p) => `${p.navn}@${p.sist}`).join(' | '))
+  ok('sidefeltTre: arbeidet «Anken til Energima» samler samtalene som hører til det (s2, s1 og tråden p1 — nyeste først), s3 står løst i prosjektet', en.arbeider.length === 1 && en.arbeider[0].navn === 'Anken til Energima' && en.arbeider[0].samtaler.map((s) => s.id).join() === 'p1,s2,s1' && en.samtaler.map((s) => s.id).join() === 's3' && en.antall === 4, JSON.stringify(en.arbeider[0].samtaler.map((s) => s.id)))
+  ok('sidefeltTre: en Spør-tråd er en samtale-rad med kilde Tua og tittel = spørsmålet; en Code-samtale har kilde «Code» og antall vendinger fra S', en.arbeider[0].samtaler[0].kilde === 'Tua' && en.arbeider[0].samtaler[0].navn === 'Hva er fristen?' && en.samtaler[0].kilde === 'Code' && en.samtaler[0].antall === 3)
+  ok('sidefeltTre: høyst fem per prosjekt, «+ N til» for resten — og alt når prosjektet er åpnet', sk.samtaler.length === 5 && sk.flere === 1 && sk.samtaler[0].id === 's4' && regler.sidefeltTre(alle, { åpne: new Set(['Skigaarden']) }).find((p) => p.navn === 'Skigaarden').samtaler.length === 6, `${sk.samtaler.length} + ${sk.flere}`)
+  // sist brukt: fem, nyeste først, uten dubletter, bare de som finnes
+  const sist = regler.leggSistBrukt(regler.leggSistBrukt(regler.leggSistBrukt(['s1', 's2', 's3', 's4', 's5'], 's6'), 's2'), 'finnes-ikke')
+  ok('leggSistBrukt: ny fremst, dubletter bort, høyst fem; sistBrukt gir radene som finnes i treet (ikke «finnes-ikke»)', sist.join() === 'finnes-ikke,s2,s6,s1,s3' && regler.sistBrukt(sist, regler.sidefeltTre(alle, { maks: 100 })).map((s) => s.id).join() === 's2,s6,s1,s3', sist.join())
+  // standardavkryssingen: standard[<mottaker>].vendinger fra broen; uten standard (mottakeren ikke klar) alt etter siste låste konklusjon, konklusjoner aldri
+  const v = (id, rolle, ekstra = {}) => ({ id, rolle, L: 'x', S: 'x', tid: t(1), ...ekstra })
+  const samtale = { id: 'a_s', vendinger: [v('v1', 'bruker'), v('v2', 'modell', { modell: 'gemma3', nivå: 'M' }), v('k1', 'konklusjon', { låst: true }), v('v3', 'bruker'), v('v4', 'modell', { modell: 'Claude' }), v('k2', 'konklusjon', { låst: false })],
+    standard: { ollama: { vendinger: ['v4'], utenfor: [{ id: 'v1', hvorfor: 'før siste låste konklusjon' }, { id: 'v3', hvorfor: 'utenfor budsjettet til gemma3' }], tokens: 900, budsjett: 3072 } } }
+  ok('standardValg: standard[<valgt mottaker>].vendinger når broen har regnet det (ollama: bare v4)', [...regler.standardValg(samtale, 'ollama')].join() === 'v4')
+  ok('standardValg: uten standard for mottakeren (ikke klar) — alt etter siste låste konklusjon, konklusjoner aldri (v3, v4)', [...regler.standardValg(samtale, 'claude')].join() === 'v3,v4' && [...regler.standardValg(samtale, null)].join() === 'v3,v4' && regler.standardValg(null, 'x').size === 0)
+  ok('utenforFor: id → hvorfor for valgt mottaker (dempet i samtalen, hvorfor ved hover); tom for en mottaker uten standard', regler.utenforFor(samtale, 'ollama').get('v3') === 'utenfor budsjettet til gemma3' && regler.utenforFor(samtale, 'ollama').size === 2 && regler.utenforFor(samtale, 'claude').size === 0)
+  ok('vendingHode: «Du · 01.10 12:00» / «gemma3 · M» / «Konklusjon låst 01.10»', /^Du · \d\d\.\d\d \d\d:\d\d$/.test(regler.vendingHode(samtale.vendinger[0])) && regler.vendingHode(samtale.vendinger[1]) === 'gemma3 · M' && /^Konklusjon låst \d\d\.\d\d$/.test(regler.vendingHode(samtale.vendinger[2])) && /^Konklusjon utkast/.test(regler.vendingHode(samtale.vendinger[5])) && regler.vendingHode({ rolle: 'modell', modell: 'Claude' }) === 'Claude', [regler.vendingHode(samtale.vendinger[0]), regler.vendingHode(samtale.vendinger[2])].join(' | '))
+  // Sendes-linja — én per mottaker; kort på mobil; «over budsjettet» når broen sier over
+  const lang = regler.sendesTekst({ valgt: 2, totalt: 3, kilder: 1, nivåer: ['S'], skjermet: 2, tokens: 900, modell: 'gemma3' })
+  ok('sendesTekst: «Sendes: 2 av 3 vendinger · 1 kilde på S · 2 skjermet · ca. 900 tokens → gemma3»', lang === 'Sendes: 2 av 3 vendinger · 1 kilde på S · 2 skjermet · ca. 900 tokens → gemma3', lang)
+  ok('sendesTekst: kort på mobil «2 av 3 · 1 kilde · gemma3»; uten kilder «ingen kilder»; over budsjettet sies fra; 1 vending i entall', regler.sendesTekst({ valgt: 2, totalt: 3, kilder: 1, modell: 'gemma3', kort: true }) === '2 av 3 · 1 kilde · gemma3' && regler.sendesTekst({ valgt: 0, totalt: 1, modell: 'Claude', tokens: 12 }) === 'Sendes: 0 av 1 vending · ingen kilder · ingenting skjermet · ca. 12 tokens → Claude' && regler.sendesTekst({ valgt: 3, totalt: 3, kilder: 2, nivåer: ['S', 'M'], tokens: 4000, over: true, modell: 'gemma3' }).replace(/[\u00a0\u202f]/g, ' ').includes('ca. 4 000 tokens — over budsjettet') && regler.sendesTekst({ valgt: 1, totalt: 2, kilder: 0, modell: 'gemma3', kort: true }) === '1 av 2 · gemma3')
+  ok('samtaleTittelAv: tittelen fra GET /api/samtale (tittel), en sak (name) eller en rad (navn); «Samtale» uten', regler.samtaleTittelAv({ tittel: ' Hva er  fristen? ' }) === 'Hva er fristen?' && regler.samtaleTittelAv({ name: 'X' }) === 'X' && regler.samtaleTittelAv({}) === 'Samtale')
+  // Finn mistet tre ting (planen §3.1): kurven (sessionStorage tua.kurv), samtalespalta (fs-samtaler) og Spør inne i saken (SporISak) — og Arbeid finnes
+  const src = (f) => fs.readFileSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', f), 'utf8')
+  const kode = (f) => src(f).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')
+  const forside = kode('pages/Forside.jsx'), sak = kode('pages/Sak.jsx')
+  ok('Finn: «Ta med»-kurven er borte — ingen tua.kurv, ingen fs-kurv, ingen taMed/erMed i Forside.jsx eller Sak.jsx', !/tua\.kurv|fs-kurv|\btaMed\b|\berMed\b|onTaMed/.test(forside) && !/tua\.kurv|onTaMed|\berMed\b|\bkurv\b/.test(sak))
+  ok('Finn: samtalespalta er borte — ingen <aside className="fs-samtaler"> i Forside.jsx, ingen .fs-samtaler i forside.css', !forside.includes('className="fs-samtaler"') && !/\.fs-samtaler\b/.test(src('forside.css')))
+  ok('Finn: Spør inne i saken er borte — SporISak.jsx finnes ikke, ingen import av den; Sak.jsx og Forside.jsx går til Arbeid (arbeid-start.js)', !fs.existsSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', 'pages', 'SporISak.jsx')) && !forside.includes('SporISak') && !sak.includes('SporISak') && forside.includes("from '../arbeid-start.js'") && sak.includes("from '../arbeid-start.js'"))
+  ok('Arbeid finnes: pages/Arbeid.jsx, Sidefelt.jsx, Samtale.jsx og arbeid.css; tua.jsx ruter #samtale/ og #arbeid/ dit (erArbeidHash)', ['pages/Arbeid.jsx', 'pages/Sidefelt.jsx', 'pages/Samtale.jsx', 'arbeid.css'].every((f) => fs.existsSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', f))) && kode('tua.jsx').includes('erArbeidHash') && kode('pages/Samtale.jsx').includes('/api/spor/forhandsvis') && kode('pages/Samtale.jsx').includes('vendinger: avkryssetRekkefølge'))
+  ok('Finn: feltet øverst gjør én ting (finner) — plassholderen er «Finn …», ⌘↵ starter en ny samtale (nySamtale), ingen Spør-knapp med kurv', forside.includes('placeholder="Finn …"') && /nySamtale\(/.test(forside) && !forside.includes('Spør med sakene i kurven'))
 }
 
 console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT}`)
