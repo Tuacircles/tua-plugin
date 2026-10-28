@@ -134,7 +134,7 @@ import { openSpawn, FILE_MANAGER, HOME } from './platform.js'   // M18: «Åpne 
 import os from 'node:os'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { load, save, setShare, upsert, search, levelOf, LEVELS, isVault, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive, archiveOptions, archiveInfo, chooseArchive, finderFolders, FINDER_DEFAULTS, setFinderFolders, CONFIG_FILE, deliveries, versions, statusOf, setStatus, STATUSER, readConfig, writeConfig, onboardingActive, finishOnboarding } from './store.js'
+import { arkivSignatur, load, save, setShare, upsert, search, levelOf, LEVELS, isVault, FILE, FILES_ROOT, DATA_DIR, filesMode, linksFor, fileOf, ensureArchive, archiveOptions, archiveInfo, chooseArchive, finderFolders, FINDER_DEFAULTS, setFinderFolders, CONFIG_FILE, deliveries, versions, statusOf, setStatus, STATUSER, readConfig, writeConfig, onboardingActive, finishOnboarding } from './store.js'
 import { watchInbox, watchDesktop, importAlt, IMPORT_STEG, historyCounts, countPrompts } from './import.js'      // M14: Innboks — eksporter som legges i mappa blir atomer · M17: Desktop-cachen · skive 8: import med fremdrift
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
@@ -310,19 +310,24 @@ if (process.argv.includes('--sett-passord')) {
 // Skive 4 (arb. 33, 28.10.2026): store JSON-svar (over 16 KiB) går gzip-pakket når nettleseren tar det (Accept-Encoding), og bærer en ETag så et uendret svar på
 // neste runde (avisen hvert 10. sekund) er 304 uten kropp. /api/atoms på Eriks arkiv er 28 MB rått — pakket er det en brøkdel; sidefeltet har fått eget, lett endepunkt.
 const GZIP_FRA = 16 * 1024
-const json = (res, code, body, extra = {}) => {
-  const tekst = JSON.stringify(body)
+// 28.10.2026 (etter arb. 33): jsonTekst tar ferdig tekst og et valgfritt minne {etag, gz} så et uendret svar verken hashes eller pakkes på nytt.
+const jsonTekst = (res, code, tekst, extra = {}, minne = null) => {
   const hode = { 'Content-Type': 'application/json; charset=utf-8', ...cors, ...extra }
   const req = res.req
   if (code === 200 && req?.method === 'GET' && tekst.length > GZIP_FRA) {
-    const etag = `"${crypto.createHash('sha1').update(tekst).digest('base64url')}"`
+    const etag = minne?.etag || `"${crypto.createHash('sha1').update(tekst).digest('base64url')}"`
+    if (minne) minne.etag = etag
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ETag: etag, ...cors, Vary: 'Accept-Encoding' }); return res.end() }
     hode.ETag = etag; hode.Vary = 'Accept-Encoding'; hode['Cache-Control'] = 'no-cache'
-    if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) { res.writeHead(code, { ...hode, 'Content-Encoding': 'gzip' }); return res.end(zlib.gzipSync(tekst, { level: 3 })) }
+    if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) { const gz = minne?.gz || zlib.gzipSync(tekst, { level: 3 }); if (minne) minne.gz = gz; res.writeHead(code, { ...hode, 'Content-Encoding': 'gzip' }); return res.end(gz) }
   }
   res.writeHead(code, hode)
   res.end(tekst)
 }
+const json = (res, code, body, extra = {}) => jsonTekst(res, code, JSON.stringify(body), extra)
+// /api/atoms husket: samme arkivsignatur + samme spørring innen 60 s → samme tekst (vekt og ulest er tidsavhengige, derfor taket). Sju saker som ikke er
+// filer (utlevering, bruk, sett alt) ligger rett under .tua/ og er med i signaturen.
+let ATOMS_MINNE = null
 const readBody = (req) =>
   new Promise((resolve, reject) => {
     let d = ''
@@ -517,6 +522,8 @@ http
       }
       if (req.method === 'GET' && !url.pathname.startsWith('/api/')) return serveStatic(res, url.pathname)
       if (req.method === 'GET' && url.pathname === '/api/atoms') {
+        const nøkkelAtoms = `${arkivSignatur()}|${url.search}`
+        if (ATOMS_MINNE && ATOMS_MINNE.nøkkel === nøkkelAtoms && Date.now() - ATOMS_MINNE.tid < 60_000) return jsonTekst(res, 200, ATOMS_MINNE.tekst, { 'X-Tua-Minne': 'ja' }, ATOMS_MINNE)
         const all = load().sort((x, y) => y.capturedAt - x.capturedAt)
         const offset = num(url.searchParams.get('offset'), 0), limit = num(url.searchParams.get('limit'), all.length)
         // lenker regnes ut ved lesing, lagres ikke her. ord/tegn per nivå, max og vault (skive 3): det forsiden sender med til Spør om en sak —
@@ -532,7 +539,8 @@ http
           ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }),   // friksjon 16: nyere enn siste «sett alt» (ellers sju dager) og ikke åpnet/sett/lest siden den ble skrevet
           // friksjon 20: hører_til (arbeidet saken henger på), del_av («Del av: <arbeid> · samtale 7 av 12»), arbeid (saken er et arbeid) med tall, hører_til_forslag bare når det venter på svar
           hører_til: a.hørerTil || null, del_av: delAv(all, a, følgere), arbeid: erArbeid(a, følgere), ...(arbeidTall.has(a.id) ? { arbeid_tall: (({ samtaler, tråder, filer, saker, sist, åpen }) => ({ samtaler, tråder, filer, saker, sist, åpen }))(arbeidTall.get(a.id)) } : {}), ...(harForslag(a) ? { hører_til_forslag: a.hørerTilForslag } : {}) }))
-        return json(res, 200, { atoms, total: all.length, offset, file: ARKIV(), klasser: tellKlasser(all), uleste: atoms.filter((a) => a.ulest && a.klasse === 'arbeid').length, sett_alt: settAltSist() || null })
+        ATOMS_MINNE = { nøkkel: nøkkelAtoms, tid: Date.now(), tekst: JSON.stringify({ atoms, total: all.length, offset, file: ARKIV(), klasser: tellKlasser(all), uleste: atoms.filter((a) => a.ulest && a.klasse === 'arbeid').length, sett_alt: settAltSist() || null }), etag: null, gz: null }
+        return jsonTekst(res, 200, ATOMS_MINNE.tekst, {}, ATOMS_MINNE)
       }
       // ── Skive 4 (arb. 33, V22, 28.10.2026): GET /api/sidefelt[?prosjekt=] — det sidefeltet i Arbeid trenger, og ikke mer. Sidefeltet hentet /api/atoms hvert 15. sekund
       //    (28 MB og 10 s på Eriks arkiv). Nå: bare sakene regler.sidefeltTre/samtalerFlat leser (samtale-saker, prompter, svar, konklusjoner, saker med samtalenavn, og

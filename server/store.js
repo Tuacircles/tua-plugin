@@ -151,8 +151,32 @@ export const sha256Tekst = sha256   // runde 3c: tester og broen sammenligner me
 export const sha256File = (p) => { try { return sha256(fs.readFileSync(p)) } catch { return null } }
 const readWritten = () => { try { return JSON.parse(fs.readFileSync(WRITTEN(), 'utf8')) } catch { return {} } }
 
+// ── Varmt minne (28.10.2026, etter arbeidsstykke 33 — «arbeid-seksjonen låser seg») ────────────────────────────────────
+// load() leste og tolket alle filene (1 786 hos Erik, ~0,35 s varm disk, mer kald) ved HVERT kall, og broen kaller load() i hver rute;
+// Finn og Arbeid spør broen sju–åtte ganger hvert tiende sekund, så kallene sto i kø på én tråd og svarene tok 25 s. Nå: en billig
+// signatur av arkivet (sti, mtime og størrelse for hver .md-fil, 14 ms, pluss filene rett under .tua/) sier om noe er endret —
+// av oss, av en annen Tua-prosess, av Finder eller av Dropbox. Er den lik, får kalleren en KOPI av sist leste liste med samme spor
+// (sha, serialisering og sti per fil er fakta om fila slik den lå), så én-skriver-regelen i save() står: hver liste er sin egen,
+// og save() leser fila igjen under låsen uansett. TUA_UTEN_MINNE=1 slår det av (tester som vil lese disken hver gang).
+let LESE_MINNE = null
+export function arkivSignatur() {
+  if (!filesMode()) return null
+  const h = crypto.createHash('sha1'); let n = 0
+  for (const { abs, rel } of walk(FILES_ROOT)) { try { const st = fs.statSync(abs); h.update(rel).update('\0').update(String(st.mtimeMs)).update('\0').update(String(st.size)).update('\n'); n++ } catch {} }
+  try { for (const f of fs.readdirSync(tuaFile(''), { withFileTypes: true })) if (f.isFile()) { try { const st = fs.statSync(tuaFile(f.name)); h.update('.tua/' + f.name).update('\0').update(String(st.mtimeMs)).update('\0').update(String(st.size)).update('\n') } catch {} } } catch {}
+  return `${n}:${h.digest('hex').slice(0, 20)}`
+}
+export const glemMinne = () => { LESE_MINNE = null }
 export function load() {
   if (!filesMode()) return loadCache()
+  const sig = process.env.TUA_UTEN_MINNE ? null : arkivSignatur()
+  if (sig && LESE_MINNE && LESE_MINNE.sig === sig) {
+    const kopi = structuredClone(LESE_MINNE.atoms)
+    const s = nyttSpor(kopi)
+    for (const [id, v] of LESE_MINNE.lest) s.lest.set(id, v)
+    for (const id of LESE_MINNE.dirty) s.dirty.add(id)
+    return kopi
+  }
   const atoms = []
   const spor = nyttSpor(atoms)                                  // runde 3c: hva denne lista leste — save() skriver bare det som er endret siden
   const written = readWritten()
@@ -186,6 +210,7 @@ export function load() {
   // Mappa er sannheten — også for sletting (V9/V12: «rydding skjer i Finder»). Det gamle sikkerhetsnettet som la inn igjen
   // atomer fra indeks-cachen (atoms.json) når fila manglet, gjenopprettet filer brukeren nettopp hadde slettet i Finder.
   // Fjernet (funnet 14.10.2026 i M14-økta, kom først til main i 0.5.2). Cachen brukes nå bare når mappa ikke finnes (annen maskin).
+  if (sig) LESE_MINNE = { sig, atoms: structuredClone(atoms), lest: new Map(spor.lest), dirty: new Set(spor.dirty) }
   return atoms
 }
 
