@@ -35,7 +35,7 @@ const H_WHY = '## Hvorfor'
 const H_M = '## Sammendrag (M)'
 const H_L = '## Innhold (L)'
 // nøklene parse() forstår; alt annet i frontmatter er `ekstra` (runde 3c)
-export const KJENTE_NØKLER = new Set(['tua_id', 'prosjekt', 'samtale', 'kilde', 'dato', 'versjon', 'key', 'kind', 'status', 'fanget', 'drift', 'beholdt', 'tagger', 'synlig_i', 'lenker', 'bygget_av', 'ga', 'gjengivelser', 'nivaa', 'S_av', 'S_versjon', 'S_dato', 'M_av', 'M_versjon', 'M_dato', 'tittel', 'hører_til', 'hører_til_forslag', 'arbeid', 'gren', 'vert', 'start'])
+export const KJENTE_NØKLER = new Set(['tua_id', 'prosjekt', 'samtale', 'kilde', 'dato', 'versjon', 'key', 'kind', 'status', 'fanget', 'drift', 'beholdt', 'tagger', 'synlig_i', 'lenker', 'bygget_av', 'ga', 'gjengivelser', 'nivaa', 'S_av', 'S_versjon', 'S_dato', 'M_av', 'M_versjon', 'M_dato', 'tittel', 'hører_til', 'hører_til_forslag', 'arbeid', 'gren', 'vert', 'start', 'gjentatt'])
 
 const isoLocal = (ms) => {
   const d = new Date(ms)
@@ -76,6 +76,7 @@ export function serialize(atom) {
     ...(atom.arbeid === true ? { arbeid: true } : {}),                                      // friksjon 20: «Gjør til arbeid» — saken er et arbeid også før noe henger på den
     ...(atom.gren ? { gren: atom.gren } : {}),                                              // friksjon 20: git-grenen Code-samtalen gikk på (kobling via felles stamme)
     ...(atom.vert ? { vert: atom.vert } : {}),                                              // friksjon 20: Code-øktas verts-id (CLAUDE_CODE_HOST_SESSION_ID) — barn finner forelderen
+    ...(atom.gjentatt === true ? { gjentatt: true } : {}),                                  // skive 3 (arb. 33 §7): en planlagt/gjentatt kjøring — samme tittel, prosjekt og kilde som en samtale som alt fantes ved import
     ...(atom.kind === 'samtale' && atom.createdAt && atom.capturedAt && Math.abs(atom.createdAt - atom.capturedAt) > 60e3 ? { start: isoLocal(atom.createdAt) } : {}),   // friksjon 20: når samtalen begynte (dato = sist skrevet) — løpet ordner samtalene etter start
     tagger: atom.tags || [],
     synlig_i: atom.refs || [],
@@ -168,6 +169,7 @@ export function parse(text, { fallbackId } = {}) {
   if (fm.arbeid === true || fm.arbeid === 'true') atom.arbeid = true
   if (typeof fm.gren === 'string' && fm.gren) atom.gren = fm.gren
   if (typeof fm.vert === 'string' && fm.vert) atom.vert = fm.vert
+  if (fm.gjentatt === true || fm.gjentatt === 'true') atom.gjentatt = true          // skive 3: gjentatt kjøring (import)
   if (typeof fm.start === 'string' && fm.start && Date.parse(fm.start)) atom.createdAt = Date.parse(fm.start)
   if (fm.nivaa && typeof fm.nivaa === 'object') atom.share = fm.nivaa
   if (Array.isArray(fm.lenker) && fm.lenker.length) atom.links = fm.lenker.filter((l) => l && l.href)

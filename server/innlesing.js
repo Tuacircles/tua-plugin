@@ -24,6 +24,52 @@ const FERDIG = () => path.join(INBOX_DIR, 'Ferdig')
 const stem = (n) => String(n || '').replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim()
 const uniq = (dir, base) => { let p = path.join(dir, base); if (!fs.existsSync(p)) return p; const e = path.extname(base), b = base.slice(0, base.length - e.length); return path.join(dir, `${b} (${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')})${e}`) }
 
+// ── Skive 3 i arbeidsstykke 33 (planen §6 «Tekst inn», 28.10.2026): tekst limt inn, og et utdrag av en sak ──
+//   lagreTekst({tekst, prosjekt, samtale, hørerTil})      tekst limt inn i feltet i Arbeid (over LIM_INN_GRENSE tegn, regelen bor i appen/regler.js) blir en sak i samtalens prosjekt:
+//                                                          kind capture, tittel «Limt inn 28.10 14:02 — <første ord>», kilde «limt inn», S/M etter regel (ingen modell), hører_til når samtalen hører til et arbeid.
+//                                                          Nøkkelen er tekstens sha256, så samme tekst limt inn igjen i samme prosjekt er samme sak. Angre = papirkurven (POST /api/rydd/kast).
+//   lagUtdrag({id, tekst, fra, til, prosjekt, …})          merket tekst i en sak («Bruk i samtalen») blir en sak: tittel «Utdrag av <sakens tittel>», kilde «utdrag», bygget_av → saken (L, versjon),
+//                                                          og lenke {kind: 'utdrag', id, versjon, fra, til} som sier hvor i saken utdraget står. Nivået i kildelinja er L (hele utdraget).
+export const LIM_INN_GRENSE = 800
+const datoKlokke = (t) => { const d = new Date(t); const to = (n) => String(n).padStart(2, '0'); return `${to(d.getDate())}.${to(d.getMonth() + 1)} ${to(d.getHours())}:${to(d.getMinutes())}` }
+const førsteOrd = (t, n = 6) => String(t || '').replace(/\s+/g, ' ').trim().split(' ').slice(0, n).join(' ')
+export async function lagreTekst({ tekst, prosjekt, samtale = '', hørerTil = null, tittel = null, klient = 'app' } = {}) {
+  const t = String(tekst || '').replace(/\r\n?/g, '\n').trim()
+  if (!t) throw new Error('tekst kreves')
+  const proj = String(prosjekt || '').trim() || STANDARD_PROSJEKT
+  const nå = Date.now()
+  const navn = String(tittel || '').trim() || `Limt inn ${datoKlokke(nå)} — ${førsteOrd(t)}`.slice(0, 90)
+  const nøkkel = `tekst:${crypto.createHash('sha256').update(t).digest('hex').slice(0, 16)}`
+  const { S, M } = await skrivNivåer(t, { tittel: navn, skriver: 'regel' })
+  const atoms = load()
+  const finnes = atoms.find((a) => a.key === nøkkel && a.project.toLowerCase() === proj.toLowerCase())
+  const { atom, status } = upsert(atoms, { key: nøkkel, kind: 'capture', content: t, name: finnes?.name || navn, project: proj, convo: finnes?.convo || samtale || 'Limt inn', source: 'limt inn', by: 'regel', tags: ['tekst', 'limt-inn'], short: S, medium: M,
+    ...(hørerTil && atoms.some((a) => a.id === hørerTil) ? { hørerTil: String(hørerTil) } : {}) })
+  save(atoms)
+  return sakUt(atom, { status, tegnInn: t.length, klient })
+}
+export function lagUtdrag({ id, tekst, fra = null, til = null, prosjekt = null, samtale = '', hørerTil = null } = {}) {
+  const atoms = load()
+  const sak = atoms.find((a) => a.id === String(id || ''))
+  if (!sak) throw new Error(`fant ikke sak ${id}`)
+  const t = String(tekst || '').replace(/\r\n?/g, '\n').trim()
+  if (!t) throw new Error('tekst kreves (den merkede teksten)')
+  const L = String(sak.content || '')
+  let f = Number.isFinite(Number(fra)) && fra !== null ? Number(fra) : L.indexOf(t)
+  let s = Number.isFinite(Number(til)) && til !== null ? Number(til) : (f >= 0 ? f + t.length : -1)
+  if (f < 0) { f = null; s = null }
+  const proj = String(prosjekt || sak.project || '').trim() || sak.project
+  const navn = `Utdrag av ${sak.name}`.slice(0, 90)
+  const nøkkel = `utdrag:${sak.id}:${crypto.createHash('sha256').update(t).digest('hex').slice(0, 12)}`
+  const S = t.length <= 300 ? t.replace(/\s+/g, ' ') : t.replace(/\s+/g, ' ').slice(0, 299).trimEnd() + '…'
+  const { atom, status } = upsert(atoms, { key: nøkkel, kind: 'capture', content: t, name: navn, project: proj, convo: samtale || sak.convo || '', source: 'utdrag', by: 'regel', tags: ['utdrag'], short: S,
+    summary: `Utdrag av «${sak.name}» (v${sak.version || 1}${f != null ? `, tegn ${f}–${s}` : ''}).`,
+    links: [{ kind: 'utdrag', href: `#sak/${sak.id}`, label: `Utdrag av ${sak.name}`, id: sak.id, versjon: sak.version || 1, ...(f != null ? { fra: f, til: s } : {}) }],
+    derivedFrom: [{ id: sak.id, version: sak.version || 1, level: 'L' }], ...(hørerTil && atoms.some((a) => a.id === hørerTil) ? { hørerTil: String(hørerTil) } : sak.hørerTil ? { hørerTil: sak.hørerTil } : {}) })
+  save(atoms)
+  return sakUt(atom, { status, av: { id: sak.id, name: sak.name, version: sak.version || 1, fra: f, til: s } })
+}
+
 // Tittelen på saken: dokumentets egen tittel når leseren fant en (første overskrift i md/html/docx, PDF-metadata), ellers filnavnet uten endelse.
 export const tittelFor = (meta) => (meta.tittel && meta.tittel.length <= 120 ? meta.tittel : stem(meta.navn)).slice(0, 90) || 'Uten tittel'
 const ordPer = (a) => Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)]))

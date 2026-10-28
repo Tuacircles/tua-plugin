@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-27. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { projectOf, projects, tråder as tr_der, statusOf } from './store.mjs';
 
 // dora.js — Tua → Claude (runde 3a i arbeidsstykke 32, 03-avisen §5 «det foruroligende»): det Claude ikke så av seg selv.

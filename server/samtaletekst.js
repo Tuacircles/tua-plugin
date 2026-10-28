@@ -13,6 +13,14 @@ import { S_MAX } from './store.js'
 
 export const flat = (s) => String(s || '').replace(/\s+/g, ' ').trim()
 export const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s)
+// Skive 3 (arb. 33, 28.10.2026) — midnattsfeilen: hodelinja i et transkript skrives med LOKAL dato (ikke toISOString, som er UTC og ligger et døgn bak
+// mellom midnatt og 01/02), og en dato «YYYY-MM-DD» lest tilbake fra hodet tolkes som lokal midnatt — så samtaleS gir samme periode skrevet som lest.
+const to2 = (n) => String(n).padStart(2, '0')
+export const isoLokal = (t) => { const d = new Date(t); return `${d.getFullYear()}-${to2(d.getMonth() + 1)}-${to2(d.getDate())}` }
+export const lokalDato = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || '')); return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : (Date.parse(s) || null) }
+// Tittelen på en samtale, kortet etter én regel (planen §7, skive 3): første setning når den er høyst 60 tegn, ellers de første 60 tegnene (som Code-samtalene).
+// Brukes på Cowork-titler ved import (meta.title kan være hele prompten) og i foldingen av gjentatte kjøringer (regler.js har samme regel).
+export const kortTittel = (t) => { const s = flat(t); if (!s) return ''; if (s.length <= 60) return s; const m = s.match(/^[\s\S]*?[.!?](?=\s|$)/); return clip(m && m[0].length <= 60 ? m[0] : s, 60) }
 
 // Et par = én brukermelding og svarene som kom etter den (til neste brukermelding). Leserne leverer pairs = [{prompt, at, answers: [tekst]}].
 export const nyttPar = (prompt, at) => ({ prompt: String(prompt || ''), at: at || null, answers: [], svar: '' })   // svar: siste assistent-tekst i paret, uansett lengde (til S)
@@ -57,14 +65,16 @@ export function samtaleM({ prompts = [], lastAssistant = '', filer = [], turns, 
 // Samme regel lest ut av en lagret samtale-sak (L er transkriptet «**Bruker:** …» / «**Claude:** …» med hodelinje) — til review.js --samtaler,
 // som skriver S på nytt for samtaler som alt ligger i arkivet uten å trenge øktfila eller Desktop-cachen. null når teksten ikke er et transkript.
 // Friksjon 20: leser også hookens form (## Oppgaver med «- HH:MM — prompt», ## Filer skrevet, ## Siste svar) — så S og M kan skrives på nytt for begge.
+// «Du · 28.10.2026, 14:02» → ms (lokal), ellers null. Hookens «- HH:MM — …» har bare klokkeslett og får ingen tid.
+const tidAvHode = (h) => { const m = /(\d{1,2})\.(\d{1,2})\.(\d{4}),? (\d{1,2}):(\d{2})/.exec(String(h || '')); return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), Number(m[4]), Number(m[5])).getTime() : null }
 export function samtaleFraSak(content, { first = null, last = null } = {}) {
   const tekst = String(content || '').replace(/\r\n?/g, '\n').replace(/\n\n---\n\n\*\*Konklusjon[^*\n]{0,40}:\*\* [^\n]*(?:\n(?!\n\*\*)[^\n]*)*/g, '').replace(/\n\n---(?=\n\n|$)/g, '')   // skive 1 (arb. 33): Tua-samtalenes konklusjonsstreker er ikke vendinger
   const hode = tekst.split(/\n\s*\n/)[1] || ''
-  const datoer = [...hode.matchAll(/(\d{4}-\d{2}-\d{2})/g)].map((m) => Date.parse(m[1])).filter(Boolean)
+  const datoer = [...hode.matchAll(/(\d{4}-\d{2}-\d{2})/g)].map((m) => lokalDato(m[1])).filter(Boolean)   // skive 3: lokal dato, samme som samtaleS skriver
   const oppgaver = hode.match(/(\d+) oppgaver/)
   const pairs = []
   for (const m of tekst.matchAll(/^\*\*(Bruker|[^*\n]{1,40}):\*\* ([\s\S]*?)(?=\n\n\*\*[^*\n]{1,40}:\*\* |\n\n_\(forkortet|\n\n\[(?:Write|Edit|NotebookEdit): |$)/gm)) {
-    if (m[1] === 'Bruker' || /^Du(?: ·|$)/.test(m[1])) pairs.push(nyttPar(m[2].trim(), null))   // «Du · <tid>» er Tua-samtalenes brukerlinje (skive 1, arb. 33)
+    if (m[1] === 'Bruker' || /^Du(?: ·|$)/.test(m[1])) pairs.push(nyttPar(m[2].trim(), tidAvHode(m[1])))   // «Du · <tid>» er Tua-samtalenes brukerlinje (skive 1, arb. 33); tida leses med (skive 3)
     else if (pairs.length && m[2].trim()) { pairs.at(-1).answers.push(m[2].trim()); pairs.at(-1).svar = m[2].trim() }
   }
   let filer = [], lastAssistant = pairs.at(-1)?.svar || ''

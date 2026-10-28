@@ -193,7 +193,7 @@ export function load() {
 // Eksplisitte lenker bor på atomet (`links`, fil-feltet `lenker`). Avledede
 // lenker regnes ut ved lesing: atomets egen .md-fil (fra indeksen), og repo +
 // Desktop-prosjekt fra prosjektregisteret (.tua/projects.json, skrevet av sync).
-export const LINK_KINDS = ['file', 'url', 'repo', 'claude-project', 'claude-chat']
+export const LINK_KINDS = ['file', 'url', 'repo', 'claude-project', 'claude-chat', 'utdrag']   // utdrag (skive 3, arb. 33): et utdrag av en annen sak — {id, versjon, fra, til} sier hvor i saken
 export const claudeProjectHref = (uuid) => `claude://claude.ai/project/${uuid}`
 export function normalizeLinks(list) {
   const out = []
@@ -202,9 +202,43 @@ export function normalizeLinks(list) {
     const kind = LINK_KINDS.includes(l.kind) ? l.kind : (/^claude:\/\/claude\.ai\/project\//.test(l.href) ? 'claude-project' : /^claude:\/\/claude\.ai\/chat\//.test(l.href) ? 'claude-chat' : /^https?:\/\//.test(l.href) ? 'url' : 'file')
     const href = String(l.href || '').trim()
     if (!href || out.some((o) => o.kind === kind && o.href === href)) continue
-    out.push({ kind, href, ...(l.label ? { label: String(l.label).trim() } : {}) })
+    const utdrag = kind === 'utdrag' && l.id ? { id: String(l.id), ...(l.versjon != null ? { versjon: Number(l.versjon) || 1 } : {}), ...(Number.isFinite(Number(l.fra)) && l.fra !== null ? { fra: Number(l.fra) } : {}), ...(Number.isFinite(Number(l.til)) && l.til !== null ? { til: Number(l.til) } : {}) } : {}
+    out.push({ kind, href, ...(l.label ? { label: String(l.label).trim() } : {}), ...utdrag })
   }
   return out
+}
+// Skive 3 (arb. 33 §8, 28.10.2026): LENKER SOM IKKE FINNES. En adresse (#sak/<id>, #samtale/<id>, #arbeid/<id>) som ikke treffer på id slås opp på nøkkel
+// (samtale:<økt>, okt:<økt>, samtale:tua:<t_…>, eller nøkkelen selv), i papirkurven (kastet, eller slått sammen inn i en annen sak — `innI`) og i
+// .tua/versions/<id>/ (saken har hatt den id-en: siste versjon sier nøkkel og prosjekt, så en sak som lever videre under en annen id finnes igjen).
+// Svaret sier HVA som skjedde, ikke bare «fant ikke»: { funnet, id, hvorfor: null | nøkkel | slått sammen | papirkurv | flyttet | ny versjon | versjoner, erstattet_av, papirkurv, tekst }
+export function finnSak(atoms, id) {
+  const s = String(id || '').trim()
+  const kort = (a) => ({ id: a.id, name: a.name, project: a.project, kind: a.kind || 'capture' })
+  if (!s) return { funnet: false, id: s, hvorfor: null, erstattet_av: null, papirkurv: null, tekst: 'Ingen id.' }
+  const direkte = atoms.find((a) => a.id === s)
+  if (direkte) return { funnet: true, id: s, hvorfor: null, erstattet_av: kort(direkte), papirkurv: null, tekst: '' }
+  const nøkler = [s, `samtale:${s}`, `okt:${s}`, `samtale:tua:${s}`]
+  const viaNøkkel = atoms.find((a) => a.key && nøkler.includes(a.key))
+  if (viaNøkkel) return { funnet: false, id: s, hvorfor: 'nøkkel', erstattet_av: kort(viaNøkkel), papirkurv: null, tekst: `Lenka pekte på nøkkelen; saken er «${viaNøkkel.name}» i ${viaNøkkel.project}.` }
+  if (filesMode()) {
+    const k = readKurv().find((e) => e.id === s)
+    if (k) {
+      const inn = k.innI ? atoms.find((a) => a.id === k.innI) : null
+      if (k.innI) return { funnet: false, id: s, hvorfor: 'slått sammen', erstattet_av: inn ? kort(inn) : { id: k.innI, name: k.innI, project: k.project, kind: 'capture' }, papirkurv: { ...k }, tekst: `Saken «${k.name}» er slått sammen med «${inn?.name || k.innI}».` }
+      return { funnet: false, id: s, hvorfor: 'papirkurv', erstattet_av: null, papirkurv: { ...k }, tekst: `Saken «${k.name}» ligger i papirkurven (${k.grunn || 'kastet'}).` }
+    }
+    const vers = versions(s)
+    if (vers.length) {
+      const siste = readVersion(s, vers.at(-1).name)
+      const arving = siste?.key ? atoms.find((a) => a.key === siste.key) : null
+      if (arving) {
+        const flyttet = siste.project && String(siste.project).toLowerCase() !== String(arving.project).toLowerCase()
+        return { funnet: false, id: s, hvorfor: flyttet ? 'flyttet' : 'ny versjon', erstattet_av: kort(arving), papirkurv: null, tekst: flyttet ? `Saken er flyttet til ${arving.project} og heter «${arving.name}».` : `Saken lever videre som «${arving.name}» (v${arving.version || 1}) i ${arving.project}.` }
+      }
+      return { funnet: false, id: s, hvorfor: 'versjoner', erstattet_av: null, papirkurv: null, versjoner: vers.length, tekst: `Saken${siste?.name ? ` «${siste.name}»` : ''} er borte fra arkivet; ${vers.length} ${vers.length === 1 ? 'eldre versjon' : 'eldre versjoner'} ligger i .tua/versions.` }
+    }
+  }
+  return { funnet: false, id: s, hvorfor: null, erstattet_av: null, papirkurv: null, tekst: `Fant ikke saken ${s} i arkivet.` }
 }
 export const projects = () => { try { return JSON.parse(fs.readFileSync(PROJECTS(), 'utf8')) } catch { return {} } }
 // Prosjektnavn som skal slås sammen (Erik 15.10.2026): .tua/project-aliases.json = { "navn slik kilden sier det": "mappa i Tua" }.
@@ -638,7 +672,7 @@ export function setShare(a, project, level) {
 // M19 (skive 8, V16): `ga` = [{id, version}] — svarene en prompt-sak ga. Normaliseres som derivedFrom; upsert slår lista SAMMEN (union på id), aldri erstatter.
 export const normalizeGa = (list) => (Array.isArray(list) ? list : []).filter((g) => g && g.id).map((g) => ({ id: String(g.id), version: Number(g.version) || 1 }))
 export const mergeGa = (gammel = [], ny = []) => { const ut = [...normalizeGa(gammel)]; for (const g of normalizeGa(ny)) { const i = ut.findIndex((x) => x.id === g.id); if (i < 0) ut.push(g); else ut[i] = g } return ut }
-export function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget, drift, beholdt, hørerTil, hørerTilForslag, arbeid, gren, vert }) {
+export function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget, drift, beholdt, hørerTil, hørerTilForslag, arbeid, gren, vert, gjentatt }) {
   const body = String(content || '').replace(/\r\n?/g, '\n').trim()   // M17: fila leses tilbake uten \r (files.js) — lagre likt, ellers blir hver import en «ny versjon»
   const now = Date.now()
   const a = {
@@ -676,6 +710,7 @@ export function makeAtom({ content, name, source, project, convo, summary, tags,
   if (arbeid === true) a.arbeid = true
   if (typeof gren === 'string' && gren) a.gren = gren
   if (typeof vert === 'string' && vert) a.vert = vert
+  if (gjentatt === true) a.gjentatt = true                                // skive 3 (arb. 33 §7): gjentatt kjøring ved import
   return a
 }
 
@@ -734,6 +769,7 @@ export function upsert(atoms, { key, ...data }) {
   const hørerTilForslag = hørerTil ? undefined : (old.hørerTilForslag || (typeof data.hørerTilForslag === 'string' && data.hørerTilForslag ? data.hørerTilForslag : undefined))
   const arbeid = old.arbeid === true || data.arbeid === true ? true : undefined
   const gren = (typeof data.gren === 'string' && data.gren) ? data.gren : old.gren, vert = (typeof data.vert === 'string' && data.vert) ? data.vert : old.vert
+  const gjentatt = data.gjentatt === false ? undefined : data.gjentatt === true ? true : old.gjentatt   // skive 3: settes ved import, tas bare bort eksplisitt
   const attach = (a) => {
     if (levels) a.levels = levels; else delete a.levels
     if (links) a.links = links; else delete a.links
@@ -748,11 +784,12 @@ export function upsert(atoms, { key, ...data }) {
     if (arbeid) a.arbeid = true; else if (old.arbeid !== undefined) a.arbeid = false; else delete a.arbeid
     if (gren) a.gren = gren; else delete a.gren
     if (vert) a.vert = vert; else delete a.vert
+    if (gjentatt) a.gjentatt = true; else delete a.gjentatt
     a.kind = kind
     return a
   }
   if (bodySame) {
-    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt && hørerTil === old.hørerTil && hørerTilForslag === old.hørerTilForslag && arbeid === old.arbeid && gren === old.gren && vert === old.vert) return { atom: old, status: 'uendret' }
+    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt && hørerTil === old.hørerTil && hørerTilForslag === old.hørerTilForslag && arbeid === old.arbeid && gren === old.gren && vert === old.vert && gjentatt === old.gjentatt) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old })
     markDirty(atoms, old.id)
     return { atom: atoms[i], status: 'nivåer' }

@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-27. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
 import path__default from 'node:path';
 import { S_MAX } from './store.mjs';
 
@@ -15,6 +15,10 @@ import { S_MAX } from './store.mjs';
 
 const flat = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
+const lokalDato = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || '')); return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime() : (Date.parse(s) || null) };
+// Tittelen på en samtale, kortet etter én regel (planen §7, skive 3): første setning når den er høyst 60 tegn, ellers de første 60 tegnene (som Code-samtalene).
+// Brukes på Cowork-titler ved import (meta.title kan være hele prompten) og i foldingen av gjentatte kjøringer (regler.js har samme regel).
+const kortTittel = (t) => { const s = flat(t); if (!s) return ''; if (s.length <= 60) return s; const m = s.match(/^[\s\S]*?[.!?](?=\s|$)/); return clip(m && m[0].length <= 60 ? m[0] : s, 60) };
 
 // Et par = én brukermelding og svarene som kom etter den (til neste brukermelding). Leserne leverer pairs = [{prompt, at, answers: [tekst]}].
 const nyttPar = (prompt, at) => ({ prompt: String(prompt || ''), at: at || null, answers: [], svar: '' });   // svar: siste assistent-tekst i paret, uansett lengde (til S)
@@ -56,5 +60,34 @@ function samtaleM({ prompts = [], lastAssistant = '', filer = [], turns, first, 
   deler.push(`_${hale}_`);
   return deler.join('\n\n').slice(0, M_MAKS)
 }
+// Samme regel lest ut av en lagret samtale-sak (L er transkriptet «**Bruker:** …» / «**Claude:** …» med hodelinje) — til review.js --samtaler,
+// som skriver S på nytt for samtaler som alt ligger i arkivet uten å trenge øktfila eller Desktop-cachen. null når teksten ikke er et transkript.
+// Friksjon 20: leser også hookens form (## Oppgaver med «- HH:MM — prompt», ## Filer skrevet, ## Siste svar) — så S og M kan skrives på nytt for begge.
+// «Du · 28.10.2026, 14:02» → ms (lokal), ellers null. Hookens «- HH:MM — …» har bare klokkeslett og får ingen tid.
+const tidAvHode = (h) => { const m = /(\d{1,2})\.(\d{1,2})\.(\d{4}),? (\d{1,2}):(\d{2})/.exec(String(h || '')); return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), Number(m[4]), Number(m[5])).getTime() : null };
+function samtaleFraSak(content, { first = null, last = null } = {}) {
+  const tekst = String(content || '').replace(/\r\n?/g, '\n').replace(/\n\n---\n\n\*\*Konklusjon[^*\n]{0,40}:\*\* [^\n]*(?:\n(?!\n\*\*)[^\n]*)*/g, '').replace(/\n\n---(?=\n\n|$)/g, '');   // skive 1 (arb. 33): Tua-samtalenes konklusjonsstreker er ikke vendinger
+  const hode = tekst.split(/\n\s*\n/)[1] || '';
+  const datoer = [...hode.matchAll(/(\d{4}-\d{2}-\d{2})/g)].map((m) => lokalDato(m[1])).filter(Boolean);   // skive 3: lokal dato, samme som samtaleS skriver
+  const oppgaver = hode.match(/(\d+) oppgaver/);
+  const pairs = [];
+  for (const m of tekst.matchAll(/^\*\*(Bruker|[^*\n]{1,40}):\*\* ([\s\S]*?)(?=\n\n\*\*[^*\n]{1,40}:\*\* |\n\n_\(forkortet|\n\n\[(?:Write|Edit|NotebookEdit): |$)/gm)) {
+    if (m[1] === 'Bruker' || /^Du(?: ·|$)/.test(m[1])) pairs.push(nyttPar(m[2].trim(), tidAvHode(m[1])));   // «Du · <tid>» er Tua-samtalenes brukerlinje (skive 1, arb. 33); tida leses med (skive 3)
+    else if (pairs.length && m[2].trim()) { pairs.at(-1).answers.push(m[2].trim()); pairs.at(-1).svar = m[2].trim(); }
+  }
+  let filer = [], lastAssistant = pairs.at(-1)?.svar || '';
+  if (!pairs.length) {
+    const opp = tekst.match(/\n## Oppgaver\n([\s\S]*?)(?=\n## |$)/);
+    if (!opp) return null
+    for (const l of opp[1].split('\n')) { const m = l.match(/^- (?:\d{1,2}[.:]\d{2} — )?([\s\S]+)$/); if (m && m[1].trim() && !/^… og \d+ til$/.test(m[1].trim())) pairs.push(nyttPar(m[1].trim(), null)); }
+    const fil = tekst.match(/\n## Filer skrevet\n([\s\S]*?)(?=\n## |$)/); if (fil) filer = fil[1].split('\n').map((l) => l.replace(/^- /, '').trim()).filter(Boolean);
+    const sv = tekst.match(/\n## Siste svar\n([\s\S]*)$/); lastAssistant = sv ? sv[1].trim() : '';
+    if (pairs.length && lastAssistant) { pairs.at(-1).svar = lastAssistant; pairs.at(-1).answers.push(lastAssistant); }
+    if (!pairs.length) return null
+  } else for (const m of tekst.matchAll(/^\[(?:Write|Edit|NotebookEdit): ([^\]\n]+)\]$/gm)) if (!filer.includes(m[1])) filer.push(m[1]);
+  const turns = oppgaver ? Number(oppgaver[1]) : pairs.length;
+  const d1 = datoer[0] || first, d2 = datoer[1] || datoer[0] || last;
+  return { pairs, prompts: pairs.map((p) => p.prompt), lastAssistant, filer, turns, first: d1, last: d2, S: samtaleS({ pairs, turns, first: d1, last: d2 }), M: samtaleM({ prompts: pairs.map((p) => p.prompt), lastAssistant, filer, turns, first: d1, last: d2, kilde: (hode.match(/^_?([^·_]+?) ·/) || [])[1]?.trim() || '' }) }
+}
 
-export { nyttPar, samtaleM, samtaleS };
+export { clip, flat, kortTittel, nyttPar, samtaleFraSak, samtaleM, samtaleS };

@@ -1,6 +1,6 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-27. IKKE REDIGER: kilden er server/*.js og node_modules.
-import { øktIdAv as _ktIdAv, statusOf, isVault, levelOf } from './store.mjs';
-import 'node:path';
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
+import { øktIdAv as _ktIdAv, hashOf, sha8, statusOf, isVault, levelOf } from './store.mjs';
+import { samtaleFraSak, clip, flat } from './samtaletekst.mjs';
 
 // samtale.js — skive 1 «Tråden» i arbeidsstykke 33 (V22 «Samtalen først», Erik 27.10.2026): SAMTALEN SOM SAK, og vendingene i den.
 //
@@ -41,25 +41,70 @@ const erForskjeller = (a) => a?.kind === 'svar' && (a.tags || []).some((t) => St
 const erSvarSak = (a) => !!a && !erForskjeller(a) && (a.kind === 'svar' || (a.kind === 'capture' && (a.tags || []).includes('svar')));
 const modellAv = (a) => String(a?.source || '').split(' (')[0].trim() || 'modell';
 const nivåAv = (a, utenom) => [...new Set((a.derivedFrom || []).filter((d) => !utenom.has(d.id)).map((d) => d.level).filter(Boolean))].join('/') || null;
+const syntetiskId = (samtale, n) => `v_${sha8(samtale.id)}_${n}`;
+const kortModell = (s) => { const k = String(s || '').trim(); return /^Claude\b/.test(k) ? 'Claude' : k.split(' (')[0] || 'modell' };
+function vendingerAvTranskript(atoms, samtale) {
+  if (!samtale || erTuaSamtale(samtale)) return null
+  const lest = samtaleFraSak(samtale.content);
+  if (!lest?.pairs?.length) return null
+  const sid8 = _ktIdAv(samtale.key);
+  const peker = (a) => (a.derivedFrom || []).some((d) => d.id === samtale.id);
+  const iSamtalen = (a) => (sid8 && String(a.key || '').startsWith(`${a.kind === 'prompt' ? 'prompt' : 'svar'}:${sid8}:`)) || peker(a);
+  const prompter = new Map(), svar = new Map();   // flatet tekst → saken (importens prompter er promptL — kortet ved 20 000 tegn — så vi matcher også på nøkkelen)
+  for (const a of atoms) {
+    if (a.id === samtale.id || !iSamtalen(a)) continue
+    if (a.kind === 'prompt' && String(a.source || '') !== KILDE_TUA) { prompter.set(a.key, a); prompter.set(hashOf(a.content), a); }
+    else if (erSvarSak(a) && a.kind !== 'svar') { svar.set(a.key, a); svar.set(hashOf(a.content), a); }
+  }
+  const rad = (a, rolle, ekstra = {}) => ({ id: a.id, rolle, kind: a.kind || 'capture', tid: a.capturedAt || 0, modell: rolle === 'bruker' ? null : modellAv(a), kilde: a.source || '', nivå: null, S: levelOf(a, 'S').text, L: a.content || '', tegn: (a.content || '').length, versjon: a.version || 1,
+    beholdt: a.beholdt === true || a.fanget === false, status: statusOf(a), vault: isVault(a), låst: false, ...ekstra });
+  const syntetisk = (n, rolle, tekst, ekstra = {}) => ({ id: syntetiskId(samtale, n), rolle, kind: 'vending', tid: ekstra.tid ?? null, modell: rolle === 'bruker' ? null : kortModell(samtale.source), kilde: samtale.source || '', nivå: null, S: clip(flat(tekst), 300), L: tekst, tegn: tekst.length, versjon: samtale.version || 1,
+    beholdt: false, status: 'endelig', vault: isVault(samtale), låst: false, syntetisk: true, samtale: samtale.id, ...ekstra });
+  const ut = [];
+  let n = 0;
+  for (const p of lest.pairs) {
+    n++;
+    const ps = prompter.get(sid8 ? `prompt:${sid8}:${hashOf(p.prompt)}` : '') || prompter.get(hashOf(p.prompt)) || null;
+    const bruker = ps ? rad(ps, 'bruker', { prompt: ps.id, forskjeller: [] }) : syntetisk(n, 'bruker', p.prompt, { tid: p.at || null });
+    bruker.prompt = bruker.id;
+    ut.push(bruker);
+    for (const a of p.answers?.length ? p.answers : p.svar ? [p.svar] : []) {
+      n++;
+      const ss = svar.get(sid8 ? `svar:${sid8}:${sha8(a)}` : '') || svar.get(hashOf(a)) || null;
+      ut.push(ss ? rad(ss, 'modell', { prompt: bruker.id, nivå: null }) : syntetisk(n, 'modell', a, { prompt: bruker.id }));
+    }
+  }
+  return ut
+}
 function vendingerFor(atoms, samtale) {
   if (!samtale) return []
   const peker = (a) => (a.derivedFrom || []).some((d) => d.id === samtale.id);
   const sid8 = _ktIdAv(samtale.key);
   const tua = erTuaSamtale(samtale);
   const sammeNavn = (a) => same(a.project, samtale.project) && (a.convo || '') === navnAv(samtale);
-  const prompter = atoms.filter((a) => a.kind === 'prompt' && a.id !== samtale.id && (peker(a) || (sid8 && String(a.key || '').startsWith(`prompt:${sid8}:`)) || (tua && /^prompt:spor:/.test(String(a.key || '')) && sammeNavn(a)))).sort(påTid);
+  const fraTranskript = vendingerAvTranskript(atoms, samtale);   // skive 3: importerte samtaler — hele transkriptet først
+  const alt = new Set((fraTranskript || []).map((v) => v.id));
+  const importPrompt = (a) => !!sid8 && String(a.key || '').startsWith(`prompt:${sid8}:`);
+  // etter transkriptet: Tua-vendingene som peker på samtalen (fortsettelsen), og importprompter transkriptet ikke fant igjen (forkortet transkript) — ingenting forsvinner
+  const prompter = atoms.filter((a) => a.kind === 'prompt' && a.id !== samtale.id && !alt.has(a.id) && (peker(a) || importPrompt(a) || (tua && /^prompt:spor:/.test(String(a.key || '')) && sammeNavn(a)))).sort(påTid);
   const rad = (a, rolle, ekstra = {}) => ({ id: a.id, rolle, kind: a.kind || 'capture', tid: a.capturedAt || 0, modell: rolle === 'bruker' ? null : modellAv(a), kilde: a.source || '', nivå: null, S: levelOf(a, 'S').text, L: a.content || '', tegn: (a.content || '').length, versjon: a.version || 1,
     beholdt: a.beholdt === true || a.fanget === false, status: statusOf(a), vault: isVault(a), låst: false, ...ekstra });
+  // rekkefølgen med transkript: importprompter transkriptet ikke fant igjen FØRST (de er eldre historikk — Desktop lagrer lange samtaler som utsnitt av de siste meldingene,
+  // og sakene fra en fullere import står igjen), så transkriptets vendinger, så Tua-vendingene (fortsettelsen) etter tid
   const ut = [];
-  for (const p of prompter) {
+  const eldre = fraTranskript ? prompter.filter(importPrompt) : [], etter = fraTranskript ? prompter.filter((a) => !importPrompt(a)) : prompter;
+  const leggTråd = (p) => {
     const svarIder = new Set((p.ga || []).map((g) => g.id));
-    const svar = atoms.filter((a) => a.id !== p.id && erSvarSak(a) && (svarIder.has(a.id) || (a.derivedFrom || []).some((d) => d.id === p.id))).sort(påTid);
+    const svar = atoms.filter((a) => a.id !== p.id && erSvarSak(a) && !alt.has(a.id) && (svarIder.has(a.id) || (a.derivedFrom || []).some((d) => d.id === p.id))).sort(påTid);
     const fsk = atoms.filter((a) => erForskjeller(a) && (a.derivedFrom || []).some((d) => svar.some((s) => s.id === d.id))).map((a) => a.id);
     const konk = atoms.filter((a) => a.kind === 'konklusjon' && (a.derivedFrom || []).some((d) => d.id === p.id)).sort(påTid);
     ut.push(rad(p, 'bruker', { prompt: p.id, forskjeller: fsk }));
     for (const s of svar) ut.push(rad(s, 'modell', { prompt: p.id, nivå: nivåAv(s, new Set([p.id, samtale.id])) }));
     for (const k of konk) ut.push(rad(k, 'konklusjon', { prompt: p.id, låst: statusOf(k) === 'endelig' }));
-  }
+  };
+  for (const p of eldre) leggTråd(p);
+  if (fraTranskript) ut.push(...fraTranskript);
+  for (const p of etter) leggTråd(p);
   return ut
 }
 const antallVendinger = (vend) => vend.filter((v) => v.rolle === 'bruker').length;

@@ -92,7 +92,47 @@ export function firstSentence(t, max = S_MAX) {
 }
 export const promptTitle = (t) => titleOf(firstSentence(t, 80), 'Spørsmål')
 // Parene, samtaleS/samtaleM og samtaleFraSak bor i samtaletekst.js (skive 1, arb. 33) — eksportert videre herfra så hooken og testene er uendret
-import { nyttPar, samtaleS, samtaleM } from './samtaletekst.js'
+import { nyttPar, samtaleS, samtaleM, kortTittel } from './samtaletekst.js'
+export { kortTittel }
+// Skive 3 (arb. 33 §7): gjentatt kjøring = en samtale-sak med samme kortede tittel, prosjekt og kilde finnes alt (en annen økt). Nøkkelen er fortsatt økt-id — to økter er to økter;
+// flagget gjør regelen synlig i fila, og visningen folder dem til én linje («9 kjøringer»). review --gjentatt merker eksisterende dubletter.
+export const erGjentatt = (atoms, { tittel, prosjekt, kilde }) => { const t = kortTittel(tittel); return !!t && atoms.some((a) => a.kind === 'samtale' && String(a.source || '') === String(kilde || '') && String(a.project || '').toLowerCase() === String(prosjekt || '').toLowerCase() && kortTittel(a.name) === t) }
+// Merk gjentatte kjøringer blant NYE samtaler (importCode): i hver gruppe (kilde, prosjekt, kortet tittel) som en ny samtale hører til, er den ELDSTE (createdAt) ikke gjentatt og
+// resten gjentatt — uavhengig av hvilken rekkefølge øktene ble importert i (lista er nyeste først). Returnerer hvor mange av de nye som ble merket. Eksisterende saker røres
+// bare når en ny er eldre enn dem (da flyttes «første» til den nye); review --gjentatt gjør det samme for hele arkivet.
+export function merkGjentatte(atoms, nye = []) {
+  const nøkkel = (a) => `${a.source}\n${String(a.project || '').toLowerCase()}\n${kortTittel(a.name)}`
+  const grupper = new Set(nye.filter((a) => a?.kind === 'samtale' && kortTittel(a.name)).map(nøkkel))
+  const nyeIder = new Set(nye.map((a) => a.id))
+  let merket = 0
+  for (const k of grupper) {
+    const liste = atoms.filter((a) => a.kind === 'samtale' && String(a.source || '') !== 'Tua' && nøkkel(a) === k).sort((x, y) => ((x.createdAt || x.capturedAt || 0) - (y.createdAt || y.capturedAt || 0)) || String(x.id).localeCompare(String(y.id)))
+    if (liste.length < 2) continue
+    liste.forEach((a, i) => {
+      const skal = i > 0
+      if (skal && a.gjentatt !== true) { a.gjentatt = true; markDirty(atoms, a.id) }
+      else if (!skal && a.gjentatt === true) { delete a.gjentatt; markDirty(atoms, a.id) }
+      if (skal && nyeIder.has(a.id)) merket++
+    })
+  }
+  return merket
+}
+export function gjentatteKandidater(atoms) {
+  const grupper = new Map()
+  for (const a of atoms.filter((x) => x.kind === 'samtale' && String(x.source || '') !== 'Tua')) {
+    const k = `${a.source}\n${String(a.project || '').toLowerCase()}\n${kortTittel(a.name)}`
+    if (!grupper.has(k)) grupper.set(k, []); grupper.get(k).push(a)
+  }
+  const nye = [], alt = []
+  const grupperUt = []
+  for (const liste of grupper.values()) {
+    if (liste.length < 2) continue
+    const sortert = [...liste].sort((x, y) => ((x.createdAt || x.capturedAt || 0) - (y.createdAt || y.capturedAt || 0)) || String(x.id).localeCompare(String(y.id)))
+    for (const a of sortert.slice(1)) (a.gjentatt === true ? alt : nye).push(a)
+    grupperUt.push({ kilde: sortert[0].source, project: sortert[0].project, tittel: kortTittel(sortert[0].name), antall: sortert.length, første: sortert[0], gjentatte: sortert.slice(1) })
+  }
+  return { grupper: grupperUt.sort((x, y) => y.antall - x.antall), nye, alt }
+}
 export { nyttPar, samtaleS, samtaleM, samtaleFraSak, samtaleSFraTranskript } from './samtaletekst.js'
 // S etter regel: «Tittel: første brukermelding» innenfor 300 tegn — for dokumenter, artifacts og vedlegg. Samtaler bruker samtaleS (under).
 export const ruleS = (title, firstUser) => clip(flat(title ? `${title}: ${firstUser}` : firstUser) || flat(title), S_MAX)
@@ -260,7 +300,7 @@ export function listCoworkSessions(root = COWORK_ROOT) {
       const folder = folders.find((f) => !generic(f)) || folders[0] || ''
       out.push({
         file, size: st.size, mtime: st.mtimeMs, kind,
-        over: { id: path.basename(sess).replace(/^local_/, ''), project: folder && !generic(folder) ? projectOfCwd(folder) : 'Cowork', repo: folder, convo: meta.title ? String(meta.title) : '', created: meta.createdAt || null, last: meta.lastActivityAt || null, archived: !!meta.isArchived },
+        over: { id: path.basename(sess).replace(/^local_/, ''), project: folder && !generic(folder) ? projectOfCwd(folder) : 'Cowork', repo: folder, convo: meta.title ? String(meta.title) : '', created: ms(meta.createdAt), last: ms(meta.lastActivityAt), archived: !!meta.isArchived },   // skive 3: ms() — Cowork skriver tidene som ISO-strenger, og Math.max(…, streng) ga NaN → samtalen fikk importtida som dato
       })
     }
   }
@@ -285,13 +325,14 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
     return { atom, status }
   }
   const count = (st) => { if (st === 'ny') stats.nye++; else if (st === 'oppdatert') stats.oppdatert++; else stats.uendret++ }
+  const nyeSamtaler = []   // skive 3 (arb. 33 §7): samtale-sakene laget i denne kjøringen — gjentatte kjøringer merkes etter løkka (merkGjentatte), uavhengig av rekkefølgen i lista
   log(`${srcLabel}-økter: ${list.length} øktfiler i ${srcRoot}${dryRun ? ' · DRY-RUN' : ''}`)
   for (const { file, over = {} } of list) {
     try {
       const s = parseCodeSession(file)
       if (over.id) s.id = over.id                                              // Cowork: mappe-uuid-en er økt-id (M17)
       if (skipSession && s.id === skipSession) continue
-      if (over.convo) { s.title = over.convo; s.convo = over.convo }          // Cowork: tittelen brukeren ser i Desktop
+      if (over.convo) { s.title = kortTittel(over.convo); s.convo = s.title }   // Cowork: tittelen brukeren ser i Desktop — kortet etter samme regel som Code-samtalene (skive 3, arb. 33 §7: meta.title kan være hele prompten)
       if (over.last) s.last = Math.max(s.last || 0, over.last)
       const proj = over.project || projectOfCwd(s.cwd)
       if (project && proj.toLowerCase() !== project.toLowerCase()) { stats.filtrert++; continue }
@@ -307,6 +348,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
       const kobling = arbeidForslag(atoms, { prosjekt: proj, tittel: s.convo, gren: s.gren, forelder: s.forelder, sid: s.id })
       // friksjon 20: har hooken alt lagret samtalen (okt:<sid>), er DEN samtale-saken — importen lager ingen dublett, men fyller inn gren og kobling om de mangler
       const hookSak = atoms.find((a) => a.key === `okt:${s.id}`)
+      const nySamtale = !hookSak && !atoms.some((a) => a.key === `samtale:${s.id}`)   // skive 3 (arb. 33 §7): nye samtaler sjekkes for gjentatte kjøringer etter løkka (rekkefølgen i lista er nyeste først)
       let atom, status
       if (hookSak) {
         atom = hookSak; status = 'uendret'; stats.hook = (stats.hook || 0) + 1
@@ -319,6 +361,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
         tags: ['samtale', source], links, short: samtaleS(s), medium: samtaleM({ ...s, filer: filerSkrevet, kilde: srcLabel }), summary: `${srcLabel}-økt importert fra ${path.basename(file)} (${s.turns} oppgaver).`, fanget: true, ...(drift ? { drift } : {}),   // S = siste vending (friksjon 9) · M etter regel (friksjon 20) · fanget (runde 2c): alt fra en samtalelogg er fanget til det løftes inn; filer Claude skrev (fil:) er dokumenter, med vilje
         ...(s.gren ? { gren: s.gren } : {}), ...(kobling.hørerTil ? { hørerTil: kobling.hørerTil } : {}),
       }, s.last))
+      if (nySamtale) nyeSamtaler.push(atom)
       if (kobling.hørerTil) stats.koblet = (stats.koblet || 0) + 1
       count(status); perProject[proj] = (perProject[proj] || 0) + 1
       const derived = [{ id: atom.id, version: atom.version || 1, level: 'L' }]
@@ -358,6 +401,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
       }
     } catch (e) { stats.feil++; log(`  ⚠ ${path.basename(file)}: ${e.message}`) }
   }
+  stats.gjentatt = merkGjentatte(atoms, nyeSamtaler)   // skive 3 (arb. 33 §7): samme tittel, prosjekt og kilde som en samtale som alt fantes → gjentatt: true på alle unntatt den eldste
   const projLine = Object.entries(perProject).sort((a, b) => b[1] - a[1]).map(([p, n]) => `${p} (${n})`).join(', ') || '—'
   const filters = [project && `prosjekt = ${project}`, `minst ${minChars} tegn`, after && `etter ${after}`].filter(Boolean).join(' · ')
   const title = `Import: ${srcLabel}-økter`
@@ -370,6 +414,7 @@ export function importCode({ files = null, source = 'code', dryRun = false, proj
     `- **Prompter (V16):** ${stats.prompter} nye/oppdaterte av ${stats.prompterAlle} spørsmål som egne saker (≥ ${PROMPT_MIN} tegn)${stats.korteprompter ? ` · ${stats.korteprompter} korte («ja», «fortsett», kommandoer) hoppet over` : ''}`,
     `- **Prosjekter:** ${projLine}`,
     ...(stats.koblet ? [`- **Arbeid (friksjon 20):** ${stats.koblet} ${stats.koblet === 1 ? 'samtale koblet' : 'samtaler koblet'} til et arbeid (forelder, gren eller tittel)`] : []),
+    ...(stats.gjentatt ? [`- **Gjentatte kjøringer (arb. 33 §7):** ${stats.gjentatt} ${stats.gjentatt === 1 ? 'samtale merket' : 'samtaler merket'} \`gjentatt\` — samme tittel, prosjekt og kilde som en samtale som alt fantes; vises som én linje med «N kjøringer»`] : []),
     `- **Filter:** ${filters}`,
     stats.feil ? `- **Feil:** ${stats.feil} (se loggen)` : null, '',
     'Hver økt er ett atom (kind «samtale») med transkript av brukerens meldinger og Claudes svar (verktøyresultater er ikke med). ' +

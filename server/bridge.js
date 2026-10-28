@@ -140,7 +140,8 @@ import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } fro
 import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, settStandard as ollamaStandard, lokale as ollamaLokale } from './ollama.js'   // friksjon 12: modellene i Ollama
 import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer, del, trekkDeling, beOmHele, mottakersideFor, standardFor } from './motor.js'
 import { finnSamtale, vendingerFor, erTuaSamtale, nySamtaleId, samtaleNøkkel, antallVendinger, sistI } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak — GET /api/samtale, POST /api/samtale/ny   // M20a/M20b: motoren — eneste vei ut til en modell
-import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks
+import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT, lagreTekst, lagUtdrag, LIM_INN_GRENSE } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks · skive 3 (arb. 33 §6): lim inn → kilde, utdrag
+import { finnSak } from './store.js'   // skive 3 (arb. 33 §8): lenker som ikke finnes — GET /api/finn?id=
 import { inboxPending, inboxShareFiles } from './import.js'
 import { projects as prosjektRegister, INBOX_DIR, deliveryCounts, tråder } from './store.js'   // runde 1 (arb. 32 §6): utlevert-teller og Spørs tråder til appen
 import { behold as fangetBehold, slåSammen as fangetSlåSammen, kast as fangetKast, angre as fangetAngre, papirkurv as fangetPapirkurv, fangetKandidater, slagAvNøkkel, driftKandidater, driftSlag } from './store.js'   // runde 2c: Fanget-bøtta (+ app: engangs-merkingen)
@@ -629,6 +630,41 @@ http
         return json(res, 200, { id: a.id, name: a.name, project: a.project, convo: a.convo || '', kind: a.kind || 'capture', tags: a.tags || [], capturedAt: a.capturedAt, version: a.version || 1, status: statusOf(a), vault: isVault(a), max: 'L',
           ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), nivåer: niv, file: fileOf(a),
           hører_til: a.hørerTil || null, del_av: delAv(alleSak, a, følgereSak), arbeid: erArbeid(a, følgereSak), ...(harForslag(a) ? { hører_til_forslag: a.hørerTilForslag } : {}) })
+      }
+      // ── Skive 3 i arbeidsstykke 33 (28.10.2026): tekst inn (§6) og lenker som ikke finnes (§8) ──
+      //   POST /api/tekst {tekst, prosjekt, samtale?, hørerTil?, tittel?} → saken (som /api/les gir den): tekst limt inn i feltet i Arbeid over LIM_INN_GRENSE (800) tegn blir en kilde
+      //        (kind capture, «Limt inn 28.10 14:02 — <første ord>», kilde «limt inn», S/M etter regel, hører_til når samtalen hører til et arbeid). Angre: POST /api/rydd/kast {id}.
+      //   POST /api/utdrag {id, tekst, fra?, til?, prosjekt?, samtale?, hørerTil?} → saken «Utdrag av <tittel>» (kilde «utdrag», bygget_av → saken, lenke {kind: utdrag, id, versjon, fra, til})
+      //   GET  /api/finn?id=<sak|samtale|nøkkel> → { funnet, id, hvorfor: null|nøkkel|slått sammen|papirkurv|flyttet|ny versjon|versjoner, erstattet_av: {id, name, project, kind}|null, papirkurv, tekst }
+      //        — oppslaget på nøkkel, i papirkurven (også «slått sammen inn i …») og i .tua/versions/<id>/ når en adresse ikke treffer på id. Appen (Finn, Arbeid, Siden sist, Løpet) sier hva som skjedde før «Fant ikke».
+      if (req.method === 'POST' && url.pathname === '/api/tekst') {
+        const b = await readBody(req)
+        const tekst = String(b.tekst || '')
+        if (!tekst.trim()) return json(res, 400, { error: 'tekst kreves' })
+        let prosjekt = STANDARD_PROSJEKT
+        try { if (b.prosjekt) prosjekt = prosjektNavn(b.prosjekt) } catch (e) { return json(res, 400, { error: e.message }) }
+        try {
+          const sak = await lagreTekst({ tekst, prosjekt, samtale: b.samtale ? String(b.samtale) : '', hørerTil: b.hørerTil || b.hører_til || null, tittel: b.tittel ? String(b.tittel) : null, klient: 'app' })
+          console.error(`[tua-bro] tekst limt inn → «${sak.name}» (${sak.id}, ${sak.status}) · ${sak.project} · ${sak.tegnInn} tegn`)
+          return json(res, 200, { ...sak, grense: LIM_INN_GRENSE })
+        } catch (e) { return json(res, 400, { error: e.message }) }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/utdrag') {
+        const b = await readBody(req)
+        if (!b.id) return json(res, 400, { error: 'id kreves (saken utdraget er fra)' })
+        if (!String(b.tekst || '').trim()) return json(res, 400, { error: 'tekst kreves (den merkede teksten)' })
+        try {
+          const sak = lagUtdrag({ id: String(b.id), tekst: String(b.tekst), fra: b.fra ?? null, til: b.til ?? null, prosjekt: b.prosjekt ? String(b.prosjekt) : null, samtale: b.samtale ? String(b.samtale) : '', hørerTil: b.hørerTil || b.hører_til || null })
+          console.error(`[tua-bro] utdrag av «${sak.av.name}» → «${sak.name}» (${sak.id}, ${sak.status}) · ${sak.project}${sak.av.fra != null ? ` · tegn ${sak.av.fra}–${sak.av.til}` : ''}`)
+          return json(res, 200, sak)
+        } catch (e) { return json(res, /fant ikke/.test(e.message) ? 404 : 400, { error: e.message }) }
+      }
+      if (req.method === 'GET' && url.pathname === '/api/finn') {
+        const id = String(url.searchParams.get('id') || '').trim()
+        if (!id) return json(res, 400, { error: 'id kreves' })
+        const r = finnSak(load(), id)
+        if (!r.funnet && r.hvorfor) console.error(`[tua-bro] finn ${id}: ${r.hvorfor} — ${r.tekst}`)
+        return json(res, 200, r)
       }
       if (req.method === 'GET' && url.pathname === '/api/innboks') {
         const dok = innboksDokumenter().map(({ sti, ...r }) => r)

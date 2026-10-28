@@ -35,7 +35,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, LONG_L, FILES_ROOT, filesMode, DATA_DIR, hashOf, markDirty, readConfig } from './store.js'
-import { samtaleForSpor, samtaleFor, finnSamtale, vendingerFor, standardVendinger, oppdaterSamtale, pekPåSamtale, erTuaSamtale } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak, vendingene i hvert kall
+import { samtaleForSpor, samtaleFor, finnSamtale, vendingerFor, standardVendinger, oppdaterSamtale, pekPåSamtale, erTuaSamtale, erSyntetiskId } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak, vendingene i hvert kall
 import { readKey, hasKey, ollamaStatus } from './keychain.js'
 import { OLLAMA_URL, OLLAMA_VERT } from './ollama.js'   // friksjon 12: adressen og standardmodellen (ollamaStatus().modell) bor der
 import { løsMottakere, registrerDeling, skrivMottakere, lagreDeling, hentDeling, delingerFor, trekkTilbake, noterForespørsel, lenkerFor, nyttToken, eier, mottakerside, trukketSide, BASE } from './deling.js'   // runde 3b: personer, sirkler som emerger, delinger med token, mottakersiden
@@ -581,9 +581,19 @@ const førsteSetning = (t, maks = 300) => { const s = String(t || '').replace(/\
 // Skive 1 (arb. 33, V22): vendingene som skal med — [{id, rolle: 'bruker'|'modell'}] i rekkefølge (id = prompt-/svar-saken; for importerte samtaler prompt-/capture-sakene).
 // Rollen leses av saken når den ikke er oppgitt. Vendingene minimeres IKKE (de er brukerens egne ord og modellens svar på dem) og går hele; en ukjent id stopper.
 // Vault: et svar bygget på en Vault-merket sak arver merket (V15) — det går aldri til en ekstern mottaker som vending (sjekkes i vendingerTillatt).
-export function løsVendinger(atoms, vendinger = []) {
+// Skive 3 (arb. 33): en vending kan også være SYNTETISK (id v_<samtale8>_<n>) — en vending lest ut av en importert samtales transkript som ikke har egen sak.
+// Da hentes teksten fra transkriptet via samtalen (samtale.vendingAv), så `samtale` må være med i kallet. Bare det nye lagres (prompt- og svar-sak som peker på samtalen).
+export function løsVendinger(atoms, vendinger = [], samtaleAtom = null) {
+  let transkript = null   // vendingene fra samtalen, regnet én gang
   return (Array.isArray(vendinger) ? vendinger : []).map((v) => {
     const id = typeof v === 'string' ? v : v?.id
+    if (erSyntetiskId(id)) {
+      if (!samtaleAtom) throw new MotorFeil(`vendingen ${id} er lest ut av et transkript — send samtalen (samtale) med i kallet`)
+      transkript = transkript || vendingerFor(atoms, samtaleAtom)
+      const t = transkript.find((x) => x.id === id)
+      if (!t) throw new MotorFeil(`fant ikke vendingen ${id} i samtalen «${samtaleAtom.name}»`)
+      return { id: t.id, rolle: t.rolle === 'bruker' ? 'bruker' : 'modell', tekst: t.L || '', name: `${t.rolle === 'bruker' ? 'Du' : t.modell || 'modellen'}: ${String(t.S || t.L || '').slice(0, 60)}`, version: t.versjon || 1, vault: !!t.vault, kind: 'vending', syntetisk: true }
+    }
     const a = atoms.find((x) => x.id === id)
     if (!a) throw new MotorFeil(`fant ikke vendingen ${id} i arkivet`)
     const rolle = v?.rolle === 'bruker' || v?.rolle === 'modell' ? v.rolle : a.kind === 'prompt' ? 'bruker' : 'modell'
@@ -603,8 +613,9 @@ export function forhåndsvis({ melding = '', saker = [], mottaker: mId, mottaker
   const ms = ids.map((id) => { const m = alle.find((x) => x.id === id); if (!m) throw new MotorFeil(`ukjent mottaker «${id}» — en av ${alle.map((x) => x.id).join(', ')}`); return m })
   const atoms = load()
   const { kontekst, kilder, notater } = minimer(atoms, saker, { prosjekt })
-  const vend = løsVendinger(atoms, vendinger)
-  const samtaleAtom = samtale ? finnSamtale(atoms, samtale) : vend.length ? samtaleFor(atoms, atoms.find((a) => a.id === vend[0].id)) : null
+  const samtaleGitt = samtale ? finnSamtale(atoms, samtale) : null
+  const vend = løsVendinger(atoms, vendinger, samtaleGitt)
+  const samtaleAtom = samtaleGitt || (vend.length ? samtaleFor(atoms, atoms.find((a) => a.id === vend[0].id)) : null)
   const maks = {}
   let blokkert = null
   for (const m of ms) {
@@ -641,7 +652,7 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
 
   const atoms = load()
   const { kontekst, kilder, notater } = minimer(atoms, saker, { prosjekt })
-  const vend = løsVendinger(atoms, vendinger)
+  const vend = løsVendinger(atoms, vendinger, samtale ? finnSamtale(atoms, samtale) : null)   // skive 3: syntetiske vendinger (transkript) trenger samtalen
   // fail closed for ALLE mottakerne før noe skjermes eller sendes: er én blokkert, sendes ingenting til noen, og linja sier hvilken og hvorfor
   const maks = {}
   for (const m of ms) {
@@ -671,7 +682,7 @@ export async function spor({ melding, saker = [], mottaker: mId, mottakere: mIds
   const proj = String(prosjekt || '').trim() || gammel?.project || atoms.find((x) => x.id === kilder[0]?.id)?.project || 'Uten prosjekt'
   const promptProj = gammel?.project || proj
   // skive 1: samtalen først — finn eller lag samtale-saken; arbeidet arves fra samtalen når ingen har valgt
-  const sakForVending = vend.length ? atoms.find((x) => x.id === vend[0].id) : null
+  const sakForVending = vend.length ? atoms.find((x) => x.id === vend[0].id) || null : null   // syntetisk vending: ingen sak (samtalen er gitt)
   let { samtale: samtaleAtom, ny: nySamtale } = samtaleForSpor(atoms, { samtale: samtale || (sakForVending ? samtaleFor(atoms, sakForVending)?.id : null), prosjekt: proj, melding, gammel, hørerTil: hørerTil && atoms.some((x) => x.id === hørerTil) ? String(hørerTil) : gammel?.hørerTil || null })
   const arbeidId = hørerTil && atoms.some((x) => x.id === hørerTil) ? String(hørerTil) : gammel?.hørerTil || samtaleAtom.hørerTil || null   // friksjon 20 + skive 1: arvet fra samtalen
   if (arbeidId && !samtaleAtom.hørerTil && arbeidId !== samtaleAtom.id) { samtaleAtom.hørerTil = arbeidId; markDirty(atoms, samtaleAtom.id) }

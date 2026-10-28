@@ -42,7 +42,7 @@ const { load, save, upsert, deliveries, fileOf, versions, tråder, setStatus } =
 const motor = await import('./motor.js')
 const { spor, forhåndsvis, byggMeldinger, mottakere, standardFor, Blokkert, BUDSJETT } = motor
 const sam = await import('./samtale.js')
-const { finnSamtale, samtaleFor, vendingerFor, standardVendinger, erTuaSamtale, samtaleTittel, gamleTråder } = sam
+const { finnSamtale, samtaleFor, vendingerFor, standardVendinger, erTuaSamtale, samtaleTittel, gamleTråder, erSyntetiskId } = sam
 const { samtaleFraSak } = await import('./samtaletekst.js')
 const { importCode } = await import('./import.js')
 
@@ -86,7 +86,7 @@ let S1 = les(r1.samtale)
   ok('(e) spor uten samtale: en samtale-sak med kilde Tua, nøkkel samtale:tua:<id>, tagger samtale · tua, i prosjektet, tittel = spørsmålet', S1?.kind === 'samtale' && S1.source === 'Tua' && /^samtale:tua:t_/.test(S1.key) && S1.tags.join() === 'samtale,tua' && S1.project === 'Testprosjekt' && S1.name === Q1 && erTuaSamtale(S1), JSON.stringify(S1 && [S1.key, S1.name, S1.tags]))
   ok('(e) prompt og svar peker på samtalen (bygget_av) og har samtalen som convo; svaret har prompten FØRST og samtalen SIST', p.derivedFrom.some((d) => d.id === S1.id) && s.derivedFrom[0].id === p.id && s.derivedFrom.at(-1).id === S1.id && s.derivedFrom.some((d) => d.id === a1.id && d.level === 'M') && p.convo === S1.name && s.convo === S1.name, JSON.stringify(s.derivedFrom))
   const fil = fs.readFileSync(fileOf(S1), 'utf8')
-  ok('(e) samtale-saken på disk: kilde Tua, transkriptet med «**Du · tid:**» og «**Test · M:**», spørsmålet og svaret i L', fil.includes('kilde: "Tua"') && /\*\*Du · \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}:\*\* Hva foreslo/.test(fil) && fil.includes('**Test · M:** Ekko fra test-mottakeren') && fil.includes(`_Tua · 1 vending · ${new Date().toISOString().slice(0, 10)} · Testprosjekt_`), fil.split('\n').slice(0, 30).join(' | ').slice(0, 300))
+  ok('(e) samtale-saken på disk: kilde Tua, transkriptet med «**Du · tid:**» og «**Test · M:**», spørsmålet og svaret i L', fil.includes('kilde: "Tua"') && /\*\*Du · \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}:\*\* Hva foreslo/.test(fil) && fil.includes('**Test · M:** Ekko fra test-mottakeren') && fil.includes(`_Tua · 1 vending · ${(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` })()} · Testprosjekt_`), fil.split('\n').slice(0, 30).join(' | ').slice(0, 300))   // skive 3: lokal dato (midnattsfeilen)
   ok('(e) S = siste vending (samtaleS), M etter regelen (samtaleM, by regel), versjon 1 etter første vending', S1.levels?.S?.text.startsWith(`Sist: ${Q1} → Ekko fra test-mottakeren`) && S1.levels.S.text.includes('1 vending') && S1.levels.S.by === 'regel' && S1.levels.M?.text.includes('**Første spørsmål:**') && S1.levels.M.text.includes('Tua · 1 vending') && (S1.version || 1) === 1, JSON.stringify([S1.levels?.S?.text, S1.version]))
   const lest = samtaleFraSak(S1.content, { first: S1.createdAt, last: S1.capturedAt })
   ok('(e) samtaleFraSak leser transkriptet tilbake (review --samtaler virker på Tua-samtaler): 1 par, prompten og svaret', lest?.pairs.length === 1 && lest.pairs[0].prompt === Q1 && lest.pairs[0].svar.startsWith('Ekko fra test-mottakeren') && lest.S === S1.levels.S.text, JSON.stringify(lest && [lest.pairs.length, lest.S.slice(0, 60)]))
@@ -204,6 +204,8 @@ const CW_ID = 'cafe0001-2222-3333-4444-555566667777'
   const A1 = 'Oppgjørsforslaget har tre uklare punkter. '.repeat(90)   // > MIN_SVAR (3 000) → svar-sak
   const P2 = 'Takk. Hvilke av de tre punktene bør vi ta opp med dem først, og hvordan bør vi formulere oss?'
   const A2 = 'Ta først punktet om renter, så fristen. '.repeat(90)
+  const P3 = 'Og renter?'                                                   // skive 3: under 80 tegn → ingen prompt-sak, men en vending i transkriptet
+  const A3 = 'Rentekravet er ikke dokumentert. Be om renteberegningen før dere svarer.'   // under 3 000 tegn → ingen svar-sak, men en vending
   const linje = (o) => JSON.stringify(o) + '\n'
   fs.writeFileSync(path.join(sess, 'audit.jsonl'), [
     linje({ type: 'system', subtype: 'init', session_id: CW_ID, cwd: mappe, _audit_timestamp: '2026-10-20T09:00:00Z' }),
@@ -211,26 +213,161 @@ const CW_ID = 'cafe0001-2222-3333-4444-555566667777'
     linje({ type: 'assistant', session_id: CW_ID, message: { role: 'assistant', content: [{ type: 'text', text: A1 }] }, _audit_timestamp: '2026-10-20T09:03:00Z' }),
     linje({ type: 'user', session_id: CW_ID, message: { role: 'user', content: [{ type: 'text', text: P2 }] }, _audit_timestamp: '2026-10-20T09:10:00Z' }),
     linje({ type: 'assistant', session_id: CW_ID, message: { role: 'assistant', content: [{ type: 'text', text: A2 }] }, _audit_timestamp: '2026-10-20T09:12:00Z' }),
+    linje({ type: 'user', session_id: CW_ID, message: { role: 'user', content: [{ type: 'text', text: P3 }] }, _audit_timestamp: '2026-10-20T09:14:00Z' }),
+    linje({ type: 'assistant', session_id: CW_ID, message: { role: 'assistant', content: [{ type: 'text', text: A3 }] }, _audit_timestamp: '2026-10-20T09:15:00Z' }),
   ].join(''))
   const imp = importCode({ source: 'cowork' })
   const CW = load().find((a) => a.key === `samtale:${CW_ID}`)
-  ok('(g) Cowork-seed importert: samtale-sak med kilde Claude Cowork, 2 prompter, 2 svar-saker', imp.stats.nye >= 1 && CW?.kind === 'samtale' && CW.source === 'Claude Cowork' && load().filter((a) => a.kind === 'prompt' && String(a.key || '').startsWith(`prompt:${CW_ID.slice(0, 8)}:`)).length === 2 && load().filter((a) => String(a.key || '').startsWith(`svar:${CW_ID.slice(0, 8)}:`)).length === 2, JSON.stringify(imp.stats))
+  ok('(g) Cowork-seed importert: samtale-sak med kilde Claude Cowork, 2 prompter, 2 svar-saker (den korte tredje vendingen gir ingen saker)', imp.stats.nye >= 1 && CW?.kind === 'samtale' && CW.source === 'Claude Cowork' && load().filter((a) => a.kind === 'prompt' && String(a.key || '').startsWith(`prompt:${CW_ID.slice(0, 8)}:`)).length === 2 && load().filter((a) => String(a.key || '').startsWith(`svar:${CW_ID.slice(0, 8)}:`)).length === 2, JSON.stringify(imp.stats))
   const vend = vendingerFor(load(), CW)
-  ok('(g) vendingene i en importert samtale er prompt-/capture-sakene i rekkefølge: bruker, modell, bruker, modell (modell = Claude)', vend.map((v) => v.rolle).join(' ') === 'bruker modell bruker modell' && vend[0].L === P1 && vend[1].L === A1.trim() && vend[1].modell === 'Claude' && vend[3].L === A2.trim(), JSON.stringify(vend.map((v) => [v.rolle, v.modell, v.tegn])))
+  ok('(g) vendingene i en importert samtale er ALLE vendingene fra transkriptet (skive 3): bruker, modell × 3 — de fire første peker på importens saker (modell = Claude)', vend.map((v) => v.rolle).join(' ') === 'bruker modell bruker modell bruker modell' && vend[0].L === P1 && vend[1].L === A1.trim() && vend[1].modell === 'Claude' && vend[3].L === A2.trim() && /^a_/.test(vend[0].id) && /^a_/.test(vend[3].id) && !vend[0].syntetisk, JSON.stringify(vend.map((v) => [v.rolle, v.modell, v.tegn, v.id.slice(0, 4)])))
+  ok('(g) skive 3: den korte vendingen uten saker har en stabil syntetisk id v_<samtale8>_<n>, teksten fra transkriptet, rollen og modellen', vend[4].syntetisk === true && erSyntetiskId(vend[4].id) && vend[4].L === P3 && vend[4].rolle === 'bruker' && vend[5].syntetisk === true && vend[5].L === A3 && vend[5].modell === 'Claude' && vend[5].prompt === vend[4].id && vendingerFor(load(), CW)[4].id === vend[4].id && vend[4].id !== vend[5].id, JSON.stringify([vend[4].id, vend[5].id]))
   ok('(g) finnSamtale på økt-id og på en svar-sak gir den importerte samtalen', finnSamtale(load(), CW_ID)?.id === CW.id && finnSamtale(load(), vend[3].id)?.id === CW.id)
   const versjonFør = CW.version || 1, innholdFør = CW.content
   const h = []
   const std = standardFor(vend, 'test')
-  ok('(g) standardFor på den importerte samtalen: de to lange Claude-svarene (≈ 1 000 tokens hver) får ikke begge plass i test-budsjettet — de to nyeste vendingene er med, de to eldste utenfor', std.vendinger.length === 2 && std.vendinger[1] === vend[3].id && std.utenfor.length === 2 && std.utenfor.every((u) => /budsjettet/.test(u.hvorfor)), JSON.stringify([std.vendinger.length, std.utenfor.map((u) => u.id)]))
+  ok('(g) standardFor på den importerte samtalen: de to lange Claude-svarene (≈ 1 000 tokens hver) får ikke begge plass i test-budsjettet — de fire nyeste vendingene (inkl. de syntetiske) er med, de to eldste utenfor', std.vendinger.length === 4 && std.vendinger.at(-1) === vend[5].id && std.utenfor.length === 2 && std.utenfor.every((u) => /budsjettet/.test(u.hvorfor)), JSON.stringify([std.vendinger.length, std.utenfor.map((u) => u.id)]))
   const r = await spor({ melding: 'Og hva med motkravet på 30 000?', saker: [], mottaker: 'test', prosjekt: CW.project, samtale: CW.id, vendinger: vend.map(({ id }) => ({ id })), på: (ev, d) => h.push([ev, d]) })
   const sk = h.find((x) => x[0] === 'skjermet')[1]
-  ok('(g) spor({vendinger, samtale}) på den importerte samtalen med alle fire: rollene leses av sakene, messages = user/assistant/user/assistant/user, samtale = den importerte, budsjettet sier over', sk.meldinger.map((m) => m.role).join(' ') === 'user assistant user assistant user' && sk.samtale === CW.id && r.samtale === CW.id && sk.budsjett.test.over === true, JSON.stringify(sk.meldinger.map((m) => m.role)))
+  ok('(g) spor({vendinger, samtale}) på den importerte samtalen med alle seks (to syntetiske): rollene leses av sakene og transkriptet, messages = user/assistant × 3 + user, samtale = den importerte, budsjettet sier over', sk.meldinger.map((m) => m.role).join(' ') === 'user assistant user assistant user assistant user' && sk.meldinger[4].content === P3 && sk.samtale === CW.id && r.samtale === CW.id && sk.budsjett.test.over === true && r.tekst.includes(`[Du]\n${P3}`) && r.tekst.includes(`[Modellen]\n${A3}`), JSON.stringify(sk.meldinger.map((m) => m.role)))
   const p = les(r.prompt), s = les(r.svar), CWb = les(CW.id)
-  ok('(g) den nye vendingen peker på den importerte samtalen (bygget_av) og har samtalens navn — samtale-saken selv er UENDRET (importen eier den)', p.derivedFrom.some((d) => d.id === CW.id) && s.derivedFrom.at(-1).id === CW.id && p.convo === CW.name && (CWb.version || 1) === versjonFør && CWb.content === innholdFør, JSON.stringify([p.convo, CWb.version]))
-  ok('(g) vendingerFor etterpå: 6 vendinger — de fire importerte og de to nye (bruker, Test)', vendingerFor(load(), CWb).length === 6 && vendingerFor(load(), CWb).at(-1).modell === 'Test')
+  ok('(g) den nye vendingen peker på den importerte samtalen (bygget_av) og har samtalens navn — samtale-saken selv er UENDRET (importen eier den); ingen sak laget for de syntetiske vendingene', p.derivedFrom.some((d) => d.id === CW.id) && s.derivedFrom.at(-1).id === CW.id && p.convo === CW.name && (CWb.version || 1) === versjonFør && CWb.content === innholdFør && !load().some((a) => a.content === P3), JSON.stringify([p.convo, CWb.version]))
+  ok('(g) vendingerFor etterpå: 8 vendinger — de seks fra transkriptet og de to nye (bruker, Test), de syntetiske med samme id som før', vendingerFor(load(), CWb).length === 8 && vendingerFor(load(), CWb).at(-1).modell === 'Test' && vendingerFor(load(), CWb)[4].id === vend[4].id)
   const u = loggLinjer().at(-1)
-  ok('(g) loggen: vendingene fra den importerte samtalen og samtalen', u.vendinger.length === 4 && u.samtale === CW.id)
-  ok('(g) importen igjen: idempotent — ingen ny versjon av prompter eller samtale etter fortsettelsen', (() => { const r2 = importCode({ source: 'cowork' }); const CWc = les(CW.id); return r2.stats.nye === 0 && r2.stats.oppdatert === 0 && (CWc.version || 1) === versjonFør })())
+  ok('(g) loggen: alle seks vendingene (også de syntetiske id-ene — aldri innhold) og samtalen', u.vendinger.length === 6 && u.vendinger[4].id === vend[4].id && u.samtale === CW.id && !JSON.stringify(u).includes(P3))
+  ok('(g) importen igjen: idempotent — ingen ny versjon av prompter eller samtale etter fortsettelsen (importen sier «uendret»)', (() => { const r2 = importCode({ source: 'cowork' }); const CWc = les(CW.id); return r2.stats.nye === 0 && r2.stats.oppdatert === 0 && (CWc.version || 1) === versjonFør })())
+  let e = null; try { await spor({ melding: 'Hei', saker: [], mottaker: 'test', prosjekt: CW.project, vendinger: [{ id: vend[4].id }] }) } catch (x) { e = x }
+  ok('(g) en syntetisk vending uten samtale i kallet → MotorFeil som sier at samtalen må med', e instanceof motor.MotorFeil && /send samtalen/.test(e.message), e?.message)
+}
+
+// ── 6b) skive 3 «Fortsett og tekst inn» (28.10.2026): en Desktop-samtale uten saker, hookens form, gjentatte kjøringer, lim inn, utdrag, finnSak, midnatt ──
+const { vendingerAvTranskript, erSyntetiskId: erSynt } = sam
+const { isoLokal, lokalDato, kortTittel } = await import('./samtaletekst.js')
+const { lagreTekst, lagUtdrag, LIM_INN_GRENSE } = await import('./innlesing.js')
+const { erGjentatt, gjentatteKandidater } = await import('./import.js')
+let DESK
+{
+  // en Desktop-samtale slik importen lagrer den — ingen prompt-/svar-saker (alle vendingene er korte): vendingene leses ut av transkriptet
+  const atoms = load()
+  const D1 = 'Hva er fristen for å klage på et vedtak fra kommunen?', D2 = 'Og om jeg mistet brevet?'
+  const linjer = [`# Klagefrist kommune`, '', `_Claude Desktop · 4 meldinger · 2026-10-25 · prosjekt Testprosjekt_`, '', `**Bruker:** ${D1}`, '', `**Claude:** Fristen er tre uker fra du fikk vedtaket.`, '', `**Bruker:** ${D2}`, '', `**Claude:** Da regnes fristen fra du burde ha fått det. Be om kopi.`].join('\n')
+  DESK = upsert(atoms, { key: 'samtale:desk0001-aaaa-bbbb-cccc-ddddeeeeffff', kind: 'samtale', name: 'Klagefrist kommune', content: linjer, project: 'Testprosjekt', convo: 'Klagefrist kommune', source: 'Claude Desktop', by: 'regel', tags: ['samtale', 'desktop'], fanget: true, short: 'Sist: Og om jeg mistet brevet? → Da regnes fristen fra du burde ha fått det. · 2 vendinger · 25.10.2026', links: [{ kind: 'claude-chat', href: 'claude://claude.ai/chat/desk0001-aaaa-bbbb-cccc-ddddeeeeffff', label: 'Samtalen i Claude Desktop' }] }).atom
+  // hookens form (## Oppgaver … ## Siste svar) — også lesbar
+  const HOOK = upsert(atoms, { key: 'okt:h00k0001-1111-2222-3333-444455556666', kind: 'samtale', name: 'Rydde i testarkivet', content: ['# Rydde i testarkivet', '', '_Claude Code · 2 oppgaver · 26.10.2026, 10:00 · Testprosjekt_', '', '## Oppgaver', '- 10:00 — Rydd i testarkivet og si hva som er dobbelt.', '- 10:20 — Slå sammen de to notatene om lageret.', '', '## Siste svar', 'De to notatene er slått sammen; ett er lagt i papirkurven.'].join('\n'), project: 'Testprosjekt', convo: 'Rydde i testarkivet', source: 'Claude Code', by: 'regel', tags: ['samtale', 'code'], fanget: true, short: 'Sist: … · 2 vendinger' }).atom
+  save(atoms)
+  const vd = vendingerFor(load(), les(DESK.id))
+  ok('skive 3: en Desktop-samtale uten saker — alle fire vendingene fra transkriptet, syntetiske id-er, Claude som modell, kilden Claude Desktop', vd.length === 4 && vd.every((v) => v.syntetisk && erSynt(v.id)) && vd.map((v) => v.rolle).join(' ') === 'bruker modell bruker modell' && vd[0].L === D1 && vd[2].L === D2 && vd[1].modell === 'Claude' && vd[1].kilde === 'Claude Desktop' && vd[3].L === 'Da regnes fristen fra du burde ha fått det. Be om kopi.', JSON.stringify(vd.map((v) => [v.id, v.rolle])))
+  const vh = vendingerFor(load(), les(HOOK.id))
+  ok('skive 3: hookens samtale-sak (## Oppgaver, ## Siste svar) — to brukervendinger og siste svar på den siste', vh.length === 3 && vh[0].rolle === 'bruker' && vh[0].L === 'Rydd i testarkivet og si hva som er dobbelt.' && vh[1].rolle === 'bruker' && vh[2].rolle === 'modell' && vh[2].prompt === vh[1].id && vh[2].L.startsWith('De to notatene'), JSON.stringify(vh.map((v) => [v.rolle, v.L.slice(0, 20)])))
+  ok('skive 3: en Tua-samtale leser ikke transkriptet (sakene er vendingene) — vendingerAvTranskript gir null', vendingerAvTranskript(load(), les(S1.id)) === null)
+  const versjonFør = les(DESK.id).version || 1
+  const h = []
+  const r = await spor({ melding: 'Kan jeg klage muntlig?', saker: [], mottaker: 'test', prosjekt: 'Testprosjekt', samtale: DESK.id, vendinger: vd.map(({ id }) => ({ id })), på: (ev, d) => h.push([ev, d]) })
+  const sk = h.find((x) => x[0] === 'skjermet')[1]
+  ok('skive 3: «Fortsett her» på Desktop-samtalen — de fire syntetiske vendingene går som user/assistant, spørsmålet sist; mottakeren ekkoer dem', sk.meldinger.map((m) => m.role).join(' ') === 'user assistant user assistant user' && sk.meldinger[0].content === D1 && r.tekst.includes(`[Du]\n${D2}`) && r.samtale === DESK.id, JSON.stringify(sk.meldinger.map((m) => [m.role, m.content.slice(0, 20)])))
+  const DESKb = les(DESK.id)
+  ok('skive 3: bare det nye er lagret — prompt- og svar-sak som peker på samtalen; samtale-saken er uendret (samme versjon, samme innhold); vendingerFor gir 6 (4 fra transkriptet + 2 nye), flettet etter transkriptet', les(r.prompt).derivedFrom.some((d) => d.id === DESK.id) && les(r.svar).derivedFrom.at(-1).id === DESK.id && (DESKb.version || 1) === versjonFør && DESKb.content === DESK.content && vendingerFor(load(), DESKb).length === 6 && vendingerFor(load(), DESKb)[4].id === r.prompt && vendingerFor(load(), DESKb)[5].id === r.svar, JSON.stringify(vendingerFor(load(), DESKb).map((v) => v.id.slice(0, 2))))
+  ok('skive 3: standardFor med syntetiske vendinger regner tokens av teksten (alle seks innenfor test-budsjettet)', standardFor(vendingerFor(load(), DESKb), 'test').vendinger.length === 6)
+  // Desktop lagrer lange samtaler som utsnitt (de siste meldingene): en prompt-sak fra en fullere import som transkriptet ikke lenger har, er eldre historikk og står FØRST
+  { const a7 = load(); upsert(a7, { key: 'prompt:desk0001:eldre001', kind: 'prompt', name: 'Et eldre spørsmål', content: 'Et eldre spørsmål fra før utsnittet i Desktop-lageret, som ikke står i transkriptet lenger.', project: 'Testprosjekt', convo: 'Klagefrist kommune', source: 'Claude Desktop', by: 'regel', tags: ['prompt'], fanget: true, short: 'Et eldre spørsmål.' }); save(a7) }
+  const v7 = vendingerFor(load(), les(DESK.id))
+  ok('skive 3: en importprompt transkriptet ikke finner igjen (utsnitt) står FØRST som eldre historikk, så transkriptets fire, så Tua-vendingene — 7 i alt, ingenting forsvinner', v7.length === 7 && v7[0].rolle === 'bruker' && !v7[0].syntetisk && /^Et eldre spørsmål/.test(v7[0].L) && v7.slice(1, 5).every((v) => v.syntetisk) && v7[5].id === r.prompt && v7[6].id === r.svar, JSON.stringify(v7.map((v) => [v.rolle, v.syntetisk ? 's' : v.id.slice(0, 4)])))
+  // midnattsfeilen: hodelinja skrives med lokal dato, og leses som lokal — samme S uansett klokkeslett
+  const kl0030 = new Date(2026, 9, 28, 0, 30).getTime()
+  ok('midnatt: isoLokal gir den lokale datoen også rett etter midnatt (toISOString ville gitt dagen før i UTC+1/+2), og lokalDato leser den tilbake som lokal midnatt', isoLokal(kl0030) === '2026-10-28' && lokalDato('2026-10-28') === new Date(2026, 9, 28).getTime() && new Date(lokalDato('2026-10-28')).getDate() === 28)
+  const lest = samtaleFraSak(les(S1.id).content)
+  ok('midnatt: samtaleFraSak på Tua-samtalen gir samme periode i S som samtaleS skrev (lokal dato begge veier)', lest.S === les(S1.id).levels.S.text && lest.pairs[0].at > 0, JSON.stringify([lest.S.slice(-30), les(S1.id).levels.S.text.slice(-30)]))
+  ok('kortTittel: kort tittel urørt; lang → første setning når den er ≤ 60, ellers 60 tegn', kortTittel('Oppgjøret med Skado') === 'Oppgjøret med Skado' && kortTittel('Gå gjennom innboksen. Lag en liste over alt som venter på svar, sortert etter hvem som sendte det.') === 'Gå gjennom innboksen.' && kortTittel('x'.repeat(100)).length === 60)
+}
+// gjentatte kjøringer (§7): tre Cowork-økter med samme lange tittel i samme mappe → kortet tittel, de to siste `gjentatt: true`
+const DAGLIG = 'Gå gjennom innboksen og lag en liste over alt som venter på svar, sortert etter hvem som sendte det og hvor gammelt det er'
+{
+  const mappe = path.join(SCRATCH, 'Innboksrutine'); fs.mkdirSync(mappe, { recursive: true })
+  const linje = (o) => JSON.stringify(o) + '\n'
+  for (const [i, dag] of ['21', '22', '23'].entries()) {
+    const id = `daaa000${i + 1}-1111-2222-3333-444455556666`
+    const sess = path.join(COWORK, 'konto', 'rom', `local_${id}`); fs.mkdirSync(sess, { recursive: true })
+    fs.writeFileSync(sess + '.json', JSON.stringify({ title: DAGLIG, userSelectedFolders: [mappe], createdAt: `2026-10-${dag}T07:00:00Z`, lastActivityAt: `2026-10-${dag}T07:10:00Z` }))
+    fs.writeFileSync(path.join(sess, 'audit.jsonl'), [
+      linje({ type: 'system', subtype: 'init', session_id: id, cwd: mappe, _audit_timestamp: `2026-10-${dag}T07:00:00Z` }),
+      linje({ type: 'user', session_id: id, message: { role: 'user', content: [{ type: 'text', text: DAGLIG }] }, _audit_timestamp: `2026-10-${dag}T07:01:00Z` }),
+      linje({ type: 'assistant', session_id: id, message: { role: 'assistant', content: [{ type: 'text', text: `Her er lista for ${dag}. oktober. `.repeat(60) }] }, _audit_timestamp: `2026-10-${dag}T07:05:00Z` }),
+    ].join(''))
+  }
+  const imp = importCode({ source: 'cowork' })
+  const kjøringer = load().filter((a) => a.kind === 'samtale' && /^samtale:daaa000/.test(a.key)).sort((x, y) => x.createdAt - y.createdAt)
+  ok('(§7) tre Cowork-økter med samme lange tittel: tittelen er kortet etter regelen (60 tegn), alle tre er egne samtale-saker (økt-id er nøkkel)', imp.stats.nye === 3 && kjøringer.length === 3 && kjøringer.every((a) => a.name === kortTittel(DAGLIG) && a.name.length <= 60 && a.convo === a.name), JSON.stringify(kjøringer.map((a) => [a.name, a.gjentatt])))
+  ok('(§7) den første er ikke gjentatt, de to neste har gjentatt: true — i fila og lest tilbake; importrapporten teller dem', kjøringer[0].gjentatt !== true && kjøringer[1].gjentatt === true && kjøringer[2].gjentatt === true && fs.readFileSync(fileOf(kjøringer[2]), 'utf8').includes('gjentatt: true') && imp.stats.gjentatt === 2, JSON.stringify(imp.stats))
+  ok('(§7) erGjentatt: samme tittel, prosjekt og kilde → ja; annen kilde eller annet prosjekt → nei', erGjentatt(load(), { tittel: DAGLIG, prosjekt: 'Innboksrutine', kilde: 'Claude Cowork' }) && !erGjentatt(load(), { tittel: DAGLIG, prosjekt: 'Innboksrutine', kilde: 'Claude Code' }) && !erGjentatt(load(), { tittel: DAGLIG, prosjekt: 'Annet', kilde: 'Claude Cowork' }))
+  ok('(§7) importen igjen: uendret, flagget står', (() => { const r2 = importCode({ source: 'cowork' }); return r2.stats.nye === 0 && r2.stats.oppdatert === 0 && les(kjøringer[2].id).gjentatt === true })())
+  // review --gjentatt på eksisterende dubletter: to Code-samtaler lagt inn uten flagg
+  const atoms = load()
+  for (const n of [1, 2]) { const a = upsert(atoms, { key: `samtale:c0de000${n}-aaaa-bbbb-cccc-ddddeeeeffff`, kind: 'samtale', name: 'Ukentlig status for styret', content: `# Ukentlig status for styret\n\n_Claude Code · 1 oppgaver · 2026-10-1${n} · Testprosjekt_\n\n**Bruker:** Skriv ukentlig status for styret.\n\n**Claude:** Status uke ${n}.`, project: 'Testprosjekt', convo: 'Ukentlig status for styret', source: 'Claude Code', by: 'regel', tags: ['samtale', 'code'], fanget: true, short: `Sist: … · uke ${n}` }).atom; a.createdAt = a.capturedAt = Date.parse(`2026-10-1${n}T09:00:00`) }
+  save(atoms)
+  const k = gjentatteKandidater(load())
+  ok('(§7) gjentatteKandidater: to grupper (Cowork-rutinen med 3, Code-statusen med 2); 1 ny å merke (Code), 2 alt merket (Cowork)', k.grupper.length === 2 && k.nye.length === 1 && k.alt.length === 2 && k.grupper[0].antall === 3, JSON.stringify(k.grupper.map((g) => [g.tittel, g.antall])))
+  const dry = kjør('--gjentatt')
+  ok('(§7) review --gjentatt (dry-run som standard): teller og viser, skriver ingenting', dry.status === 0 && /2 grupper med samme tittel/.test(dry.stdout) && /1 ville fått gjentatt: true \(2 alt merket\)/.test(dry.stdout) && /DRY-RUN/.test(dry.stdout) && load().filter((a) => a.gjentatt === true).length === 2, dry.stdout.split('\n')[0] + (dry.stderr ? ' | ' + dry.stderr.slice(0, 200) : ''))
+  const ekte = kjør('--gjentatt', '--skriv')
+  ok('(§7) review --gjentatt --skriv: den nyeste Code-statusen merkes, den første ikke; igjen = ingenting å gjøre', ekte.status === 0 && /1 samtaler merket gjentatt/.test(ekte.stdout) && load().filter((a) => a.gjentatt === true).length === 3 && load().find((a) => a.key === 'samtale:c0de0002-aaaa-bbbb-cccc-ddddeeeeffff').gjentatt === true && !load().find((a) => a.key === 'samtale:c0de0001-aaaa-bbbb-cccc-ddddeeeeffff').gjentatt && /0 ville fått/.test(kjør('--gjentatt').stdout), ekte.stdout.split('\n').at(-2))
+}
+// lim inn → kilde (§6) og utdrag («Bruk i samtalen»)
+let LIMT, UTDRAG
+{
+  const lang = 'Dette er et langt avsnitt som ble limt inn i feltet. '.repeat(20)   // > 800 tegn
+  const før = load().length
+  LIMT = await lagreTekst({ tekst: lang, prosjekt: 'Testprosjekt', samtale: S1.name, hørerTil: a1.id })
+  const l = les(LIMT.id)
+  ok('(§6) lagreTekst: en sak i prosjektet — tittel «Limt inn dd.mm hh:mm — <første ord>», kilde «limt inn», kind capture, S etter regel, hører_til arbeidet, samtalen som convo', LIM_INN_GRENSE === 800 && load().length === før + 1 && /^Limt inn \d\d\.\d\d \d\d:\d\d — Dette er et langt avsnitt som/.test(l.name) && l.source === 'limt inn' && l.kind === 'capture' && l.levels?.S?.by === 'regel' && l.hørerTil === a1.id && l.convo === S1.name && l.content === lang.trim() && /^tekst:/.test(l.key), JSON.stringify([l.name, l.key]))
+  const igjen = await lagreTekst({ tekst: lang, prosjekt: 'Testprosjekt' })
+  ok('(§6) samme tekst limt inn igjen i samme prosjekt = samme sak (nøkkelen er tekstens sha256), ingen kopi', igjen.id === LIMT.id && load().length === før + 1)
+  let e = null; try { await lagreTekst({ tekst: '   ', prosjekt: 'Testprosjekt' }) } catch (x) { e = x }
+  ok('(§6) tom tekst → feil', /tekst kreves/.test(e?.message))
+  const bit = 'Budsjett 45 000 kr.'
+  UTDRAG = lagUtdrag({ id: a1.id, tekst: bit, samtale: S1.name })
+  const ut = les(UTDRAG.id), fra = a1.content.indexOf(bit)
+  ok('(§6) lagUtdrag: «Utdrag av <tittel>», kilde «utdrag», innholdet er den merkede teksten, bygget_av → saken på L med versjon, lenke {kind: utdrag, id, versjon, fra, til} som peker på avsnittet', ut.name === 'Utdrag av Møtenotat lager' && ut.source === 'utdrag' && ut.content === bit && ut.derivedFrom[0].id === a1.id && ut.derivedFrom[0].level === 'L' && ut.links[0].kind === 'utdrag' && ut.links[0].id === a1.id && ut.links[0].versjon === (a1.version || 1) && ut.links[0].fra === fra && ut.links[0].til === fra + bit.length && UTDRAG.av.fra === fra, JSON.stringify(ut.links))
+  ok('(§6) lenka med fra/til står i fila og leses tilbake (normalizeLinks bevarer feltene for kind utdrag)', fs.readFileSync(fileOf(ut), 'utf8').includes(`"fra":${fra}`) && load().find((a) => a.id === ut.id).links[0].til === fra + bit.length)
+  const ut2 = lagUtdrag({ id: a1.id, tekst: 'tekst som ikke står i saken', fra: 5, til: 9 })
+  ok('(§6) et utdrag som ikke finnes ordrett i saken: fra/til tas fra kallet; uten begge → ingen fra/til', les(ut2.id).links[0].fra === 5 && les(ut2.id).links[0].til === 9 && !('fra' in lagUtdrag({ id: a1.id, tekst: 'finnes heller ikke' }).links[0]))
+  e = null; try { lagUtdrag({ id: 'a_finnes_ikke', tekst: 'x' }) } catch (x) { e = x }
+  ok('(§6) utdrag av en sak som ikke finnes → feil', /fant ikke sak/.test(e?.message))
+}
+// lenker som ikke finnes (§8): store.finnSak
+const { finnSak, kast, slåSammen, angre } = store
+{
+  const atoms = load()
+  ok('(§8) finnSak: en sak som finnes → funnet', finnSak(atoms, a1.id).funnet === true && finnSak(atoms, a1.id).erstattet_av.id === a1.id)
+  const n = finnSak(atoms, CW_ID)
+  ok('(§8) finnSak på en økt-id (nøkkelen samtale:<id>) → hvorfor «nøkkel», erstattet_av = samtale-saken', !n.funnet && n.hvorfor === 'nøkkel' && n.erstattet_av.id === les(load().find((a) => a.key === `samtale:${CW_ID}`).id).id && /Lenka pekte på nøkkelen/.test(n.tekst), JSON.stringify(n))
+  ok('(§8) finnSak på S1 via den reserverte id-en (samtale:tua:<t_…>) → nøkkel', finnSak(atoms, S1.key.replace(/^samtale:tua:/, '')).hvorfor === 'nøkkel')
+  const kastet = upsert(atoms, { key: 'notat:kastes', content: 'Et notat som skal i papirkurven. '.repeat(5), name: 'Notat som kastes', project: 'Testprosjekt', by: 'menneske' }).atom
+  const inn = upsert(atoms, { key: 'notat:inn', content: 'Notatet alt slås sammen inn i. '.repeat(5), name: 'Samlenotat', project: 'Testprosjekt', by: 'menneske' }).atom
+  const sam = upsert(atoms, { key: 'notat:sammen', content: 'Notatet som slås sammen. '.repeat(5), name: 'Notat som slås sammen', project: 'Testprosjekt', by: 'menneske' }).atom
+  save(atoms)
+  const a2 = load()
+  kast(a2, kastet.id, { grunn: 'kastet i testen' }); save(a2)
+  const k = finnSak(load(), kastet.id)
+  ok('(§8) en kastet sak → hvorfor «papirkurv» med kurv-posten (Gjenopprett i appen)', !k.funnet && k.hvorfor === 'papirkurv' && k.papirkurv?.id === kastet.id && /ligger i papirkurven/.test(k.tekst), JSON.stringify(k))
+  const a3 = load()
+  slåSammen(a3, sam.id, inn.id); save(a3)
+  const s = finnSak(load(), sam.id)
+  ok('(§8) en sak slått sammen inn i en annen → hvorfor «slått sammen», erstattet_av = den andre (Åpne i appen)', !s.funnet && s.hvorfor === 'slått sammen' && s.erstattet_av.id === inn.id && s.erstattet_av.name === 'Samlenotat' && /slått sammen med «Samlenotat»/.test(s.tekst), JSON.stringify(s))
+  angre(kastet.id)
+  ok('(§8) etter angre finnes saken igjen', finnSak(load(), kastet.id).funnet === true)
+  // bare versjoner igjen (fila slettet i Finder), og «flyttet»: saken lever videre under en annen id med samme nøkkel i et annet prosjekt
+  const a4 = load()
+  const v = upsert(a4, { key: 'notat:versjonert', content: 'Første versjon. '.repeat(10), name: 'Versjonert notat', project: 'Testprosjekt', by: 'menneske' }).atom
+  save(a4)
+  const a5 = load(); upsert(a5, { key: 'notat:versjonert', content: 'Andre versjon. '.repeat(10), name: 'Versjonert notat', project: 'Testprosjekt', by: 'menneske' }); save(a5)
+  ok('(§8) oppsett: saken har en eldre versjon i .tua/versions', versions(v.id).length >= 1)
+  fs.rmSync(fileOf(les(v.id)))   // slettet i Finder: mappa er sannheten
+  const b = finnSak(load(), v.id)
+  ok('(§8) fila slettet i Finder, bare eldre versjoner igjen → hvorfor «versjoner» med tallet', !load().some((a) => a.id === v.id) && !b.funnet && b.hvorfor === 'versjoner' && b.versjoner >= 1 && /eldre versjon/.test(b.tekst), JSON.stringify(b))
+  const a6 = load(); const ny = upsert(a6, { key: 'notat:versjonert', content: 'Tredje versjon, nytt prosjekt. '.repeat(10), name: 'Versjonert notat', project: 'Skigaarden', by: 'menneske' }).atom; save(a6)
+  const f = finnSak(load(), v.id)
+  ok('(§8) … og når en sak med samme nøkkel lever i et annet prosjekt → hvorfor «flyttet», erstattet_av = den', !f.funnet && f.hvorfor === 'flyttet' && f.erstattet_av.id === ny.id && f.erstattet_av.project === 'Skigaarden' && /flyttet til Skigaarden/.test(f.tekst), JSON.stringify(f))
+  ok('(§8) en id ingen har sett → funnet false, hvorfor null, «Fant ikke»', finnSak(load(), 'a_finnes_ikke').hvorfor === null && /Fant ikke saken/.test(finnSak(load(), 'a_finnes_ikke').tekst))
 }
 
 // ── 7) broen ────────────────────────────────────────────────────────────────
@@ -283,7 +420,25 @@ try {
   const ss = await get('/api/siden-sist')
   ok('GET /api/siden-sist virker; Tua-samtaler telles ikke som Claude-økter (nøkkelen samtale:tua: er ikke en økt)', ss.status === 200 && Array.isArray(ss.json.spørsmål) && !ss.json.økter.some((ø) => ø.sak === sk.samtale), JSON.stringify(ss.json.økter?.map((ø) => ø.name)))
   const cw = await get(`/api/samtale?id=${CW_ID}`)
-  ok('GET /api/samtale på en importert Cowork-samtale (økt-id): kilde Claude Cowork, tua false, 6 vendinger, standard regnet', cw.status === 200 && cw.json.kilde === 'Claude Cowork' && cw.json.tua === false && cw.json.vendinger.length === 6 && Array.isArray(cw.json.standard.test.vendinger) && cw.json.standard.test.utenfor.length >= 1, JSON.stringify(cw.json && [cw.json.kilde, cw.json.vendinger.length]))
+  ok('GET /api/samtale på en importert Cowork-samtale (økt-id): kilde Claude Cowork, tua false, 8 vendinger (6 fra transkriptet — 2 syntetiske — og 2 fra Tua), standard regnet', cw.status === 200 && cw.json.kilde === 'Claude Cowork' && cw.json.tua === false && cw.json.vendinger.length === 8 && cw.json.vendinger.filter((v) => v.syntetisk).length === 2 && cw.json.antall === 4 && Array.isArray(cw.json.standard.test.vendinger) && cw.json.standard.test.utenfor.length >= 1, JSON.stringify(cw.json && [cw.json.kilde, cw.json.vendinger.length]))
+  // skive 3: sending av syntetiske vendinger gjennom broen, lim inn, utdrag og finn
+  const synt = cw.json.vendinger.filter((v) => v.syntetisk).map(({ id, rolle }) => ({ id, rolle }))
+  const fv = await post('/api/spor/forhandsvis', { melding: 'Og motkravet?', saker: [], mottaker: 'test', prosjekt: cw.json.prosjekt, samtale: CW_ID, vendinger: synt })
+  ok('POST /api/spor/forhandsvis med syntetiske vendinger og samtale: meldingene har transkriptets tekst', fv.status === 200 && fv.json.meldinger.length === 3 && fv.json.meldinger[0].content === 'Og renter?' && fv.json.vendinger.length === 2, JSON.stringify(fv.json?.meldinger?.map((m) => m.content.slice(0, 20))))
+  const rs = await sse({ melding: 'Og motkravet?', saker: [], mottaker: 'test', prosjekt: cw.json.prosjekt, samtale: CW_ID, vendinger: synt })
+  ok('POST /api/spor med syntetiske vendinger: sendt (ferdig), loggen har de syntetiske id-ene', rs.hendelser.at(-1)[0] === 'ferdig' && loggLinjer().at(-1).vendinger.length === 2 && loggLinjer().at(-1).vendinger.every((v) => /^v_/.test(v.id)), JSON.stringify(rs.hendelser.map((h) => h[0])))
+  const lang = 'Tekst limt inn gjennom broen. '.repeat(40)
+  const lim = await post('/api/tekst', { tekst: lang, prosjekt: 'Testprosjekt', samtale: 'Oppgjøret med Skado', hørerTil: a1.id })
+  ok('POST /api/tekst: saken kommer tilbake slik /api/les gir den (id, name, project, ord, tegn, max L), grensen 800 med', lim.status === 200 && /^Limt inn /.test(lim.json.name) && lim.json.project === 'Testprosjekt' && lim.json.max === 'L' && typeof lim.json.tegn.L === 'number' && lim.json.grense === 800 && les(lim.json.id).hørerTil === a1.id, JSON.stringify(lim.json && [lim.json.name, lim.json.status]))
+  ok('POST /api/tekst uten tekst → 400; med ugyldig prosjekt → 400', (await post('/api/tekst', { tekst: '', prosjekt: 'Testprosjekt' })).status === 400 && (await post('/api/tekst', { tekst: 'x', prosjekt: '.skjult' })).status === 400)
+  const angreKast = await post('/api/rydd/kast', { id: lim.json.id })
+  ok('angre på en innliming = papirkurven (POST /api/rydd/kast): saken er borte fra arkivet og ligger i kurven', angreKast.status === 200 && !load().some((a) => a.id === lim.json.id) && (await get(`/api/finn?id=${lim.json.id}`)).json.hvorfor === 'papirkurv')
+  const ud = await post('/api/utdrag', { id: a1.id, tekst: 'Industriveien 4, 2000 Lillestrøm', samtale: S1.name })
+  ok('POST /api/utdrag: «Utdrag av Møtenotat lager» med av {id, fra, til}, lenke utdrag', ud.status === 200 && ud.json.name === 'Utdrag av Møtenotat lager' && ud.json.av.id === a1.id && ud.json.av.fra === a1.content.indexOf('Industriveien 4') && ud.json.links[0].kind === 'utdrag', JSON.stringify(ud.json && [ud.json.name, ud.json.av]))
+  ok('POST /api/utdrag på ukjent sak → 404; uten tekst → 400', (await post('/api/utdrag', { id: 'a_finnes_ikke', tekst: 'x' })).status === 404 && (await post('/api/utdrag', { id: a1.id, tekst: '' })).status === 400)
+  const fn = await get(`/api/finn?id=${CW_ID}`)
+  ok('GET /api/finn?id=<økt-id>: funnet false, hvorfor nøkkel, erstattet_av samtale-saken; på en sak som finnes: funnet; uten id → 400', fn.status === 200 && fn.json.funnet === false && fn.json.hvorfor === 'nøkkel' && fn.json.erstattet_av.id === cw.json.id && (await get(`/api/finn?id=${a1.id}`)).json.funnet === true && (await get('/api/finn')).status === 400, JSON.stringify(fn.json))
+  ok('GET /api/finn på en ukjent id: funnet false, hvorfor null, «Fant ikke»', (await get('/api/finn?id=a_finnes_ikke')).json.hvorfor === null && /Fant ikke/.test((await get('/api/finn?id=a_finnes_ikke')).json.tekst))
   const sok = await get('/api/search?q=budsjettet&kind=samtale')
   ok('GET /api/search?kind=samtale finner Tua-samtalen på tittelen (klassen holder den ikke utenfor søket — den er ikke fanget)', sok.json.hits.some((h) => h.id === sk.samtale), JSON.stringify(sok.json.hits.map((h) => [h.id, h.kind, h.klasse])))
 } finally { bro.kill() }

@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-27. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import 'node:os';
 import path__default from 'node:path';
@@ -173,7 +173,7 @@ function load() {
 // Eksplisitte lenker bor på atomet (`links`, fil-feltet `lenker`). Avledede
 // lenker regnes ut ved lesing: atomets egen .md-fil (fra indeksen), og repo +
 // Desktop-prosjekt fra prosjektregisteret (.tua/projects.json, skrevet av sync).
-const LINK_KINDS = ['file', 'url', 'repo', 'claude-project', 'claude-chat'];
+const LINK_KINDS = ['file', 'url', 'repo', 'claude-project', 'claude-chat', 'utdrag'];   // utdrag (skive 3, arb. 33): et utdrag av en annen sak — {id, versjon, fra, til} sier hvor i saken
 const claudeProjectHref = (uuid) => `claude://claude.ai/project/${uuid}`;
 function normalizeLinks(list) {
   const out = [];
@@ -182,7 +182,8 @@ function normalizeLinks(list) {
     const kind = LINK_KINDS.includes(l.kind) ? l.kind : (/^claude:\/\/claude\.ai\/project\//.test(l.href) ? 'claude-project' : /^claude:\/\/claude\.ai\/chat\//.test(l.href) ? 'claude-chat' : /^https?:\/\//.test(l.href) ? 'url' : 'file');
     const href = String(l.href || '').trim();
     if (!href || out.some((o) => o.kind === kind && o.href === href)) continue
-    out.push({ kind, href, ...(l.label ? { label: String(l.label).trim() } : {}) });
+    const utdrag = kind === 'utdrag' && l.id ? { id: String(l.id), ...(l.versjon != null ? { versjon: Number(l.versjon) || 1 } : {}), ...(Number.isFinite(Number(l.fra)) && l.fra !== null ? { fra: Number(l.fra) } : {}), ...(Number.isFinite(Number(l.til)) && l.til !== null ? { til: Number(l.til) } : {}) } : {};
+    out.push({ kind, href, ...(l.label ? { label: String(l.label).trim() } : {}), ...utdrag });
   }
   return out
 }
@@ -592,7 +593,7 @@ function setShare(a, project, level) {
 // M19 (skive 8, V16): `ga` = [{id, version}] — svarene en prompt-sak ga. Normaliseres som derivedFrom; upsert slår lista SAMMEN (union på id), aldri erstatter.
 const normalizeGa = (list) => (Array.isArray(list) ? list : []).filter((g) => g && g.id).map((g) => ({ id: String(g.id), version: Number(g.version) || 1 }));
 const mergeGa = (gammel = [], ny = []) => { const ut = [...normalizeGa(gammel)]; for (const g of normalizeGa(ny)) { const i = ut.findIndex((x) => x.id === g.id); if (i < 0) ut.push(g); else ut[i] = g; } return ut };
-function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget, drift, beholdt, hørerTil, hørerTilForslag, arbeid, gren, vert }) {
+function makeAtom({ content, name, source, project, convo, summary, tags, short, medium, by, levels, links, kind, derivedFrom, renders, ga, fanget, drift, beholdt, hørerTil, hørerTilForslag, arbeid, gren, vert, gjentatt }) {
   const body = String(content || '').replace(/\r\n?/g, '\n').trim();   // M17: fila leses tilbake uten \r (files.js) — lagre likt, ellers blir hver import en «ny versjon»
   const now = Date.now();
   const a = {
@@ -630,6 +631,7 @@ function makeAtom({ content, name, source, project, convo, summary, tags, short,
   if (arbeid === true) a.arbeid = true;
   if (typeof gren === 'string' && gren) a.gren = gren;
   if (typeof vert === 'string' && vert) a.vert = vert;
+  if (gjentatt === true) a.gjentatt = true;                                // skive 3 (arb. 33 §7): gjentatt kjøring ved import
   return a
 }
 
@@ -688,6 +690,7 @@ function upsert(atoms, { key, ...data }) {
   const hørerTilForslag = hørerTil ? undefined : (old.hørerTilForslag || (typeof data.hørerTilForslag === 'string' && data.hørerTilForslag ? data.hørerTilForslag : undefined));
   const arbeid = old.arbeid === true || data.arbeid === true ? true : undefined;
   const gren = (typeof data.gren === 'string' && data.gren) ? data.gren : old.gren, vert = (typeof data.vert === 'string' && data.vert) ? data.vert : old.vert;
+  const gjentatt = data.gjentatt === false ? undefined : data.gjentatt === true ? true : old.gjentatt;   // skive 3: settes ved import, tas bare bort eksplisitt
   const attach = (a) => {
     if (levels) a.levels = levels; else delete a.levels;
     if (links) a.links = links; else delete a.links;
@@ -702,11 +705,12 @@ function upsert(atoms, { key, ...data }) {
     if (arbeid) a.arbeid = true; else if (old.arbeid !== undefined) a.arbeid = false; else delete a.arbeid;
     if (gren) a.gren = gren; else delete a.gren;
     if (vert) a.vert = vert; else delete a.vert;
+    if (gjentatt) a.gjentatt = true; else delete a.gjentatt;
     a.kind = kind;
     return a
   };
   if (bodySame) {
-    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt && hørerTil === old.hørerTil && hørerTilForslag === old.hørerTilForslag && arbeid === old.arbeid && gren === old.gren && vert === old.vert) return { atom: old, status: 'uendret' }
+    if (sameJson(levels, old.levels) && sameJson(links, old.links) && sameJson(derivedFrom, old.derivedFrom) && sameJson(renders, old.renders) && sameJson(ga, old.ga) && kind === old.kind && fanget === old.fanget && drift === old.drift && beholdt === old.beholdt && hørerTil === old.hørerTil && hørerTilForslag === old.hørerTilForslag && arbeid === old.arbeid && gren === old.gren && vert === old.vert && gjentatt === old.gjentatt) return { atom: old, status: 'uendret' }
     atoms[i] = attach({ ...old });
     markDirty(atoms, old.id);
     return { atom: atoms[i], status: 'nivåer' }
