@@ -23,7 +23,7 @@ if (!ROOT || !DATA || ROOT.includes('Dropbox') || ROOT.includes('iCloud')) { con
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.rmSync(DATA, { recursive: true, force: true })
 fs.mkdirSync(ROOT, { recursive: true }); fs.mkdirSync(DATA, { recursive: true })
 
-const { load, save, upsert, deliveries, logDelivery } = await import('./store.js')
+const { load, save, upsert, deliveries, logDelivery, fileOf } = await import('./store.js')
 const { spor, mottakere, trustScores, trustFor } = await import('./motor.js')
 const { deleteKey, hasKey } = await import('./keychain.js')
 
@@ -65,6 +65,18 @@ const r2 = await spor({ melding: 'Og hva mer?', saker: [{ id: a2.id, nivå: 'S' 
 // og én eldre linje fra MCP-døra (tool get: id/level, ikke saker[]) — tre dager gammel
 logDelivery({ at: Date.now() - 3 * 86400e3, tool: 'get', id: a1.id, version: 1, level: 'S', context: 'Annet' })
 ok('tre linjer i Utlevert-loggen (to fra motoren, én fra MCP-døra)', deliveries(null, 100).length === 3)
+// skive 4: en gammel Tua-tråd (prompt:spor: uten samtale-sak) og tre Cowork-kjøringer med samme tittel — til knappene i Innstillinger › Spør
+let gpId, cw = []
+{
+  const at = load()
+  const gp = upsert(at, { key: 'prompt:spor:gammel9', kind: 'prompt', content: 'Gammelt spørsmål fra før skive 1: hva er fristen?', name: 'Hva er fristen?', project: 'Testprosjekt', convo: 'Hva er fristen?', source: 'Tua', by: 'regel', short: 'Gammelt spørsmål.' }).atom
+  const gs = upsert(at, { key: 'svar:spor:gammel9', kind: 'svar', content: 'Tre uker.', name: 'Svar fra Test: Hva er fristen?', project: 'Testprosjekt', convo: 'Hva er fristen?', source: 'Test (ekko — sender ingenting)', tags: ['svar', 'test'], by: 'regel', derivedFrom: [{ id: gp.id, version: 1, level: 'L' }] }).atom
+  gp.ga = [{ id: gs.id, version: 1 }]; gpId = gp.id
+  const DAGLIG = 'Du lager min daglige morgenbriefing. Gå gjennom nyhetene og lag et sammendrag på norsk for meg.'
+  for (let i = 0; i < 3; i++) cw.push(upsert(at, { key: `samtale:cw-900${i}`, kind: 'samtale', content: `# Briefing\n\n_Claude Cowork · 1 vending · 2026-10-2${i} · Skigaarden_\n\n**Bruker:** ${DAGLIG}\n\n**Claude:** Briefing ${i}.`, name: DAGLIG, project: 'Skigaarden', convo: `Kjøring ${i}`, source: 'Claude Cowork', by: 'regel', tags: ['samtale', 'cowork'], short: `Sist: … · 1 vending · 2${i}.10.2026` }).atom)
+  cw.forEach((c, i) => { c.createdAt = Date.parse(`2026-10-2${i}T08:00:00+02:00`); c.capturedAt = c.createdAt })
+  save(at)
+}
 
 // ── 4) broen ────────────────────────────────────────────────────────────────
 const PORT = 5298
@@ -130,6 +142,23 @@ try {
     ok('DELETE /api/keychain: fjernet', d1.status === 200 && JSON.parse(d1.tekst).satt === false && !hasKey('mistral'))
     ok('POST /api/keychain med ugyldig nøkkel → 400', (await send('POST', '/api/keychain', { provider: 'mistral', key: 'kort' })).status === 400)
     ok('POST /api/keychain for ukjent leverandør → 400', (await send('POST', '/api/keychain', { provider: 'finnes-ikke', key: TESTNØKKEL })).status === 400)
+  }
+  // skive 4: knappene «Gamle tråder → samtaler» og «Gjentatte kjøringer» — SSE, dry-run først, så skriv
+  {
+    const sse = async (p, body) => { const r = await hent(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const ev = []; for (const b of r.tekst.split('\n\n')) { const e = b.match(/^event: (.+)$/m)?.[1], d = b.match(/^data: (.+)$/m)?.[1]; if (e && d) ev.push([e, JSON.parse(d)]) } return { status: r.status, ev, slutt: ev.find((x) => x[0] === 'slutt')?.[1] } }
+    const før = load().length
+    const t1 = await sse('/api/samtaler/traader', { dryRun: true })
+    ok('POST /api/samtaler/traader {dryRun}: SSE start · rad · slutt — 1 gammel tråd med tekst, ingenting skrevet', t1.status === 200 && t1.ev[0][0] === 'start' && t1.ev[0][1].antall === 1 && t1.ev.some((x) => x[0] === 'rad' && /Testprosjekt \/ «Hva er fristen\?»  1 spørsmål · 2 saker/.test(x[1].tekst)) && t1.slutt.antall === 1 && t1.slutt.laget === 0 && t1.slutt.dryRun === true && load().length === før, JSON.stringify(t1.slutt))
+    const t2 = await sse('/api/samtaler/traader', { dryRun: false })
+    const S2 = load().find((a) => a.kind === 'samtale' && a.source === 'Tua' && a.name === 'Hva er fristen?')
+    ok('POST /api/samtaler/traader {dryRun: false}: samtale-sak laget (kilde Tua), prompt og svar peker på den, filer skrevet', t2.slutt.laget === 1 && t2.slutt.filer >= 1 && !!S2 && load().find((a) => a.id === gpId).derivedFrom.some((d) => d.id === S2.id) && load().length === før + 1, JSON.stringify(t2.slutt))
+    ok('POST /api/samtaler/traader igjen: 0 gamle tråder', (await sse('/api/samtaler/traader', { dryRun: true })).slutt.antall === 0)
+    const g1 = await sse('/api/samtaler/gjentatt', { dryRun: true })
+    ok('POST /api/samtaler/gjentatt {dryRun}: 1 gruppe, 2 nye ville fått gjentatt, rad med «3 kjøringer · Cowork», ingenting skrevet', g1.slutt.grupper === 1 && g1.slutt.nye === 2 && g1.slutt.merket === 0 && g1.ev.some((x) => x[0] === 'rad' && /Skigaarden \/ «Du lager min daglige morgenbriefing\.»  3 kjøringer · Cowork/.test(x[1].tekst)) && load().filter((a) => a.gjentatt === true).length === 0, JSON.stringify(g1.slutt))
+    const g2 = await sse('/api/samtaler/gjentatt', { dryRun: false })
+    const merket = load().filter((a) => a.gjentatt === true)
+    ok('POST /api/samtaler/gjentatt {dryRun: false}: de to nyeste merket gjentatt: true i fila, den eldste ikke', g2.slutt.merket === 2 && merket.length === 2 && !merket.some((a) => a.id === cw[0].id) && /gjentatt: true/.test(fs.readFileSync(fileOf(load().find((a) => a.id === cw[1].id)), 'utf8')), JSON.stringify(g2.slutt))
+    ok('POST /api/samtaler/gjentatt igjen: 0 nye, 2 alt merket', (await sse('/api/samtaler/gjentatt', { dryRun: true })).slutt.nye === 0 && (await sse('/api/samtaler/gjentatt', { dryRun: true })).slutt.alt === 2)
   }
 } finally { bro.kill(); if (process.platform === 'darwin') deleteKey('mistral') }
 

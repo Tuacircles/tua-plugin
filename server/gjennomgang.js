@@ -139,3 +139,41 @@ export async function samtalerGjennomgang({ atoms = null, dryRun = false, skrive
   på('slutt', ut)
   return ut
 }
+
+// ── Skive 4 (arb. 33, V22, 28.10.2026): de to engangsgjennomgangene fra skive 1 og 3 som KNAPPER i Innstillinger › Spør — samme funksjoner som review.js --traader og --gjentatt,
+//    så kommandolinja og appen gjør nøyaktig det samme. Dry-run som standard (teller og viser, skriver ingenting); dryRun: false skriver gjennom lageret (save). på(ev, data):
+//    start {antall, …} · rad {i, antall, tekst} · slutt {…} — broen sender dem som SSE. review.js kaller disse.
+//   traaderGjennomgang   gamle Tua-tråder (prompt:spor:-saker uten samtale-sak) → samtale-sak med kilde Tua; prompt, svar, Forskjeller og konklusjon får bygget_av → samtalen
+//   gjentattGjennomgang  gjentatte kjøringer (samme kortede tittel, prosjekt og kilde — Cowork-oppgaver som kjører daglig) → gjentatt: true på alle unntatt den eldste i gruppa
+export async function traaderGjennomgang({ atoms = null, dryRun = true, på = () => {} } = {}) {
+  const { gamleTråder, gjørOmTråd } = await import('./samtale.js')
+  const liste = atoms || load()
+  const grupper = gamleTråder(liste)
+  const alleSamtaler = liste.filter((a) => a.kind === 'samtale'), tua = alleSamtaler.filter((a) => String(a.source || '') === 'Tua')
+  const vis = grupper.map((g) => ({ project: g.project, convo: g.convo, spørsmål: g.prompter.length, saker: g.saker.length, hørerTil: !!g.hørerTil, start: Number.isFinite(g.start) ? g.start : null,
+    tekst: `${g.project} / «${g.convo}»  ${g.prompter.length} spørsmål · ${g.saker.length} saker får bygget_av → samtalen${g.hørerTil ? ' · hører til et arbeid' : ''}` }))
+  på('start', { saker: liste.length, samtaler: alleSamtaler.length, tua: tua.length, antall: grupper.length, dryRun })
+  const laget = []
+  let i = 0
+  for (const g of grupper) { i++; på('rad', { i, antall: grupper.length, tekst: vis[i - 1].tekst }); if (!dryRun) laget.push(gjørOmTråd(liste, g)) }
+  const filer = !dryRun && laget.length ? save(liste) : 0
+  const r = { saker: liste.length, samtaler: alleSamtaler.length, tua: tua.length, antall: grupper.length, laget: laget.length, filer, dryRun, vis }
+  på('slutt', r)
+  return r
+}
+export async function gjentattGjennomgang({ atoms = null, dryRun = true, på = () => {} } = {}) {
+  const { gjentatteKandidater } = await import('./import.js')
+  const liste = atoms || load()
+  const { grupper, nye, alt } = gjentatteKandidater(liste)
+  const samtaler = liste.filter((a) => a.kind === 'samtale')
+  const vis = grupper.map((g) => ({ project: g.project, tittel: g.tittel, antall: g.antall, kilde: String(g.kilde).replace(/^Claude /, ''), første: g.første.createdAt || g.første.capturedAt || null,
+    tekst: `${g.project} / «${g.tittel}»  ${g.antall} kjøringer · ${String(g.kilde).replace(/^Claude /, '')} · første ${new Date(g.første.createdAt || g.første.capturedAt).toLocaleDateString('no-NO')}` }))
+  på('start', { saker: liste.length, samtaler: samtaler.length, grupper: grupper.length, nye: nye.length, alt: alt.length, dryRun })
+  let i = 0
+  for (const g of grupper) { i++; på('rad', { i, antall: grupper.length, tekst: vis[i - 1].tekst }) }
+  if (!dryRun) for (const a of nye) { a.gjentatt = true; markDirty(liste, a.id) }
+  const filer = !dryRun && nye.length ? save(liste) : 0
+  const r = { saker: liste.length, samtaler: samtaler.length, grupper: grupper.length, nye: nye.length, alt: alt.length, merket: dryRun ? 0 : nye.length, filer, dryRun, vis }
+  på('slutt', r)
+  return r
+}

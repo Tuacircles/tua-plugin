@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-27. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { requireLimitNumber } from './limitNumber.mjs';
 import { requireMultipleOf } from './multipleOf.mjs';
 import { requireLimitLength } from './limitLength.mjs';

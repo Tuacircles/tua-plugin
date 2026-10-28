@@ -104,6 +104,8 @@ og fest dem med `tua_save` med samme `key` og `project` hvis atomet har key — 
    på hvilket nivå). Skriv den om i husstilen om det trengs og lagre med `tua_save(key=samme key, content=…)`.
 3. Rendrer du html/pdf (`build/html2pdf.sh`): fest dem med `tua_save(key=…, renders=[{path: "<absolutt sti>"}])`.
    Fila er en gjengivelse — atomet er sannheten. Står det «⚠ endret utenfor Tua» senere, er fila redigert i et annet verktøy.
+   Vil brukeren fortsette eller vurdere en **samtale** fra Tua («fortsett samtalen om …», «hva ble sagt i samtalen med gemma om …»):
+   `tua_compose(samtale=<samtale-sakens id fra tua_search>, name=…)` gir vendingene som user/assistant-blokker (standardvalget, eller `vendinger=[id…]`), skjermet og logget.
 4. Står det «bygger på utdaterte kilder» (en kilde har gått videre, v2 → v4): si det, og tilby å kjøre `tua_compose`
    på nytt med samme key.
 

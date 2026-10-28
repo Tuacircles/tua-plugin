@@ -30,17 +30,45 @@ import { samtaleFraSak, clip, flat } from './samtaletekst.mjs';
 
 const KILDE_TUA = 'Tua';
 const erTuaSamtale = (a) => a?.kind === 'samtale' && String(a.source || '').trim() === KILDE_TUA;
+const samtaleNøkkel = (id) => `samtale:tua:${id}`;
 const same = (x, y) => String(x || '').toLowerCase() === String(y || '').toLowerCase();
 const navnAv = (s) => s.convo || s.name || '';
 // rekkefølge: tid (dato i fila har sekundoppløsning), så tidsstempelet i id-en (uid() = a_<ms i base36>_…) — to spørsmål i samme sekund står riktig
 const idTid = (a) => { const m = /^a_([0-9a-z]+)_/.exec(String(a?.id || '')); return m ? parseInt(m[1], 36) : 0 };
 const påTid = (x, y) => ((x.capturedAt || 0) - (y.capturedAt || 0)) || (idTid(x) - idTid(y));
 
+function finnSamtale(atoms, id) {
+  if (!id) return null
+  const s = String(id).trim();
+  const direkte = atoms.find((a) => a.kind === 'samtale' && (a.id === s || a.key === samtaleNøkkel(s) || a.key === `samtale:${s}` || a.key === `okt:${s}`));
+  if (direkte) return direkte
+  const sak = atoms.find((a) => a.id === s);
+  return sak ? samtaleFor(atoms, sak) : null
+}
+function samtaleFor(atoms, sak, dybde = 0) {
+  if (!sak || dybde > 3) return null
+  if (sak.kind === 'samtale') return sak
+  const viaRef = (sak.derivedFrom || []).map((d) => atoms.find((a) => a.id === d.id && a.kind === 'samtale')).find(Boolean);
+  if (viaRef) return viaRef
+  if (sak.kind !== 'prompt') {
+    const prompt = (sak.derivedFrom || []).map((d) => atoms.find((a) => a.id === d.id && a.kind === 'prompt')).find(Boolean);
+    if (prompt) { const r = samtaleFor(atoms, prompt, dybde + 1); if (r) return r }
+  }
+  const sid8 = _ktIdAv(sak.key);
+  if (sid8) { const s = atoms.find((a) => a.kind === 'samtale' && _ktIdAv(a.key) === sid8); if (s) return s }
+  return atoms.find((a) => erTuaSamtale(a) && same(a.project, sak.project) && navnAv(a) === (sak.convo || '')) || null   // gammel Tua-tråd: samtalenavnet
+}
+
 // ── vendingene ───────────────────────────────────────────────────────────────
 const erForskjeller = (a) => a?.kind === 'svar' && (a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller');
 const erSvarSak = (a) => !!a && !erForskjeller(a) && (a.kind === 'svar' || (a.kind === 'capture' && (a.tags || []).includes('svar')));
 const modellAv = (a) => String(a?.source || '').split(' (')[0].trim() || 'modell';
 const nivåAv = (a, utenom) => [...new Set((a.derivedFrom || []).filter((d) => !utenom.has(d.id)).map((d) => d.level).filter(Boolean))].join('/') || null;
+// Skive 3 (arb. 33, 28.10.2026): for en IMPORTERT samtale (Code/Cowork/Desktop, hookens okt:-saker) er vendingene ALLE vendingene lest ut av transkriptet
+// (samtaleFraSak), ikke bare sakene importen laget (prompt ≥ 80 tegn, svar ≥ 3 000). Der en vending alt har en sak, peker vendingen på den (id = sakens id);
+// ellers får den en stabil syntetisk id v_<sha8 av samtalens id>_<n> (n = plassen i transkriptet — nye vendinger legges bakerst ved ny import, så gamle id-er står).
+// Tua-vendinger som peker på samtalen (en fortsettelse ført i Tua) kommer etter transkriptets, i tidsrekkefølge. Lar transkriptet seg ikke lese, som før.
+const erSyntetiskId = (id) => /^v_[0-9a-f]{8}_\d+$/.test(String(id || ''));
 const syntetiskId = (samtale, n) => `v_${sha8(samtale.id)}_${n}`;
 const kortModell = (s) => { const k = String(s || '').trim(); return /^Claude\b/.test(k) ? 'Claude' : k.split(' (')[0] || 'modell' };
 function vendingerAvTranskript(atoms, samtale) {
@@ -109,5 +137,44 @@ function vendingerFor(atoms, samtale) {
 }
 const antallVendinger = (vend) => vend.filter((v) => v.rolle === 'bruker').length;
 const sistI = (samtale, vend) => Math.max(samtale?.capturedAt || 0, ...vend.map((v) => v.tid || 0));
+// Skive 4 (arb. 33, 28.10.2026) — Claude-døra viser samtaler fullt ut: det kortet, tua_search, tua_get og Siden sist sier om en samtale-sak, regnet ÉN gang her.
+//   { id, tittel, prosjekt, kilde ('Tua' | 'Claude Code' | …), tua, vendinger (antall spørsmål), siste (ms), modeller: ['gemma3', 'Claude'], konklusjon: 'låst' | 'utkast' | null,
+//     syntetiske (vendinger lest ut av transkriptet uten egen sak), adresse: '#samtale/<id>' }
+function samtaleInfo(atoms, samtale, { base = '' } = {}) {
+  const v = vendingerFor(atoms, samtale);
+  const konk = v.filter((x) => x.rolle === 'konklusjon');
+  return { id: samtale.id, tittel: samtale.name || navnAv(samtale) || 'Samtale', prosjekt: samtale.project, kilde: erTuaSamtale(samtale) ? KILDE_TUA : String(samtale.source || 'Claude'), tua: erTuaSamtale(samtale),
+    vendinger: antallVendinger(v), siste: sistI(samtale, v), modeller: [...new Set(v.filter((x) => x.rolle === 'modell').map((x) => kortModell(x.modell)).filter(Boolean))],
+    konklusjon: konk.some((k) => k.låst) ? 'låst' : konk.length ? 'utkast' : null, syntetiske: v.filter((x) => x.syntetisk).length, adresse: `${base}#samtale/${encodeURIComponent(samtale.id)}` }
+}
+// Én linje om samtalen, lik i tua_search, tua_get og kortet: «Samtale i Tua: 4 vendinger · siste 27.10.2026 · gemma3, Claude · konklusjon låst · fortsett: http://…#samtale/<id>»
+function samtaleLinje(info) {
+  const dato = info.siste ? new Date(info.siste).toLocaleDateString('no-NO', { day: 'numeric', month: 'numeric', year: 'numeric' }) : '—';
+  return `Samtale ${info.tua ? 'i Tua' : `fra ${info.kilde}`}: ${info.vendinger} ${info.vendinger === 1 ? 'vending' : 'vendinger'} · siste ${dato}${info.modeller.length ? ` · ${info.modeller.join(', ')}` : ''}${info.konklusjon ? ` · konklusjon ${info.konklusjon}` : ''} · fortsett i Tua: ${info.adresse}`
+}
 
-export { antallVendinger, erTuaSamtale, sistI, vendingerFor };
+// Standardvalget regnes HER, ikke i appen (plan §5): alt etter siste låste konklusjon, ellers alt; så bakfra til budsjettet er brukt. anslå(tekst) → tokens for mottakeren.
+function standardVendinger(vend, mottaker = {}, { anslå = (t) => Math.round(String(t || '').length / 3.5), reservert = 0 } = {}) {
+  const label = mottaker.label ? String(mottaker.label).split(' (')[0] : mottaker.id || 'mottakeren';
+  const budsjett = Number(mottaker.budsjett) || 0;
+  const sisteLåst = vend.reduce((s, v, i) => (v.rolle === 'konklusjon' && v.låst ? i : s), -1);
+  const utenfor = new Map();
+  vend.forEach((v, i) => {
+    if (i < sisteLåst) utenfor.set(v.id, { id: v.id, hvorfor: 'før siste låste konklusjon — konklusjonen oppsummerer det' });
+    else if (i === sisteLåst) utenfor.set(v.id, { id: v.id, hvorfor: 'den låste konklusjonen står som strek i samtalen; kryss av om den skal med' });
+    else if (v.rolle === 'konklusjon') utenfor.set(v.id, { id: v.id, hvorfor: 'konklusjon (utkast) — kryss av om den skal med' });
+  });
+  const kandidater = vend.filter((v) => !utenfor.has(v.id));
+  const valgt = [];
+  let brukt = reservert, stoppet = false;
+  for (const v of [...kandidater].reverse()) {
+    const t = anslå(v.L);
+    if (!stoppet && (!budsjett || brukt + t <= budsjett)) { brukt += t; valgt.unshift(v.id); continue }
+    stoppet = true;   // bakfra: faller én utenfor, faller alle eldre også — nyeste beholdes
+    utenfor.set(v.id, { id: v.id, hvorfor: `utenfor budsjettet til ${label} (ca. ${t.toLocaleString('no-NO')} tokens; ${budsjett.toLocaleString('no-NO')} er grensen, ${brukt.toLocaleString('no-NO')} er alt brukt av nyere vendinger)`, tokens: t });
+  }
+  const rekkefølge = new Map(vend.map((v, i) => [v.id, i]));
+  return { vendinger: valgt, utenfor: [...utenfor.values()].sort((x, y) => rekkefølge.get(x.id) - rekkefølge.get(y.id)), tokens: brukt, budsjett: budsjett || null, mottaker: mottaker.id || null }
+}
+
+export { erSyntetiskId, erTuaSamtale, finnSamtale, samtaleInfo, samtaleLinje, standardVendinger, vendingerFor };

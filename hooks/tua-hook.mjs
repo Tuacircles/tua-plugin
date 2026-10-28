@@ -147,7 +147,9 @@ try {
     let siden = '', arbeidLinje = ''
     try {
       const atoms = load()
-      const s = dora.sidenSist(atoms, { prosjekt: project }); if (s.noe) siden = `Siden sist i Tua (7 dager, ${project}): ${s.linjer.map((l) => l.tekst).join(' · ')}${s.lagret ? ` · ${s.lagret} ${s.lagret === 1 ? 'sak' : 'saker'} lagret med vilje` : ''} — nevn det i én setning hvis det passer; tua_search(project="${project}") finner sakene`
+      const s = dora.sidenSist(atoms, { prosjekt: project })
+      // skive 4 (arb. 33): linja skjermes som alt annet Claude får (titlene på Spør-tråder og Tua-samtaler kan bære navn); «Samtaler i Tua: N, siste «…»» er med
+      if (s.noe) { const { skjermerFor } = await import(mod('motor.js')); const sk = skjermerFor(atoms); siden = sk.skjerm(`Siden sist i Tua (7 dager, ${project}): ${[...s.linjer.map((l) => l.tekst), ...(s.samtaler ? [s.samtaler.tekst] : [])].join(' · ')}${s.lagret ? ` · ${s.lagret} ${s.lagret === 1 ? 'sak' : 'saker'} lagret med vilje` : ''} — nevn det i én setning hvis det passer; tua_search(project="${project}") finner sakene`) }
       // Friksjon 20 (Erik: Tua foreslår med én gang): hører samtalen til et arbeid — automatisk (forelder, gren, tittel) eller som forslag — lages samtale-saken nå, så appen og Claude har noe å peke på
       if (sid && !atoms.some((a) => a.key === `okt:${sid}`)) {
         const k = kobling(atoms)

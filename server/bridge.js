@@ -129,6 +129,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import zlib from 'node:zlib'
 import { openSpawn, FILE_MANAGER, HOME } from './platform.js'   // M18: «Åpne i …» på macOS, Windows og Linux · HOME: hjemmemappa (TUA_HOME i tester)
 import os from 'node:os'
 import readline from 'node:readline'
@@ -150,7 +151,7 @@ import { ulestAv, ulestFra, logSettAlt, settAltSist, fjernetAv } from './store.j
 import { projectAliases } from './store.js'
 import { lesMottakere, oppdaterPerson, nyPerson, navngiSirkel, avvisSirkel, eier, settEier, delingerFor, lenkerFor, trukketSide, MERKER } from './deling.js'   // runde 3b: personer, sirkler som emerger, delingene (mottakersiden tegnes i motoren)   // runde 2d (app), friksjon 14: filer i prosjektmappa som ikke er saker, og aliasene til prosjekt-treffet i søket
 import { flytt as ryddFlytt, giNyttNavn, tømPapirkurv, ryddeforslag, sisteSave } from './store.js'   // runde 3c: rydding på saken, papirkurv, Tua foreslår — én skriver i lageret
-import { gjennomgang, planFor, NIVÅER_GJENNOMGANG, samtalerGjennomgang } from './gjennomgang.js'   // runde 3c: Ny gjennomgang (AI3) — S/M på nytt med valgt modell, aldri menneskeskrevet · friksjon 20: samtale-sakene på nytt
+import { gjennomgang, planFor, NIVÅER_GJENNOMGANG, samtalerGjennomgang, traaderGjennomgang, gjentattGjennomgang } from './gjennomgang.js'   // runde 3c: Ny gjennomgang (AI3) — S/M på nytt med valgt modell, aldri menneskeskrevet · friksjon 20: samtale-sakene på nytt
 import { følgereAv, erArbeid, delAv, løpFor, arbeider, åpneArbeider, settHørerTil, løsne, avvisForslag, harForslag, gjørTilArbeid, vurderPakke, vurderingsprompt, settVurderingsprompt, VURDERING_STANDARD } from './arbeid.js'   // friksjon 20: arbeidet som samler
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
@@ -306,9 +307,21 @@ if (process.argv.includes('--sett-passord')) {
   setPassword(a)
   console.error(`Passord satt (${AUTH_FILE}). Alle sesjoner er logget ut. Start broen: npm run kart`); process.exit(0)
 }
+// Skive 4 (arb. 33, 28.10.2026): store JSON-svar (over 16 KiB) går gzip-pakket når nettleseren tar det (Accept-Encoding), og bærer en ETag så et uendret svar på
+// neste runde (avisen hvert 10. sekund) er 304 uten kropp. /api/atoms på Eriks arkiv er 28 MB rått — pakket er det en brøkdel; sidefeltet har fått eget, lett endepunkt.
+const GZIP_FRA = 16 * 1024
 const json = (res, code, body, extra = {}) => {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', ...cors, ...extra })
-  res.end(JSON.stringify(body))
+  const tekst = JSON.stringify(body)
+  const hode = { 'Content-Type': 'application/json; charset=utf-8', ...cors, ...extra }
+  const req = res.req
+  if (code === 200 && req?.method === 'GET' && tekst.length > GZIP_FRA) {
+    const etag = `"${crypto.createHash('sha1').update(tekst).digest('base64url')}"`
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ETag: etag, ...cors, Vary: 'Accept-Encoding' }); return res.end() }
+    hode.ETag = etag; hode.Vary = 'Accept-Encoding'; hode['Cache-Control'] = 'no-cache'
+    if (/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) { res.writeHead(code, { ...hode, 'Content-Encoding': 'gzip' }); return res.end(zlib.gzipSync(tekst, { level: 3 })) }
+  }
+  res.writeHead(code, hode)
+  res.end(tekst)
 }
 const readBody = (req) =>
   new Promise((resolve, reject) => {
@@ -521,6 +534,36 @@ http
           hører_til: a.hørerTil || null, del_av: delAv(all, a, følgere), arbeid: erArbeid(a, følgere), ...(arbeidTall.has(a.id) ? { arbeid_tall: (({ samtaler, tråder, filer, saker, sist, åpen }) => ({ samtaler, tråder, filer, saker, sist, åpen }))(arbeidTall.get(a.id)) } : {}), ...(harForslag(a) ? { hører_til_forslag: a.hørerTilForslag } : {}) }))
         return json(res, 200, { atoms, total: all.length, offset, file: ARKIV(), klasser: tellKlasser(all), uleste: atoms.filter((a) => a.ulest && a.klasse === 'arbeid').length, sett_alt: settAltSist() || null })
       }
+      // ── Skive 4 (arb. 33, V22, 28.10.2026): GET /api/sidefelt[?prosjekt=] — det sidefeltet i Arbeid trenger, og ikke mer. Sidefeltet hentet /api/atoms hvert 15. sekund
+      //    (28 MB og 10 s på Eriks arkiv). Nå: bare sakene regler.sidefeltTre/samtalerFlat leser (samtale-saker, prompter, svar, konklusjoner, saker med samtalenavn, og
+      //    arbeidene samtaler hører til), og bare feltene de leser (id, kind, project, convo, name, capturedAt, klasse, tråd, ulest, hører_til, gjentatt, kilde, nøkkel for
+      //    prompter, prompt-teksten kortet, S-teksten på samtaler (antall vendinger), Forskjeller-saker med tekst, Claude-lenkene). Appen kjører SAMME regler på dem — én logikk.
+      if (req.method === 'GET' && url.pathname === '/api/sidefelt') {
+        const t0 = Date.now()
+        const prosjekt = url.searchParams.get('prosjekt') || ''
+        const all = load(), now = Date.now()
+        const { av: trådAv } = trådSamlet(all), bruk = brukInfo(), fraUlest = ulestFra(now), følgere = følgereAv(all)
+        const arbeidIder = new Set(all.map((a) => a.hørerTil).filter(Boolean))
+        // Claude-lenkene uten linksFor per sak (den leser prosjektregisteret fra disk for hver sak — 1,2 s på 1 783 saker): registeret leses ÉN gang, sakens egne lenker som de er
+        const register = prosjektRegister(), prosjektLenke = new Map()
+        const claudeLenker = (a) => { const egne = (a.links || []).filter((l) => l && (l.kind === 'claude-chat' || l.kind === 'claude-project') && l.href); const p = a.project || ''
+          if (!prosjektLenke.has(p)) { const uuid = register[p]?.claudeProject; prosjektLenke.set(p, uuid ? [{ kind: 'claude-project', href: `claude://claude.ai/project/${uuid}` }] : []) }
+          return egne.some((l) => l.kind === 'claude-project') ? egne : [...egne, ...prosjektLenke.get(p)] }
+        const erFsk = (a) => a.kind === 'svar' && (a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller')
+        const med = (a) => ['samtale', 'prompt', 'svar', 'konklusjon'].includes(a.kind) || !!a.convo || arbeidIder.has(a.id) || erArbeid(a, følgere)
+        const iProsjekt = (a) => !prosjekt || same(a.project || 'Uten prosjekt', prosjekt)
+        const saker = all.filter((a) => med(a) && (iProsjekt(a) || arbeidIder.has(a.id))).map((a) => {
+          const ut = { id: a.id, kind: a.kind || 'capture', project: a.project, convo: a.convo || '', capturedAt: a.capturedAt, klasse: klasseAv(a), tråd: trådAv.get(a.id) || null, ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }), hører_til: a.hørerTil || null }
+          if (a.kind === 'samtale' || a.kind === 'prompt' || arbeidIder.has(a.id)) ut.name = a.name
+          if (a.kind === 'samtale') { ut.source = a.source || ''; if (a.gjentatt === true) ut.gjentatt = true; const S = levelOf(a, 'S'); if (S.level === 'S') ut.levels = { S: { text: S.text } } }
+          if (a.kind === 'prompt') { ut.key = a.key || ''; ut.source = a.source || ''; ut.content = String(a.content || '').replace(/\s+/g, ' ').trim().slice(0, 120) }
+          if (erFsk(a)) { ut.tags = ['forskjeller']; ut.source = a.source || ''; ut.content = a.content || '' }
+          const ls = claudeLenker(a)
+          if (ls.length) ut.links = ls
+          return ut
+        })
+        return json(res, 200, { saker, total: all.length, prosjekt }, { 'X-Tua-Ms': String(Date.now() - t0) })   // tida i et hode, ikke i kroppen — så ETag-en står når ingenting er endret (304)
+      }
       if (req.method === 'GET' && url.pathname === '/api/search') {
         const q = url.searchParams.get('q') || ''
         const kind = url.searchParams.get('kind') || undefined
@@ -731,7 +774,7 @@ http
         return json(res, 200, { atom: { ...a, links: linksFor(a), file: fileOf(a), status: statusOf(a) }, før })
       }
       // ── M20a: motoren ──
-      if (req.method === 'GET' && url.pathname === '/api/mottakere') return json(res, 200, { mottakere: await mottakere(), trust: { merk: trustScores()._merk || '' } })
+      if (req.method === 'GET' && url.pathname === '/api/mottakere') { const ms = await mottakere(); return json(res, 200, { mottakere: [...ms], usikker: !!ms.usikker, trust: { merk: trustScores()._merk || '' } }) }   // skive 4 (arb. 33): usikker = Ollama har ikke svart ennå, ingen standard
       // Friksjon 15: standardnivået per mottaker for én sak (regelen bor i motoren; /api/mottakere har alt `nivå`/`nivåVault` per rad, så appen trenger sjelden denne)
       if (req.method === 'GET' && url.pathname === '/api/niva') {
         const ids = String(url.searchParams.get('mottaker') || url.searchParams.get('mottakere') || '').split(',').map((s) => s.trim()).filter(Boolean)
@@ -1419,6 +1462,19 @@ http
         const ms = await mottakere()
         console.error(`[tua-bro] vurder «${p.arbeid.name}»: ${kilder.length} kilder (${p.filer} filer), prompt ${p.standard ? 'standard' : 'egen'}`)
         return json(res, 200, { ...p, kilder, mottakere: ms.filter((m) => m.aktiv).map((m) => m.id), standardMottaker: ms.find((m) => m.standard)?.id || null })
+      }
+      // skive 4 (arb. 33): de to engangsgjennomgangene som knapper — POST /api/samtaler/traader og /api/samtaler/gjentatt {dryRun} → SSE start · rad · slutt (samme funksjoner som review.js)
+      if (req.method === 'POST' && (url.pathname === '/api/samtaler/traader' || url.pathname === '/api/samtaler/gjentatt')) {
+        const b = await readBody(req)
+        const dryRun = b.dryRun !== false
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        try {
+          const r = url.pathname.endsWith('traader') ? await traaderGjennomgang({ dryRun, på: hendelse }) : await gjentattGjennomgang({ dryRun, på: hendelse })
+          console.error(`[tua-bro] ${url.pathname.endsWith('traader') ? `gamle tråder → samtaler: ${r.antall} tråder · ${r.laget} laget` : `gjentatte kjøringer: ${r.grupper} grupper · ${r.nye} nye · ${r.merket} merket`} · ${r.filer} filer${dryRun ? ' · DRY-RUN' : ''}`)
+        } catch (e) { hendelse('feil', { feil: e.message }) }
+        return res.end()
       }
       if (req.method === 'POST' && url.pathname === '/api/samtaler/gjennomgang') {
         const b = await readBody(req)

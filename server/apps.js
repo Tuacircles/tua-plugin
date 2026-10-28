@@ -24,7 +24,7 @@ import {
   linksFor, fileOf, sources, renderStatus, isVault, vaultClamp, hasExternalEdits,
 } from './store.js'
 import { lever, skjermerFor } from './motor.js'                                   // runde 3a: kortet gjennom motoren
-import { vendingerFor, antallVendinger, sistI, erTuaSamtale } from './samtale.js'   // skive 1 (arb. 33): Tua-samtaler som samtaler i kortet («4 vendinger, siste 27.10»)
+import { samtaleInfo, samtaleLinje } from './samtale.js'   // skive 1+4 (arb. 33): samtaler som samtaler i kortet («4 vendinger · siste 27.10 · gemma3 · konklusjon låst», lenke til #samtale/<id>)
 import { delingerFor, lenkerFor } from './deling.js'                               // runde 3b: delingen (lenke, mottakere, trukket) på en delingssak
 import { sidenSist, skalVise, trådFørst, instruksFor } from './dora.js'          // runde 3a: Tua → Claude
 
@@ -68,8 +68,11 @@ function atomCard(atoms, cur, level, context, { client = 'Claude' } = {}) {
     ...rel.sameTags.map((x) => ({ id: x.id, name: x.name, how: 'felles tagger' })),
   ].slice(0, 6)
   const instruks = instruksFor(cur.project)
+  const base = process.env.TUA_APP_URL || 'http://127.0.0.1:5274/'
+  const samtale = cur.kind === 'samtale' ? (() => { const i = samtaleInfo(atoms, cur, { base }); return { kilde: i.kilde, tua: i.tua, vendinger: i.vendinger, siste: date(i.siste), modeller: i.modeller, konklusjon: i.konklusjon, adresse: i.adresse, linje: samtaleLinje(i) } })() : null   // skive 4 (arb. 33)
   return {
     id: cur.id, name: lv.felt.navn, project: cur.project, convo: lv.felt.samtale, source: cur.source || '',
+    ...(samtale ? { samtale } : {}),
     date: date(cur.capturedAt), version: cur.version || 1, kind: cur.kind || 'capture', tags: cur.tags || [],
     level: eff, max, vault: isVault(cur), stale, clipped: lv.linje || '', shielded: lv.treff, logged: lv.logget,
     S: lv.felt.S, why: lv.felt.hvorfor,
@@ -81,7 +84,7 @@ function atomCard(atoms, cur, level, context, { client = 'Claude' } = {}) {
     builtBy: sources(atoms, cur).map((s) => ({ id: s.id, name: s.name, version: s.version, level: s.level, stale: s.stale, now: s.now, missing: s.missing })),
     renders: renderStatus(cur).map((r) => ({ format: r.format, path: r.url || r.path, ok: r.exists && !r.changed })),
     related: relItems,
-    address: process.env.TUA_APP_URL ? `${process.env.TUA_APP_URL}#atom/${cur.id}` : `http://127.0.0.1:5274/#atom/${cur.id}`,
+    address: samtale ? samtale.adresse : process.env.TUA_APP_URL ? `${process.env.TUA_APP_URL}#atom/${cur.id}` : `http://127.0.0.1:5274/#atom/${cur.id}`,   // en samtale åpnes i Arbeid (#samtale/<id>)
     claudeProject: first(ls, 'claude-project')?.href || '',
     file: fileOf(cur) || '',
     repo: first(ls, 'repo')?.href || '',
@@ -94,6 +97,7 @@ const atomText = (a) =>
   `Skjermet: ${a.shielded} (plassholdere som [Person A] — bruk dem uendret)${a.logged ? ' · utlevering logget' : ''}\n` +
   (a.builtBy.length ? `Bygget av: ${a.builtBy.map((s) => `[${s.id}] ${s.name} v${s.version}/${s.level}${s.stale ? ' ⚠' : ''}`).join(' · ')}\n` : '') +
   (a.deling ? `Delt med: ${a.deling.til.map((t) => t.navn).join(', ')} · nivå ${a.deling.nivå}${a.deling.trukket ? ' · TRUKKET TILBAKE' : ` · mottakersiden: ${a.deling.http} · som fil: ${a.deling.html}`}${a.deling.forespørsler ? ` · ${a.deling.forespørsler} forespørsel/-ler om hele` : ''}\n` : '') +
+  (a.samtale ? `${a.samtale.linje}\n` : '') +
   `Adresse: ${a.address}\n\n${a.text}`
 
 // ── «Åpne i …» fra kortet: samme faste liste som broen (V13). Aldri shell. macOS: open · Windows: explorer/rundll32 · Linux: xdg-open (platform.js)
@@ -172,16 +176,16 @@ export function registerApps(server, { client = 'Claude' } = {}) {
         id: a.id, name: sk.skjerm(a.name), project: a.project, date: date(a.capturedAt), version: a.version || 1, kind: a.kind || 'capture',
         S: S.level === 'S' ? sk.skjerm(S.text) : '', snippet: sk.skjerm(snippet || ''), max, tags: (a.tags || []).slice(0, 4),
         ...(tråd ? { thread: { svar: tråd.svar.length, konklusjon: tråd.konklusjon ? tråd.konklusjon.status : '' } } : {}),
-        ...(a.kind === 'samtale' ? (() => { const v = vendingerFor(atoms, a); return { samtale: { kilde: erTuaSamtale(a) ? 'Tua' : a.source || 'Claude', vendinger: antallVendinger(v), siste: date(sistI(a, v)) } } })() : {}),   // skive 1 (arb. 33)
+        ...(a.kind === 'samtale' ? (() => { const i = samtaleInfo(atoms, a, { base: process.env.TUA_APP_URL || 'http://127.0.0.1:5274/' }); return { samtale: { kilde: i.kilde, tua: i.tua, vendinger: i.vendinger, siste: date(i.siste), modeller: i.modeller, konklusjon: i.konklusjon, adresse: i.adresse, linje: samtaleLinje(i) } } })() : {}),   // skive 1+4 (arb. 33): samtalen fullt ut
       }))
       const prosjekt = project || context || ''
       const siden = skalVise(prosjekt) ? sidenSist(atoms, { prosjekt }) : null
-      const sidenSc = siden ? { prosjekt: siden.prosjekt, dager: siden.dager, lagret: siden.lagret, linjer: siden.linjer.map((l) => ({ slag: l.slag, id: l.id, tekst: sk.skjerm(l.tekst) })) } : null
+      const sidenSc = siden ? { prosjekt: siden.prosjekt, dager: siden.dager, lagret: siden.lagret, linjer: [...siden.linjer.map((l) => ({ slag: l.slag, id: l.id, tekst: sk.skjerm(l.tekst) })), ...(siden.samtaler ? [{ slag: 'samtale', id: siden.samtaler.siste.id, tekst: sk.skjerm(siden.samtaler.tekst), adresse: siden.samtaler.siste.adresse }] : [])] } : null   // skive 4: «Samtaler i Tua: N, siste «…»»
       const instruks = instruksFor(prosjekt)
       const sc = { mode: 'list', query: query || '', project: project || '', total: hits.total, items, ...(sidenSc ? { sidenSist: sidenSc } : {}), ...(instruks ? { instruks: instruks.tekst, instruksProsjekt: instruks.prosjekt } : {}) }
       const txt = (items.length
         ? `${hits.total} treff${query ? ` på «${query}»` : ''}${project ? ` i ${project}` : ''} (viser ${items.length}${hits.tråder ? `, ${hits.tråder} tråder fra Spør øverst` : ''}):\n` +
-          items.map((i) => `- [${i.id}] ${i.name} — ${i.project} · ${i.date}${i.thread ? ` · tråd: ${i.thread.svar} svar${i.thread.konklusjon ? `, konklusjon ${i.thread.konklusjon}` : ''}` : ''}${i.samtale ? ` · samtale ${i.samtale.kilde === 'Tua' ? 'i Tua' : `fra ${i.samtale.kilde}`}: ${i.samtale.vendinger} vendinger, siste ${i.samtale.siste}` : ''}${i.S ? `\n  ${i.S}` : ''}`).join('\n')
+          items.map((i) => `- [${i.id}] ${i.name} — ${i.project} · ${i.date}${i.thread ? ` · tråd: ${i.thread.svar} svar${i.thread.konklusjon ? `, konklusjon ${i.thread.konklusjon}` : ''}` : ''}${i.samtale ? `\n  ${i.samtale.linje}` : ''}${i.S ? `\n  ${i.S}` : ''}`).join('\n')
         : `Ingen treff${query ? ` på «${query}»` : ''}.`) +
         (sk.treff ? `\nSkjermet: ${sk.treff} (plassholdere — bruk dem uendret).` : '') +
         (siden ? `\n\n${sk.skjerm(siden.tekst)}` : '')

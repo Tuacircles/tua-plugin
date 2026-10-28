@@ -159,7 +159,7 @@ const kopier = async (tekst, knapp) => {
 }
 const instruksKnapp = (tekst) => { if (!tekst) return null; const b = el('button', { class: 'btn', type: 'button', title: 'Lim inn i Desktop-prosjektets «Project instructions»' }, 'Kopier instruksen'); b.addEventListener('click', () => kopier(tekst, b)); return b }
 // Runde 3a: «Siden sist i Tua» — det som er gjort i appen for prosjektet (Spør-tråder, delinger, filer lest inn), ved første kall i samtalen
-const SLAG = { tråd: 'Spør', deling: 'Delt', innlest: 'Lest inn' }
+const SLAG = { tråd: 'Spør', deling: 'Delt', innlest: 'Lest inn', samtale: 'Samtaler' }
 const sidenSistBlokk = (s) => s ? el('div', { class: 'siden' },
   el('div', { class: 'lbl' }, `Siden sist i Tua · ${s.dager} dager${s.prosjekt ? ' · ' + s.prosjekt : ''}`),
   ...(s.linjer.length ? s.linjer.map((l) => el('div', { class: 'sl' }, el('span', { class: 'chip' }, SLAG[l.slag] || l.slag), el('a', { onclick: () => call({ id: l.id, level: 'S' }) }, l.tekst))) : [el('p', { class: 'why' }, 'Ingenting nytt i appen.')]),
@@ -187,6 +187,7 @@ function renderAtom(a) {
     a.level !== 'S' && a.S ? el('p', { class: 's' }, a.S) : null,
     a.why ? el('p', { class: 'why' }, 'Hvorfor: ' + a.why) : null,
     a.clipped ? el('p', { class: 'clip' }, a.clipped) : null,
+    a.samtale ? el('p', { class: 'why samtale' }, `${a.samtale.tua ? 'Samtale i Tua' : 'Samtale fra ' + a.samtale.kilde} · ${a.samtale.vendinger} ${a.samtale.vendinger === 1 ? 'vending' : 'vendinger'} · siste ${a.samtale.siste}${a.samtale.modeller?.length ? ' · ' + a.samtale.modeller.join(', ') : ''}${a.samtale.konklusjon ? ' · konklusjon ' + a.samtale.konklusjon : ''} · `, el('a', { href: a.samtale.adresse, target: '_blank', rel: 'noopener' }, 'Fortsett i Tua ›')) : null,   // skive 4 (arb. 33)
     el('div', { class: 'row' }, seg,
       el('span', { class: 'meta', style: 'font-size:12px;color:var(--fg3)' },
         a.level === 'S' ? `ingress · M ${a.hasM ? 'finnes' : 'mangler'} · L ${a.lengthL} tegn` : `${LV[a.level]}${a.stale ? ' · ⚠ fra v' + a.stale : ''}`)),
@@ -227,6 +228,8 @@ function renderList(d) {
       return el('div', { class: 'hit' },
         el('div', { class: 'eyebrow' }, a.project, el('span', { class: 'meta' }, `· ${a.date}${a.kind === 'leveranse' ? ' · leveranse' : ''}${a.thread ? ` · tråd fra Spør: ${a.thread.svar} svar${a.thread.konklusjon ? ', konklusjon ' + a.thread.konklusjon : ''}` : ''}`)),
         el('h2', {}, el('a', { onclick: () => call({ id: a.id, level: 'S' }) }, a.name)),
+        // skive 4 (arb. 33): en samtale vises som samtale — vendinger, siste, modellene, konklusjon — med «Fortsett i Tua» til Arbeid (#samtale/<id>)
+        a.samtale ? el('p', { class: 'why samtale' }, `${a.samtale.tua ? 'Samtale i Tua' : 'Samtale fra ' + a.samtale.kilde} · ${a.samtale.vendinger} ${a.samtale.vendinger === 1 ? 'vending' : 'vendinger'} · siste ${a.samtale.siste}${a.samtale.modeller?.length ? ' · ' + a.samtale.modeller.join(', ') : ''}${a.samtale.konklusjon ? ' · konklusjon ' + a.samtale.konklusjon : ''} · `, el('a', { href: a.samtale.adresse, target: '_blank', rel: 'noopener' }, 'Fortsett i Tua ›')) : null,
         el('p', { class: 's' }, a.S || a.snippet || ''),
         a.snippet && a.S ? el('p', { class: 'why' }, '… ' + a.snippet) : null,
         el('div', { class: 'row' }, more, el('button', { class: 'btn', type: 'button', onclick: () => call({ id: a.id, level: 'S' }) }, 'Åpne kortet')),

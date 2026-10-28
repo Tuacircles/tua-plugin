@@ -93,14 +93,14 @@ if (args.includes('--fanget')) {
 }
 
 if (args.includes('--traader')) {
-  const { gamleTråder, gjørOmTråd } = await import('./samtale.js')
+  // skive 4 (arb. 33): samme funksjon som knappen «Gamle tråder → samtaler» i Innstillinger › Spør (POST /api/samtaler/traader)
+  const { traaderGjennomgang } = await import('./gjennomgang.js')
   const skriv = args.includes('--skriv')
-  const grupper = gamleTråder(atoms)
-  const alleSamtaler = atoms.filter((a) => a.kind === 'samtale'), tua = alleSamtaler.filter((a) => String(a.source || '') === 'Tua')
-  console.log(`${atoms.length} saker · ${alleSamtaler.length} samtale-saker (${tua.length} ført i Tua) · ${grupper.length} gamle Tua-tråder uten samtale-sak${skriv ? '' : ' · DRY-RUN, ingenting skrevet (legg til --skriv)'}`)
-  for (const g of grupper.slice(0, 30)) console.log(`  ${g.project} / «${g.convo}»  ${g.prompter.length} spørsmål · ${g.saker.length} saker får bygget_av → samtalen${g.hørerTil ? ' · hører til et arbeid' : ''}`)
-  if (grupper.length > 30) console.log(`  … og ${grupper.length - 30} til`)
-  if (skriv && grupper.length) { const laget = grupper.map((g) => gjørOmTråd(atoms, g)); const written = save(atoms); console.log(`\n${laget.length} samtale-saker laget · ${written} filer skrevet`) }
+  const r = await traaderGjennomgang({ atoms, dryRun: !skriv })
+  console.log(`${r.saker} saker · ${r.samtaler} samtale-saker (${r.tua} ført i Tua) · ${r.antall} gamle Tua-tråder uten samtale-sak${skriv ? '' : ' · DRY-RUN, ingenting skrevet (legg til --skriv)'}`)
+  for (const v of r.vis.slice(0, 30)) console.log(`  ${v.tekst}`)
+  if (r.vis.length > 30) console.log(`  … og ${r.vis.length - 30} til`)
+  if (skriv && r.laget) console.log(`\n${r.laget} samtale-saker laget · ${r.filer} filer skrevet`)
   else if (skriv) console.log('\nIngenting å skrive.')
   process.exit(0)
 }
@@ -108,14 +108,14 @@ if (args.includes('--traader')) {
 if (args.includes('--gjentatt')) {
   // skive 3 (arb. 33 §7, 28.10.2026): eksisterende gjentatte kjøringer (samme kortede tittel, prosjekt og kilde — Cowork-oppgaver som kjører daglig) får `gjentatt: true`,
   // alle unntatt den første i hver gruppe. DRY-RUN som standard; --skriv setter flagget (nøkler og innhold røres ikke — to økter er fortsatt to økter).
-  const { gjentatteKandidater } = await import('./import.js')
+  // skive 4: samme funksjon som knappen «Gjentatte kjøringer» i Innstillinger › Spør (POST /api/samtaler/gjentatt)
+  const { gjentattGjennomgang } = await import('./gjennomgang.js')
   const skriv = args.includes('--skriv')
-  const { grupper, nye, alt } = gjentatteKandidater(atoms)
-  const samtaler = atoms.filter((a) => a.kind === 'samtale')
-  console.log(`${atoms.length} saker · ${samtaler.length} samtale-saker · ${grupper.length} grupper med samme tittel, prosjekt og kilde · ${nye.length} ${skriv ? 'får' : 'ville fått'} gjentatt: true (${alt.length} alt merket)${skriv ? '' : ' · DRY-RUN, ingenting skrevet (legg til --skriv)'}`)
-  for (const g of grupper.slice(0, 30)) console.log(`  ${g.project} / «${g.tittel}»  ${g.antall} kjøringer · ${String(g.kilde).replace(/^Claude /, '')} · første ${new Date(g.første.createdAt || g.første.capturedAt).toLocaleDateString('no-NO')}`)
-  if (grupper.length > 30) console.log(`  … og ${grupper.length - 30} til`)
-  if (skriv && nye.length) { const { markDirty } = await import('./store.js'); for (const a of nye) { a.gjentatt = true; markDirty(atoms, a.id) } const written = save(atoms); console.log(`\n${nye.length} samtaler merket gjentatt · ${written} filer skrevet`) }
+  const r = await gjentattGjennomgang({ atoms, dryRun: !skriv })
+  console.log(`${r.saker} saker · ${r.samtaler} samtale-saker · ${r.grupper} grupper med samme tittel, prosjekt og kilde · ${r.nye} ${skriv ? 'får' : 'ville fått'} gjentatt: true (${r.alt} alt merket)${skriv ? '' : ' · DRY-RUN, ingenting skrevet (legg til --skriv)'}`)
+  for (const v of r.vis.slice(0, 30)) console.log(`  ${v.tekst}`)
+  if (r.vis.length > 30) console.log(`  … og ${r.vis.length - 30} til`)
+  if (skriv && r.merket) console.log(`\n${r.merket} samtaler merket gjentatt · ${r.filer} filer skrevet`)
   else if (skriv) console.log('\nIngenting å skrive.')
   process.exit(0)
 }

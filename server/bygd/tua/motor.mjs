@@ -3,6 +3,7 @@ import fs__default from 'node:fs';
 import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LONG_L, load, logDelivery, LEVELS, filesMode, FILES_ROOT, DATA_DIR, readConfig, clampLevel, maxLevel, isVault, levelOf, upsert, save } from './store.mjs';
+import { vendingerFor, standardVendinger, erSyntetiskId } from './samtale.mjs';
 import { hasKey, ollamaStatus, readKey } from './keychain.mjs';
 import { OLLAMA_VERT, OLLAMA_URL } from './ollama.mjs';
 import { løsMottakere as l_sMottakere, delingerFor, nyttToken, lenkerFor, eier, lagreDeling, registrerDeling, skrivMottakere } from './deling.mjs';
@@ -258,6 +259,19 @@ const SYSTEM = 'Du svarer på norsk, kort og presist. Teksten under «Kontekst»
   'plassholdere som [Person A], [E-post 1] eller [Adresse 1]. Det er skjermede opplysninger: bruk plassholderne uendret i svaret, ' +
   'og ikke gjett hva de står for.';
 const byggMelding = (melding, kontekst) => (kontekst ? `${melding.trim()}\n\n---\n\nKontekst\n\n${kontekst}` : melding.trim());
+// Skive 1 (arb. 33, V22): `messages` som EKTE samtale. Vendingene (alt skjermet) vekselvis user/assistant — to like roller etter hverandre slås sammen —
+// kildene (minimer) i den FØRSTE brukermeldingen slik byggMelding gjør, den nye meldingen sist. Begynner lista med et modellsvar, settes en kort
+// brukermelding først (Claude krever at første melding er fra brukeren), og kildene havner der. Uten vendinger: nøyaktig én melding, som før.
+function byggMeldinger({ vendinger = [], melding = '', kontekst = '' } = {}) {
+  const ut = [];
+  const legg = (role, tekst) => { const c = String(tekst || '').trim(); if (!c) return; const sist = ut.at(-1); if (sist && sist.role === role) sist.content += `\n\n${c}`; else ut.push({ role, content: c }); };
+  for (const v of vendinger) legg(v.rolle === 'bruker' ? 'user' : 'assistant', v.tekst);
+  legg('user', melding);
+  if (!ut.length) ut.push({ role: 'user', content: '' });
+  if (ut[0].role !== 'user') ut.unshift({ role: 'user', content: kontekst ? `(Fortsettelse av en samtale — tidligere svar følger.)\n\n---\n\nKontekst\n\n${kontekst}` : '(Fortsettelse av en samtale — tidligere svar følger.)' });
+  else if (kontekst) ut[0].content = byggMelding(ut[0].content, kontekst);
+  return ut
+}
 // Teksten slik den sendes, til tokens, ord, «se hva som sendes» og test-ekkoet: én melding = selve innholdet (som før); flere = merket per rolle.
 const tekstAv = (messages) => (messages.length === 1 ? messages[0].content : messages.map((m) => `[${m.role === 'user' ? 'Du' : 'Modellen'}]\n${m.content}`).join('\n\n'));
 const meldingerAv = ({ messages, melding, kontekst }) => (Array.isArray(messages) && messages.length ? messages : [{ role: 'user', content: byggMelding(melding || '', kontekst || '') }]);
@@ -406,6 +420,11 @@ function lagMottakere() {
   for (const m of liste) m.budsjett = budsjettFor(m.id);   // skive 1 (arb. 33): budsjettet i tokens per mottaker — standardVendinger kutter bakfra mot det
   return liste
 }
+// Skive 1: standardvalget av vendinger for én mottaker, med mottakerens tokens-anslag og budsjett (regelen bor i samtale.js, tallene her).
+function standardFor(vendinger, mottakerId, { reservert = 0 } = {}) {
+  const m = lagMottakere().find((x) => x.id === mottakerId) || { id: mottakerId, budsjett: budsjettFor(mottakerId) };
+  return standardVendinger(vendinger, m, { anslå: (t) => anslåTokens(t, m.id), reservert })
+}
 
 // Vurdereren (skive 6, V21): Forskjeller og konklusjonen skrives av standardmodellen lokalt — Ollama når den kjører, ellers Claude med nøkkel,
 // ellers ikke tilgjengelig med grunn. TUA_VURDERER overstyrer (testene setter «test»). Går gjennom de samme trinnene som spor():
@@ -497,6 +516,31 @@ async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, klient =
   if (!S) return { ...regel, av: 'regel', modell: r.modell, tokens, utlevert, grunn: `${m.label} ga ingen ingress — S og M er skrevet etter regler.` }
   return { S, M: M || (medM ? regel.M : ''), av, M_av: M ? av : medM ? 'regel' : null, modell: r.modell, tokens, utlevert, skjermet: { ...sk.antall } }
 }
+// Friksjon 15: «før du sender, ser du hva som sendes». Samme trinn som spor() fram til sendingen — minimer → sjekkTillatt per mottaker → skjerm → tokens —
+// men ingenting sendes, lagres eller logges, og kjent-personer-lista lærer ingenting. Svaret har samme form som hendelsen `skjermet` i spor(), pluss
+// `blokkert` {feil, detaljer, mottaker} når fail closed ville stoppet sendingen (da er `tekst` likevel med, så linja kan vise hva som ville gått).
+// Skive 1 (arb. 33, V22): vendingene som skal med — [{id, rolle: 'bruker'|'modell'}] i rekkefølge (id = prompt-/svar-saken; for importerte samtaler prompt-/capture-sakene).
+// Rollen leses av saken når den ikke er oppgitt. Vendingene minimeres IKKE (de er brukerens egne ord og modellens svar på dem) og går hele; en ukjent id stopper.
+// Vault: et svar bygget på en Vault-merket sak arver merket (V15) — det går aldri til en ekstern mottaker som vending (sjekkes i vendingerTillatt).
+// Skive 3 (arb. 33): en vending kan også være SYNTETISK (id v_<samtale8>_<n>) — en vending lest ut av en importert samtales transkript som ikke har egen sak.
+// Da hentes teksten fra transkriptet via samtalen (samtale.vendingAv), så `samtale` må være med i kallet. Bare det nye lagres (prompt- og svar-sak som peker på samtalen).
+function løsVendinger(atoms, vendinger = [], samtaleAtom = null) {
+  let transkript = null;   // vendingene fra samtalen, regnet én gang
+  return (Array.isArray(vendinger) ? vendinger : []).map((v) => {
+    const id = typeof v === 'string' ? v : v?.id;
+    if (erSyntetiskId(id)) {
+      if (!samtaleAtom) throw new MotorFeil(`vendingen ${id} er lest ut av et transkript — send samtalen (samtale) med i kallet`)
+      transkript = transkript || vendingerFor(atoms, samtaleAtom);
+      const t = transkript.find((x) => x.id === id);
+      if (!t) throw new MotorFeil(`fant ikke vendingen ${id} i samtalen «${samtaleAtom.name}»`)
+      return { id: t.id, rolle: t.rolle === 'bruker' ? 'bruker' : 'modell', tekst: t.L || '', name: `${t.rolle === 'bruker' ? 'Du' : t.modell || 'modellen'}: ${String(t.S || t.L || '').slice(0, 60)}`, version: t.versjon || 1, vault: !!t.vault, kind: 'vending', syntetisk: true }
+    }
+    const a = atoms.find((x) => x.id === id);
+    if (!a) throw new MotorFeil(`fant ikke vendingen ${id} i arkivet`)
+    const rolle = v?.rolle === 'bruker' || v?.rolle === 'modell' ? v.rolle : a.kind === 'prompt' ? 'bruker' : 'modell';
+    return { id: a.id, rolle, tekst: a.content || '', name: a.name, version: a.version || 1, vault: isVault(a), kind: a.kind || 'capture' }
+  })
+}
 function plukkJson(t) {
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
   for (const k of [fence?.[1], t]) {
@@ -562,6 +606,30 @@ function lever(atoms, sak, { nivå = 'L', mottaker = 'claude', tool = 'tua_get',
     logget = true;
   }
   return { nivå: eff, ønsket, maks, linje, felt, tekst, got, S, antall, treff: Object.values(antall).reduce((a, b) => a + b, 0), tokens, ord: ord(alt), logget, mottaker: m }
+}
+
+// Skive 4 (arb. 33, V22, 28.10.2026): EN SAMTALE til Claude-døra (tua_compose med `samtale`) — gjennom motoren som spor(): vendingene velges (de oppgitte, ellers
+// standardvalget for mottakeren: alt etter siste låste konklusjon, kuttet bakfra mot budsjettet), Vault-merkede vendinger holdes utenfor hos en ekstern mottaker (fail
+// closed, med linje — ikke en feil, resten går), hver vending skjermes med samme kobling som resten av svaret, og `messages` bygges med byggMeldinger slik modellen
+// ville fått dem. Returnerer { samtale, vendinger: [{id, rolle}], messages (skjermet), tekst (markdown: **user:** / **assistant:**-blokker), standard, utenfor,
+// vault: [navn…], linje }. Logger ingenting selv — kalleren skriver én Utlevert-linje med `vendinger` og `samtale` (som spor).
+function leverSamtale(atoms, samtale, { vendinger = null, mottaker = 'claude', sk = null } = {}) {
+  const m = typeof mottaker === 'string' ? endepunkt(mottaker) : mottaker;
+  const alle = vendingerFor(atoms, samtale);
+  const std = standardFor(alle, m.id);
+  const ønsket = Array.isArray(vendinger) && vendinger.length ? vendinger.map((v) => (typeof v === 'string' ? v : v?.id)).filter(Boolean) : std.vendinger;
+  const rekkefølge = new Map(alle.map((v, i) => [v.id, i]));
+  const ukjent = ønsket.filter((id) => !rekkefølge.has(id));
+  if (ukjent.length) throw new MotorFeil(`${ukjent.length === 1 ? 'vendingen' : 'vendingene'} ${ukjent.join(', ')} finnes ikke i samtalen «${samtale.name}»`)
+  const løst = løsVendinger(atoms, [...ønsket].sort((a, b) => rekkefølge.get(a) - rekkefølge.get(b)), samtale);
+  const vault = m.local ? [] : løst.filter((v) => v.vault);
+  const med = løst.filter((v) => !vault.includes(v));
+  sk = sk || skjermerFor(atoms);
+  const vendS = med.map((v) => ({ ...v, tekst: sk.skjerm(v.tekst) }));
+  const messages = vendS.length ? byggMeldinger({ vendinger: vendS }) : [];
+  const tekst = messages.map((x) => `**${x.role}:**\n\n${x.content}`).join('\n\n');
+  const linje = vault.length ? `${vault.length === 1 ? 'Én vending' : `${vault.length} vendinger`} (${vault.map((v) => `«${v.name}»`).join(', ')}) bygger på Vault-merket innhold og er holdt utenfor hos ${m.label} (V15, fail closed).` : '';
+  return { samtale: samtale.id, vendinger: med.map(({ id, rolle }) => ({ id, rolle })), messages, tekst, standard: std, valgtStandard: !(Array.isArray(vendinger) && vendinger.length), antall: alle.length, utenfor: std.utenfor, vault: vault.map((v) => v.name), linje, mottaker: m }
 }
 
 // del(): «del med …» — runde 3a laget delingssaken; runde 3b (planen videre §4 3b, Erik: kollegaer først) gjør mottakeren til en PERSON og gir delingen en
@@ -639,4 +707,4 @@ function del(atoms, { ids = [], til, nivå = 'S', prosjekt, klient = 'Claude', c
 }
 const fmtTid = (d) => d.toLocaleString('no-NO', { dateStyle: 'short', timeStyle: 'short' });
 
-export { anslåTokens, del, endepunkt, lever, maksNivå, ord, skjermerFor, skrivNivåer };
+export { MotorFeil, anslåTokens, del, endepunkt, lever, leverSamtale, maksNivå, ord, skjermerFor, skrivNivåer };

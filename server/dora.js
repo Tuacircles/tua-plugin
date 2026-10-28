@@ -13,6 +13,7 @@
 // Bare lageret importeres (ingen keychain, ingen modell) så hooken kan bruke fila på under et sekund.
 
 import { tråder, statusOf, fmtTime, projectOf, projects } from './store.js'
+import { erTuaSamtale, samtaleInfo } from './samtale.js'   // skive 4 (arb. 33): «Samtaler i Tua: N, siste «tittel»» i Siden sist
 
 const DAG = 864e5
 const same = (x, y) => String(x || '').toLowerCase() === String(y || '').toLowerCase()
@@ -51,12 +52,16 @@ export function sidenSist(atoms, { prosjekt = '', dager = 7, nå = Date.now(), m
     ...delinger.map((d) => ({ slag: 'deling', id: d.id, tekst: d.tekst, sist: d.sist })),
     ...innlest.map((i) => ({ slag: 'innlest', id: i.id, tekst: i.tekst, sist: i.sist })),
   ].sort((x, y) => y.sist - x.sist).slice(0, maks)
-  const noe = linjer.length + lagret.length > 0
+  // skive 4 (arb. 33, V22): samtalene ført i Tua (samtale-saker med kilde Tua) rørt i perioden — én linje «Samtaler i Tua: N, siste «tittel»» med lenke til Arbeid
+  const tuaSamtaler = atoms.filter((a) => erTuaSamtale(a) && inne(a) && ny(a)).map((a) => samtaleInfo(atoms, a, { base: APP_BASE() })).sort((x, y) => y.siste - x.siste)
+  const samtaler = tuaSamtaler.length ? { antall: tuaSamtaler.length, siste: tuaSamtaler[0], tekst: `Samtaler i Tua: ${tuaSamtaler.length}, siste «${kort(tuaSamtaler[0].tittel)}» (${tuaSamtaler[0].vendinger} ${tuaSamtaler[0].vendinger === 1 ? 'vending' : 'vendinger'}${tuaSamtaler[0].modeller.length ? `, ${tuaSamtaler[0].modeller.join(', ')}` : ''}) · fortsett: ${tuaSamtaler[0].adresse}` } : null
+  const noe = linjer.length + lagret.length > 0 || !!samtaler
   const hode = `Siden sist i Tua (${dager} dager${prosjekt ? `, ${prosjekt}` : ', alle prosjekter'})`
-  const rader = [...linjer.map((l) => `- ${l.tekst} [${l.id}]`), ...(lagret.length ? [`- ${lagret.length} ${lagret.length === 1 ? 'sak' : 'saker'} lagret med vilje (${lagret.slice(0, 3).map((a) => `«${kort(a.name, 40)}»`).join(', ')}${lagret.length > 3 ? ', …' : ''})`] : [])]
+  const rader = [...linjer.map((l) => `- ${l.tekst} [${l.id}]`), ...(samtaler ? [`- ${samtaler.tekst} [${samtaler.siste.id}]`] : []), ...(lagret.length ? [`- ${lagret.length} ${lagret.length === 1 ? 'sak' : 'saker'} lagret med vilje (${lagret.slice(0, 3).map((a) => `«${kort(a.name, 40)}»`).join(', ')}${lagret.length > 3 ? ', …' : ''})`] : [])]
   const tekst = !noe ? `${hode}: ingenting nytt i appen.` : `${hode}:\n${rader.join('\n')}`
-  return { prosjekt, dager, tråder: tr, delinger, innlest, lagret: lagret.length, linjer, noe, tekst }
+  return { prosjekt, dager, tråder: tr, delinger, innlest, lagret: lagret.length, samtaler, linjer, noe, tekst }
 }
+const APP_BASE = () => (process.env.TUA_APP_URL || 'http://127.0.0.1:5274/').replace(/\/?$/, '/')
 
 // Første kall i en samtale: serveren lever på tvers av samtaler i Desktop, så «første» er per prosess og per prosjekt, og igjen etter 30 min stillhet.
 const vist = new Map()

@@ -9,8 +9,12 @@
 // motoren (skjermet tekst tilbake, originalene i leveransen, én Utlevert-linje med alle kildene) · tua_share lager delingssak med riktig nivå, Vault → S,
 // forhåndsvis uten lagring/logg, Utlevert-linje · tua_search legger Spør-tråder øverst, holder fanget/drift utenfor, skjermer treffene, Siden sist ved første
 // kall · kortet får sidenSist, instruksen og klippet-linja · SessionStart-hooken skriver Siden sist · dora.sidenSist/trådFørst holder drift utenfor.
+// Skive 4 (arb. 33, V22): Claude-døra viser samtaler fullt ut — tua_search/kortet sier «Samtale i Tua: N vendinger · siste · modellene · konklusjon · fortsett i Tua: …#samtale/<id>»,
+// tua_get på en samtale-sak har linja og adressen #samtale/, tua_compose(samtale) gir vendingene som user/assistant-blokker gjennom motoren (standardvalg eller oppgitte,
+// Vault utenfor hos ekstern, skjermet) med én Utlevert-linje med vendinger og samtale, Siden sist har «Samtaler i Tua: N, siste «…»».
 process.env.TUA_KEYCHAIN_PREFIX = 'tua-test-finnes-ikke'
 process.env.TUA_BRIDGE_VAKTER = '0'
+process.env.TUA_TESTMOTTAKERE = '3'   // skive 4: Tua-samtalen under føres mot test (ekstern-lik) og testlokal (lokal) — aldri en modell
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -192,14 +196,64 @@ let n0kort
   const { text } = await call('tua_setup', {})
   ok('tua_setup: «kopier instruksen» med Desktop-uuid og teksten', /kopier instruksen: prosjektet «Testprosjekt»/.test(text) && /Spør Tua først/.test(text), text.match(/kopier instruksen[^\n]*/)?.[0])
 }
+// 9) skive 4 (arb. 33): en samtale ført i Tua (to vendinger mot test gjennom motoren) — slik Claude-døra viser og leverer den
+{
+  const { spor } = motor
+  const r1 = await spor({ melding: `Hva foreslo ${PERSON} om lageret?`, saker: [{ id: vanlig.id, nivå: 'S' }], mottaker: 'test', prosjekt: P })
+  await new Promise((r) => setTimeout(r, 1100))   // vendingene sorteres på sekund
+  const r2 = await spor({ melding: 'Og hva koster det?', saker: [], mottaker: 'test', prosjekt: P, samtale: r1.samtale, vendinger: [{ id: r1.prompt, rolle: 'bruker' }, { id: r1.svar, rolle: 'modell' }] })
+  const sam = load().find((a) => a.id === r1.samtale)
+  ok('skive 4: Tua-samtalen finnes som samtale-sak (kilde Tua, 2 vendinger)', sam && sam.kind === 'samtale' && sam.source === 'Tua' && r2.samtale === r1.samtale, sam?.levels?.S?.text)
+  // dora.sidenSist: «Samtaler i Tua: 1, siste «…»»
+  const ss = dora.sidenSist(load(), { prosjekt: P })
+  ok('sidenSist: «Samtaler i Tua: 1, siste «Hva foreslo …»» med vendinger, modellen og fortsett-lenka — og Spør-trådene er fortsatt egne linjer', ss.samtaler?.antall === 1 && /^Samtaler i Tua: 1, siste «Hva foreslo/.test(ss.samtaler.tekst) && /\(2 vendinger, Test\) · fortsett: http:\/\/127\.0\.0\.1:5274\/#samtale\//.test(ss.samtaler.tekst) && ss.tekst.includes('- Samtaler i Tua: 1') && ss.tråder.length >= 2, ss.samtaler?.tekst)
+  // tua_search: samtalen som samtale, med hele linja
+  const sø = await call('tua_search', { query: 'lageret', project: P, limit: 25 })
+  const linje = sø.text.split('\n').find((l) => /Samtale i Tua:/.test(l)) || ''
+  ok('tua_search: samtalen vises som samtale — «Samtale i Tua: 2 vendinger · siste <dato> · Test · fortsett i Tua: …#samtale/<id>»', /Samtale i Tua: 2 vendinger · siste \d{1,2}\.\d{1,2}\.\d{4} · Test · fortsett i Tua: http:\/\/127\.0\.0\.1:5274\/#samtale\//.test(linje) && linje.includes(sam.id), linje)
+  ok('tua_search: svaret er skjermet (ingen originaler)', ingenOriginaler(sø.text))
+  // kortet: samtale-objektet med modeller, konklusjon, adresse og linje
+  const k = await call('tua_card', { query: 'lageret', project: P, limit: 10 })
+  const item = k.r.structuredContent?.items?.find((i) => i.id === sam.id)
+  ok('tua_card(query): samtalen har samtale {kilde Tua, tua, vendinger 2, siste, modeller [Test], konklusjon null, adresse #samtale/, linje}', item?.samtale && item.samtale.tua === true && item.samtale.vendinger === 2 && item.samtale.modeller.join() === 'Test' && item.samtale.konklusjon === null && item.samtale.adresse.endsWith(`#samtale/${sam.id}`) && /Samtale i Tua: 2 vendinger/.test(item.samtale.linje) && k.text.includes('fortsett i Tua:'), JSON.stringify(item?.samtale))
+  const kk = await call('tua_card', { id: sam.id })
+  const ka = kk.r.structuredContent?.atom
+  ok('tua_card(id) på samtalen: samtale-objektet og adressen til Arbeid (#samtale/<id>), linja i teksten', ka?.samtale?.vendinger === 2 && ka.address.endsWith(`#samtale/${sam.id}`) && /Samtale i Tua: 2 vendinger/.test(kk.text), ka?.address)
+  // tua_get på samtalen: transkriptet på nivå, linja, adressen
+  const g = await call('tua_get', { id: sam.id, level: 'S' })
+  ok('tua_get(samtale, S): S = siste vending, linja «Samtale i Tua: 2 vendinger …», hint om tua_compose(samtale=…), adressen er #samtale/', /Nivå: S/.test(g.text) && /Samtale i Tua: 2 vendinger · siste/.test(g.text) && g.text.includes(`tua_compose(samtale=«${sam.id}»)`) && g.text.includes(`Adresse: http://127.0.0.1:5274/#samtale/${sam.id}`) && /Sist: Og hva koster det\?/.test(g.text), g.text.match(/Samtale i Tua[^\n]*/)?.[0])
+  const gl = await call('tua_get', { id: sam.id, level: 'L' })
+  // «Fil:»-linja er den lokale stien til fila (tittelen i filnavnet) — en peker for Finder/Code, ikke innhold; skjermes ikke (se STATUS skive 4 «Å vite»)
+  const utenSti = (t) => t.split('\n').filter((l) => !/^(Fil|Lenker|Repo \(Code\)): /.test(l)).join('\n')
+  ok('tua_get(samtale, L): hele transkriptet, skjermet (tittel, vendinger, relaterte)', /\*\*Du · /.test(gl.text) && /\*\*Test( · S)?:\*\*/.test(gl.text) && ingenOriginaler(utenSti(gl.text)) && /Relaterte · samme samtale: .*\[Person A\]/.test(gl.text), gl.text.match(/\*\*Test[^\n]{0,80}/)?.[0] + (ingenOriginaler(utenSti(gl.text)) ? '' : ' · ORIGINAL: ' + (utenSti(gl.text).split('\n').find((l) => !ingenOriginaler(l)) || '').slice(0, 160)))
+  // tua_compose med samtale: standardvalget, user/assistant-blokker, logget med vendinger og samtale
+  const n0 = utlevert().length
+  const c = await call('tua_compose', { samtale: sam.id, name: 'Samtalen — test', key: 'lev:samtale' })
+  ok('tua_compose(samtale): leveranse med 4 av 4 vendinger (standardvalget) som **user:**/**assistant:**-blokker, skjermet, samtale-linja med', /med 4 av 4 vendinger fra samtalen «Hva foreslo/.test(c.text) && /\(standardvalget\)/.test(c.text) && (c.text.match(/\*\*user:\*\*/g) || []).length === 2 && (c.text.match(/\*\*assistant:\*\*/g) || []).length === 2 && /\[Person A\]/.test(c.text) && ingenOriginaler(c.text.split('---').slice(1).join('---')) && /Samtale i Tua: 2 vendinger/.test(c.text), c.text.slice(0, 240))
+  const d = utlevert().at(-1)
+  ok('tua_compose(samtale): ÉN Utlevert-linje med samtalen som kilde (L), vendinger [{id, rolle}×4] og samtale — som spor', utlevert().length === n0 + 1 && d.tool === 'tua_compose' && d.samtale === sam.id && d.vendinger?.length === 4 && d.vendinger[0].rolle === 'bruker' && d.saker.some((x) => x.id === sam.id && x.level === 'L'), JSON.stringify(d))
+  const lev = load().find((a) => a.key === 'lev:samtale')
+  ok('tua_compose(samtale): leveransen i arkivet har originalene, bygget_av → samtalen, samtalen som convo', lev && lev.content.includes(PERSON) && lev.derivedFrom.some((x) => x.id === sam.id) && lev.convo === sam.name)
+  const c2 = await call('tua_compose', { samtale: r1.prompt, vendinger: [r1.prompt], ids: [kort.id], name: 'Samtalen — utvalg', level: 'S' })
+  ok('tua_compose(samtale = en sak i samtalen, vendinger = én, ids i tillegg): 1 av 4 vendinger (valgt), kilden først, én user-blokk', /1 av 4 vendinger/.test(c2.text) && !/standardvalget/.test(c2.text) && (c2.text.match(/\*\*user:\*\*/g) || []).length === 1 && !/\*\*assistant:\*\*/.test(c2.text) && c2.text.includes('## Kort sak lager') && utlevert().at(-1).vendinger?.length === 1, c2.text.slice(0, 200))
+  const c3 = await call('tua_compose', { samtale: sam.id, vendinger: ['v_finnes_ikke'], name: 'x' })
+  ok('tua_compose(samtale) med ukjent vending → tydelig feil, ingenting lagret', /finnes ikke i samtalen/.test(c3.text) && utlevert().length === n0 + 2)
+  const c4 = await call('tua_compose', { name: 'x' })
+  ok('tua_compose uten ids og samtale → beskjed', /Oppgi `ids`/.test(c4.text))
+  ok('tua_compose(samtale) på ukjent samtale → beskjed', /Fant ingen samtale/.test((await call('tua_compose', { samtale: 'a_finnes_ikke', name: 'x' })).text))
+  // Vault: et svar bygget på Vault-saken arver merket — holdes utenfor hos Claude (ekstern), med linje
+  const r3 = await spor({ melding: 'Hva står i den hemmelige avtalen?', saker: [{ id: vault.id, nivå: 'S' }], mottaker: 'testlokal', prosjekt: P, samtale: sam.id })
+  const c5 = await call('tua_compose', { samtale: sam.id, name: 'Samtalen — med vault', vendinger: [r3.prompt, r3.svar] })
+  ok('tua_compose(samtale): Vault-merket vending holdes utenfor hos Claude med linje (fail closed), spørsmålet går', /bygger på Vault-merket innhold og er holdt utenfor hos Claude/.test(c5.text) && /1 av 6 vendinger/.test(c5.text) && !/assistant:/.test(c5.text.split('---').slice(1).join('')) && utlevert().at(-1).vendinger.length === 1, c5.text.match(/Merk:[^\n]*/)?.[0])
+}
 await client.close()
 
-// 9) SessionStart-hooken i Code: én linje «Siden sist i Tua»
+// 10) SessionStart-hooken i Code: én linje «Siden sist i Tua»
 {
   const repo = path.join(HJEM, 'repo'); fs.mkdirSync(repo, { recursive: true })
   fs.writeFileSync(path.join(repo, '.tua-sync.json'), JSON.stringify({ project: P }))
   const r = spawnSync(process.execPath, [path.join(HERE, '..', 'hooks', 'tua-hook.mjs'), 'start'], { input: JSON.stringify({ cwd: repo, session_id: 'dora0001', hook_event_name: 'SessionStart' }), env: { ...process.env, TUA_CODE_HOME: path.join(HJEM, 'code-tom'), TUA_COWORK_ROOT: path.join(HJEM, 'cowork-tom') }, encoding: 'utf8' })
-  ok('hook start: skriver Siden sist i Tua for prosjektet, én linje', r.status === 0 && /Siden sist i Tua \(7 dager, Testprosjekt\): /.test(r.stdout) && /Spurt «Hva bør vi gjøre/.test(r.stdout) && /Lest inn «Lagerrapport 2026»/.test(r.stdout) && /Delt med Revisor/.test(r.stdout) && r.stdout.trim().split('\n').length === 1 && ingenOriginaler(r.stdout), r.stdout.match(/Siden sist[^]*/)?.[0].slice(0, 200) || r.stderr.slice(0, 200))
+  ok('hook start: skriver Siden sist i Tua for prosjektet, én linje — skjermet, med «Samtaler i Tua: 1, siste «…»»', r.status === 0 && /Siden sist i Tua \(7 dager, Testprosjekt\): /.test(r.stdout) && /Spurt «Hva bør vi gjøre/.test(r.stdout) && /Lest inn «Lagerrapport 2026»/.test(r.stdout) && /Delt med Revisor/.test(r.stdout) && /Samtaler i Tua: 1, siste «Hva foreslo \[Person A\]/.test(r.stdout) && r.stdout.trim().split('\n').length === 1 && ingenOriginaler(r.stdout), r.stdout.match(/Siden sist[^]*/)?.[0].slice(0, 300) || r.stderr.slice(0, 200))
 }
 
 console.log(feil ? `\n${feil} feil` : '\nalle grønne')

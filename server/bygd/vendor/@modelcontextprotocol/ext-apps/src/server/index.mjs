@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-27. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { EmbeddedResourceSchema, ResourceLinkSchema, CallToolResultSchema, ToolSchema, RequestIdSchema, ImplementationSchema, ContentBlockSchema } from '../../../sdk/types.mjs';
 import '../../../../zod-to-json-schema/parsers/string.mjs';
 import { union, literal, record, string, _undefined, object, boolean, array, number, unknown, any, never } from '../../../../zod/v4/classic/schemas.mjs';

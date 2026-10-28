@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-27. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { $constructor } from './core.mjs';
 import { lowercase, uppercase, integer } from './regexes.mjs';
 import { escapeRegex, nullish, getLengthableOrigin, floatSafeRemainder, NUMBER_FORMAT_RANGES } from './util.mjs';

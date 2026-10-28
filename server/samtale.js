@@ -150,6 +150,21 @@ export function vendingAv(atoms, id, samtale = null) {
 }
 export const antallVendinger = (vend) => vend.filter((v) => v.rolle === 'bruker').length
 export const sistI = (samtale, vend) => Math.max(samtale?.capturedAt || 0, ...vend.map((v) => v.tid || 0))
+// Skive 4 (arb. 33, 28.10.2026) — Claude-døra viser samtaler fullt ut: det kortet, tua_search, tua_get og Siden sist sier om en samtale-sak, regnet ÉN gang her.
+//   { id, tittel, prosjekt, kilde ('Tua' | 'Claude Code' | …), tua, vendinger (antall spørsmål), siste (ms), modeller: ['gemma3', 'Claude'], konklusjon: 'låst' | 'utkast' | null,
+//     syntetiske (vendinger lest ut av transkriptet uten egen sak), adresse: '#samtale/<id>' }
+export function samtaleInfo(atoms, samtale, { base = '' } = {}) {
+  const v = vendingerFor(atoms, samtale)
+  const konk = v.filter((x) => x.rolle === 'konklusjon')
+  return { id: samtale.id, tittel: samtale.name || navnAv(samtale) || 'Samtale', prosjekt: samtale.project, kilde: erTuaSamtale(samtale) ? KILDE_TUA : String(samtale.source || 'Claude'), tua: erTuaSamtale(samtale),
+    vendinger: antallVendinger(v), siste: sistI(samtale, v), modeller: [...new Set(v.filter((x) => x.rolle === 'modell').map((x) => kortModell(x.modell)).filter(Boolean))],
+    konklusjon: konk.some((k) => k.låst) ? 'låst' : konk.length ? 'utkast' : null, syntetiske: v.filter((x) => x.syntetisk).length, adresse: `${base}#samtale/${encodeURIComponent(samtale.id)}` }
+}
+// Én linje om samtalen, lik i tua_search, tua_get og kortet: «Samtale i Tua: 4 vendinger · siste 27.10.2026 · gemma3, Claude · konklusjon låst · fortsett: http://…#samtale/<id>»
+export function samtaleLinje(info) {
+  const dato = info.siste ? new Date(info.siste).toLocaleDateString('no-NO', { day: 'numeric', month: 'numeric', year: 'numeric' }) : '—'
+  return `Samtale ${info.tua ? 'i Tua' : `fra ${info.kilde}`}: ${info.vendinger} ${info.vendinger === 1 ? 'vending' : 'vendinger'} · siste ${dato}${info.modeller.length ? ` · ${info.modeller.join(', ')}` : ''}${info.konklusjon ? ` · konklusjon ${info.konklusjon}` : ''} · fortsett i Tua: ${info.adresse}`
+}
 
 // Standardvalget regnes HER, ikke i appen (plan §5): alt etter siste låste konklusjon, ellers alt; så bakfra til budsjettet er brukt. anslå(tekst) → tokens for mottakeren.
 export function standardVendinger(vend, mottaker = {}, { anslå = (t) => Math.round(String(t || '').length / 3.5), reservert = 0 } = {}) {

@@ -431,17 +431,30 @@ export function standardFor(vendinger, mottakerId, { reservert = 0 } = {}) {
 }
 // Lista til appen (GET /api/mottakere): uten send(), med status. Nøkkel: satt/ikke satt — aldri verdien.
 // standard (V18): lokal modell først når den finnes, ellers Claude når nøkkelen finnes, ellers ingen (test er aldri standard).
+// Skive 4 (arb. 33, 28.10.2026): standardmottakeren ved oppstart. Rett etter at broen starter kan Ollama.app ennå ikke svare (tjeneren er ikke oppe, eller modellen
+// lastes) — da sto Claude som standard et øyeblikk (skive 2 «Å vite» (3)). Nå er Ollama-statusen USIKKER til den har svart ja én gang, eller til prosessen har levd
+// TUA_OLLAMA_VENT ms (standard 20 s): så lenge den er usikker, får Ollama-raden `usikker: true`, ingen er standard, og appen viser «…» i modellbrikken og spør igjen.
+// Svarer Ollama ja, er den avgjort for resten av prosessens liv (en Ollama som stopper midt i dagen er bare «ikke klar», som før).
+const PROSESS_START = Date.now()
+let ollamaHarSvart = false
+export const OLLAMA_VENT_MS = () => (process.env.TUA_OLLAMA_VENT != null ? Math.max(0, Number(process.env.TUA_OLLAMA_VENT) || 0) : 20_000)
+export const ollamaAvgjort = (nå = Date.now()) => ollamaHarSvart || nå - PROSESS_START >= OLLAMA_VENT_MS()
 export async function mottakere() {
   const liste = await Promise.all(lagMottakere().map(async (m) => {
     const st = await m.status()
+    if (m.id === 'ollama' && st.klar) ollamaHarSvart = true
+    const usikker = m.id === 'ollama' && !st.klar && !ollamaAvgjort()
     return { id: m.id, label: m.label, endpoint: m.endpoint, modell: st.modell || st.modeller?.[0] || m.modell, trust: m.trust, local: !!m.local, test: !!m.test,
       nivå: standardNivå(m), nivåVault: standardNivå(m, { vault: true }),   // friksjon 15: standardnivået en sak får som kilde til denne mottakeren (vanlig sak / Vault-merket)
       tegnPerToken: TEGN_PER_TOKEN[m.id] || 3.5,                 // Spør-skjermens anslag før sending bruker samme faktor som motoren (skive 2)
       budsjett: m.budsjett || null,                               // skive 1 (arb. 33): tokens som får plass i ett kall — Sendes-linja og standardvalget av vendinger
-      ...(m.nøkkel ? { nøkkel: hasKey(m.id) ? 'satt' : 'ikke satt' } : {}), aktiv: st.klar, ...(st.hvorfor ? { hvorfor: st.hvorfor } : {}) }
+      ...(m.nøkkel ? { nøkkel: hasKey(m.id) ? 'satt' : 'ikke satt' } : {}), aktiv: st.klar, ...(st.hvorfor ? { hvorfor: st.hvorfor } : {}), ...(usikker ? { usikker: true } : {}) }
   }))
-  const std = liste.find((m) => m.local && m.aktiv) || liste.find((m) => m.id === 'claude' && m.aktiv)
-  return liste.map((m) => ({ ...m, standard: !!std && m.id === std.id }))
+  const usikker = liste.some((m) => m.usikker)
+  const std = usikker ? null : liste.find((m) => m.local && m.aktiv) || liste.find((m) => m.id === 'claude' && m.aktiv)
+  const ut = liste.map((m) => ({ ...m, standard: !!std && m.id === std.id }))
+  ut.usikker = usikker   // GET /api/mottakere sender flagget videre øverst i svaret
+  return ut
 }
 export const standardMottaker = async () => (await mottakere()).find((m) => m.standard)?.id || null
 
@@ -996,6 +1009,30 @@ export function lever(atoms, sak, { nivå = 'L', mottaker = 'claude', tool = 'tu
     logget = true
   }
   return { nivå: eff, ønsket, maks, linje, felt, tekst, got, S, antall, treff: Object.values(antall).reduce((a, b) => a + b, 0), tokens, ord: ord(alt), logget, mottaker: m }
+}
+
+// Skive 4 (arb. 33, V22, 28.10.2026): EN SAMTALE til Claude-døra (tua_compose med `samtale`) — gjennom motoren som spor(): vendingene velges (de oppgitte, ellers
+// standardvalget for mottakeren: alt etter siste låste konklusjon, kuttet bakfra mot budsjettet), Vault-merkede vendinger holdes utenfor hos en ekstern mottaker (fail
+// closed, med linje — ikke en feil, resten går), hver vending skjermes med samme kobling som resten av svaret, og `messages` bygges med byggMeldinger slik modellen
+// ville fått dem. Returnerer { samtale, vendinger: [{id, rolle}], messages (skjermet), tekst (markdown: **user:** / **assistant:**-blokker), standard, utenfor,
+// vault: [navn…], linje }. Logger ingenting selv — kalleren skriver én Utlevert-linje med `vendinger` og `samtale` (som spor).
+export function leverSamtale(atoms, samtale, { vendinger = null, mottaker = 'claude', sk = null } = {}) {
+  const m = typeof mottaker === 'string' ? endepunkt(mottaker) : mottaker
+  const alle = vendingerFor(atoms, samtale)
+  const std = standardFor(alle, m.id)
+  const ønsket = Array.isArray(vendinger) && vendinger.length ? vendinger.map((v) => (typeof v === 'string' ? v : v?.id)).filter(Boolean) : std.vendinger
+  const rekkefølge = new Map(alle.map((v, i) => [v.id, i]))
+  const ukjent = ønsket.filter((id) => !rekkefølge.has(id))
+  if (ukjent.length) throw new MotorFeil(`${ukjent.length === 1 ? 'vendingen' : 'vendingene'} ${ukjent.join(', ')} finnes ikke i samtalen «${samtale.name}»`)
+  const løst = løsVendinger(atoms, [...ønsket].sort((a, b) => rekkefølge.get(a) - rekkefølge.get(b)), samtale)
+  const vault = m.local ? [] : løst.filter((v) => v.vault)
+  const med = løst.filter((v) => !vault.includes(v))
+  sk = sk || skjermerFor(atoms)
+  const vendS = med.map((v) => ({ ...v, tekst: sk.skjerm(v.tekst) }))
+  const messages = vendS.length ? byggMeldinger({ vendinger: vendS }) : []
+  const tekst = messages.map((x) => `**${x.role}:**\n\n${x.content}`).join('\n\n')
+  const linje = vault.length ? `${vault.length === 1 ? 'Én vending' : `${vault.length} vendinger`} (${vault.map((v) => `«${v.name}»`).join(', ')}) bygger på Vault-merket innhold og er holdt utenfor hos ${m.label} (V15, fail closed).` : ''
+  return { samtale: samtale.id, vendinger: med.map(({ id, rolle }) => ({ id, rolle })), messages, tekst, standard: std, valgtStandard: !(Array.isArray(vendinger) && vendinger.length), antall: alle.length, utenfor: std.utenfor, vault: vault.map((v) => v.name), linje, mottaker: m }
 }
 
 // del(): «del med …» — runde 3a laget delingssaken; runde 3b (planen videre §4 3b, Erik: kollegaer først) gjør mottakeren til en PERSON og gir delingen en

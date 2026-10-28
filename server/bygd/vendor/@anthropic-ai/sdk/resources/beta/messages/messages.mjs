@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-27. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { Batches } from './batches.mjs';
 import { APIResource } from '../../../core/resource.mjs';
 import { MODEL_NONSTREAMING_TOKENS } from '../../../internal/constants.mjs';
