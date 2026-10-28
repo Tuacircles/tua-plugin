@@ -115,6 +115,16 @@ fs.writeFileSync(øktfil, [linje('user', P1, 0), linje('assistant', A1, 1), linj
   ok('fila i arkivet har den nye ingressen (S) og S_av: regel', fil.includes('Sist: Og hva er anslaget') && /S_av: "regel"/.test(fil))
 }
 
+// ── Kildefarger (28.10.2026): regler.kildeKlasse — én klasse per leverandør, ingen for Tua/Erik/test ─────────────────────────────
+{
+  const kk = regler.kildeKlasse
+  ok('kildeKlasse: Claude-kildene (Claude, Claude Code · sync, Cowork, Desktop, Anthropic, modellnavn) → kf-claude', ['Claude', 'Claude Code · sync', 'Claude Cowork', 'Claude Desktop', 'Claude (Anthropic)', 'claude-sonnet-4-5'].every((s) => kk(s) === 'kf kf-claude'))
+  ok('kildeKlasse: ChatGPT, Codex, OpenAI (GPT), gpt-5.5 → kf-gpt', ['ChatGPT', 'Codex', 'OpenAI (GPT)', 'gpt-5.5'].every((s) => kk(s) === 'kf kf-gpt'))
+  ok('kildeKlasse: Gemini → kf-gemini, Ollama (lokal)/gemma3:4b → kf-lokal, Mistral → kf-mistral, Perplexity → kf-perplexity', kk('Gemini') === 'kf kf-gemini' && kk('Ollama (lokal)') === 'kf kf-lokal' && kk('gemma3:4b', 'Ollama (lokal)') === 'kf kf-lokal' && kk('Mistral') === 'kf kf-mistral' && kk('Perplexity') === 'kf kf-perplexity')
+  ok('kildeKlasse: Tua, Erik, Test (ekko), tomt → ingen tone', ['Tua', 'Erik', 'Test (ekko — sender ingenting)', '', null, undefined].every((s) => kk(s) === ''))
+  ok('kildeKlasse: flere navn slås sammen — modellen vinner ikke over kilden, men tom kilde + modell gir modellens farge', kk(null, 'Claude') === 'kf kf-claude' && kk('ekko', 'Test (ekko)') === '')
+}
+
 // ── Runde 1 — lette og rydde (arbeidsstykke 32 §6, 24.10.2026): reglene appen deler (tua2-sandbox/src/regler.js), tråder i lageret, PDF-tittel ─
 {
   const T0 = Date.parse('2026-10-24T12:00:00+02:00'), T = (h) => T0 - h * 36e5
