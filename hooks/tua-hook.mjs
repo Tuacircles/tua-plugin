@@ -49,7 +49,7 @@ const dora = await import(mod('dora.js'))                                     //
 const { posix, insideTmp } = await import(mod('platform.js'))
 const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState, mergeGa } = store
 const arb = await import(mod('arbeid.js'))                                   // friksjon 20: arbeidet som samler — kobling og forslag
-const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, historyCounts, sha8, promptKey, worthKeeping, promptTitle, promptL, firstSentence, samtaleS, samtaleM, forelderAv, isTuaCommand } = imp
+const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, pendingCodexSessions, historyCounts, sha8, promptKey, worthKeeping, promptTitle, promptL, firstSentence, samtaleS, samtaleM, forelderAv, isTuaCommand } = imp
 
 // 0.5.1: innstillingen «arkivmappe» → ~/.tua/config.json, samme fil og samme skrivemåte som tua_setup (store.chooseArchive),
 // så serveren finner arkivet uten TUA_FILES_ROOT — også i Cowork, der innstillingen aldri når serveren. Bare når innstillingen
@@ -112,15 +112,18 @@ try {
   if (mode === 'start') {
     // Påminnelse — standard i pluginen. Stdout fra SessionStart blir kontekst for Claude.
     const st = importState()
-    const lastCode = st.code?.at || 0, lastCowork = st.cowork?.at || 0
-    const pending = pendingCodeSessions(lastCode), pendingCw = pendingCoworkSessions(lastCowork)
+    const lastCode = st.code?.at || 0, lastCowork = st.cowork?.at || 0, lastCodex = st.codex?.at || 0
+    const pending = pendingCodeSessions(lastCode), pendingCw = pendingCoworkSessions(lastCowork), pendingCx = pendingCodexSessions(lastCodex)
     const inbox = inboxPending()
     const days = lastCode ? Math.floor((Date.now() - lastCode) / DAYS) : null
     const daysCw = lastCowork ? Math.floor((Date.now() - lastCowork) / DAYS) : null
+    const daysCx = lastCodex ? Math.floor((Date.now() - lastCodex) / DAYS) : null
     const parts = []
     if (inbox.length) parts.push(`${inbox.length} fil${inbox.length === 1 ? '' : 'er'} venter i Innboks (${inbox.join(', ')}) — de importeres av serveren når den starter, eller med tua_import(kilde=innboks)`)
     if (pending && (days === null || days >= 7)) parts.push(`${pending} Code-økt${pending === 1 ? '' : 'er'} er ikke tatt med i Tua${days === null ? ' (aldri importert)' : ` (siste import for ${days} dager siden)`} — tilby «ta med historikken» (tua_import kilde=code) én gang hvis det passer`)
     if (pendingCw && (daysCw === null || daysCw >= 7)) parts.push(`${pendingCw} Cowork-økt${pendingCw === 1 ? '' : 'er'} er ikke tatt med${daysCw === null ? ' (aldri importert)' : ` (siste import for ${daysCw} dager siden)`} — tua_import(kilde=cowork)`)
+    // 28.10.2026: Codex (CLI og ChatGPT-appen) har ingen hooks — importen er eneste fangst
+    if (pendingCx && (daysCx === null || daysCx >= 7)) parts.push(`${pendingCx} Codex-samtale${pendingCx === 1 ? '' : 'r'} (Codex CLI / ChatGPT-appen) er ikke tatt med${daysCx === null ? ' (aldri importert)' : ` (siste import for ${daysCx} dager siden)`} — tua_import(kilde=codex)`)
     // M17: Desktop-samtaler i cachen og dokumenter med AI-opphav — raske tall (forrige skanning / bare opphav), hooken har 10 s
     let hc = null
     try { hc = historyCounts({ quick: true, fresh: true }) } catch {}

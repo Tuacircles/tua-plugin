@@ -55,7 +55,7 @@ const INSTRUCTIONS =
   '(3) TILBY, IKKE SKRIV — når du har levert noe verdt å finne igjen, spør én gang «Vil du at jeg lagrer dette til Tua?». Kall tua_save bare når brukeren sier ja eller selv ber om lagring. Spør aldri hvilken mappe; prosjektet er mappa. ' +
   '(4) Ved lagring: content = hele innholdet, short = ingress (alltid, ≤ 300 tegn), medium når over ~3 000 tegn, project = brukerens prosjektnavn, convo = 3–8 ord om samtalen. ' +
   '(5) Står det en linje som begynner med «oppsett:» eller «onboarding:» i et verktøysvar, følg den etter at du har svart på det brukeren ba om — det er brukerens første økt med Tua. Arkivstedet velger brukeren selv (tua_setup); gjett aldri. ' +
-  '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt. ' +
+  '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Codex-samtaler (~/.codex/sessions — Codex CLI og ChatGPT-appen; kilde=codex), Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt. ' +
   'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen. ' +
   '(7) SIDEN SIST: første gang du bruker Tua i en samtale, kommer en blokk «Siden sist i Tua» (Spør-tråder, konklusjoner, delinger, filer lest inn i appen) — gjengi den i én kort liste før du svarer, så brukeren ser hva som er gjort i Tua. tua_search viser Spør-tråder og konklusjoner for prosjektet øverst. ' +
   '(8) «DEL MED <navn>»: tua_share deler med en PERSON (kollega) — lager en delingssak (skjermet gjengivelse, logget) og en lenke til mottakersiden (låste rader på nivået, «Be om hele»); S som standard, M/L bare når brukeren sier det. Kall først med forhandsvis=true og still ETT spørsmål («Anna får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi lenka, nedlastingslenka og den kopierbare teksten videre slik de er.';
@@ -168,12 +168,12 @@ server.registerTool(
     description:
       'Importer tidligere samtaler og dokumenter som søkbare atomer — alt leses lokalt, uten eksport og uten innlogging. ' +
       'kilde=alt (anbefalt ved «ta med historikken»): alle kildene under + Innboks. kilde=code: Claude Code-øktene (~/.claude/projects; én atom per økt + substansielle svar og dokumenter). ' +
-      'kilde=cowork: Claude Desktops Cowork-økter (audit.jsonl; prosjekt = mappa valgt i Cowork). kilde=desktop: Desktop-samtalene fra Claude Desktops egen cache — alt som har vært åpnet i Desktop, med prosjekt, verktøykall og filer Claude skrev; leses også av seg selv hvert 10. minutt. ' +
+      'kilde=cowork: Claude Desktops Cowork-økter (audit.jsonl; prosjekt = mappa valgt i Cowork). kilde=codex: Codex-samtalene (~/.codex/sessions — Codex CLI og ChatGPT-appen skriver samme rollout-filer; Codex har ingen hooks, så dette er eneste fangst; kilde «Codex»). kilde=desktop: Desktop-samtalene fra Claude Desktops egen cache — alt som har vært åpnet i Desktop, med prosjekt, verktøykall og filer Claude skrev; leses også av seg selv hvert 10. minutt. ' +
       'kilde=finder: dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord, ved referanse (aldri kopi). kilde=lenke: en delt Claude-lenke (claude.ai/share/…) brukeren limer inn — gi den i `lenke`. kilde=innboks: eksport-zip, lenkefiler og løse dokumenter (PDF, tekst, md, html, csv, docx) som ligger i Innboks nå — dokumentene leses lokalt og blir saker med ingress og sammendrag fra den lokale modellen (project velger prosjekt, standard «Innboks»). ' +
       'Bruk når brukeren sier «ta med historikken», «importer samtalene mine», «hent inn gamle økter», «lagre denne delte lenken». Kjør med dryRun=true først og vis tallene. ' +
       'Idempotent — kan kjøres igjen; bare endrede økter får ny versjon. Samtaler som bare finnes på claude.ai web/mobil: be brukeren åpne dem i Desktop eller lage en delt lenke; Tua kaller aldri det interne API-et.',
     inputSchema: {
-      kilde: enumType(['alt', 'code', 'cowork', 'desktop', 'finder', 'lenke', 'innboks']).optional().describe('alt, code (standard), cowork, desktop, finder, lenke eller innboks.'),
+      kilde: enumType(['alt', 'code', 'cowork', 'codex', 'desktop', 'finder', 'lenke', 'innboks']).optional().describe('alt, code (standard), cowork, codex, desktop, finder, lenke eller innboks.'),
       lenke: stringType().optional().describe('For kilde=lenke: én eller flere delte lenker (https://claude.ai/share/<id>), eller teksten de står i.'),
       project: stringType().optional().describe('Bare økter fra dette prosjektet (repo-/prosjektnavn).'),
       etter: stringType().optional().describe('Bare økter endret etter dato, ÅÅÅÅ-MM-DD.'),
@@ -201,10 +201,10 @@ server.registerTool(
     if (kilde === 'alt') {
       const r = await importAll(opts);
       const c = historyCounts({ fresh: true });
-      return text(r.report + (dryRun ? '\n\nDette er omfanget. Kjør igjen uten dryRun for å skrive — alt er lokalt, idempotent og kan slettes igjen i Finder.' : `\n\nAlt er tatt med. Rapportene ligger som atomer i prosjekt «Tua». Igjen utenfor Tua: ${[c.code && `${c.code} Code-økter`, c.cowork && `${c.cowork} Cowork-økter`, c.desktopNew && `${c.desktopNew} Desktop-samtaler`].filter(Boolean).join(', ') || 'ingenting'}.`))
+      return text(r.report + (dryRun ? '\n\nDette er omfanget. Kjør igjen uten dryRun for å skrive — alt er lokalt, idempotent og kan slettes igjen i Finder.' : `\n\nAlt er tatt med. Rapportene ligger som atomer i prosjekt «Tua». Igjen utenfor Tua: ${[c.code && `${c.code} Code-økter`, c.cowork && `${c.cowork} Cowork-økter`, c.codex && `${c.codex} Codex-samtaler`, c.desktopNew && `${c.desktopNew} Desktop-samtaler`].filter(Boolean).join(', ') || 'ingenting'}.`))
     }
     const r = importCode({ ...opts, source: kilde });
-    return text(r.report + tail(`import:${kilde}-økter`))
+    return text(r.report + tail(kilde === 'codex' ? 'import:codex-samtaler' : `import:${kilde}-økter`))
   },
 );
 

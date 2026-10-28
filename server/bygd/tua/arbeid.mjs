@@ -103,7 +103,7 @@ function arbeidForslag(atoms, { prosjekt = '', tittel = '', gren = '', forelder 
   const følgere = følgereAv(atoms);
   const iProsjekt = (a) => !prosjekt || same(a.project, prosjekt);
   const egenNøkkel = sid ? `okt:${sid}` : null;
-  const ikkeEgen = (a) => !egenNøkkel || (a.key !== egenNøkkel && a.key !== `samtale:${sid}`);
+  const ikkeEgen = (a) => !egenNøkkel || (a.key !== egenNøkkel && a.key !== `samtale:${sid}` && a.key !== `codex:${sid}`);
   const finnes = (id) => atoms.some((x) => x.id === id);
   if (forelder) {
     const f = atoms.find((a) => a.vert === forelder && a.kind === 'samtale' && ikkeEgen(a));

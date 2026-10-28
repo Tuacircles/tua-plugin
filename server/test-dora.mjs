@@ -252,7 +252,7 @@ await client.close()
 {
   const repo = path.join(HJEM, 'repo'); fs.mkdirSync(repo, { recursive: true })
   fs.writeFileSync(path.join(repo, '.tua-sync.json'), JSON.stringify({ project: P }))
-  const r = spawnSync(process.execPath, [path.join(HERE, '..', 'hooks', 'tua-hook.mjs'), 'start'], { input: JSON.stringify({ cwd: repo, session_id: 'dora0001', hook_event_name: 'SessionStart' }), env: { ...process.env, TUA_CODE_HOME: path.join(HJEM, 'code-tom'), TUA_COWORK_ROOT: path.join(HJEM, 'cowork-tom') }, encoding: 'utf8' })
+  const r = spawnSync(process.execPath, [path.join(HERE, '..', 'hooks', 'tua-hook.mjs'), 'start'], { input: JSON.stringify({ cwd: repo, session_id: 'dora0001', hook_event_name: 'SessionStart' }), env: { ...process.env, TUA_CODE_HOME: path.join(HJEM, 'code-tom'), TUA_COWORK_ROOT: path.join(HJEM, 'cowork-tom'), TUA_CODEX_HOME: path.join(HJEM, 'codex-tom') }, encoding: 'utf8' })
   ok('hook start: skriver Siden sist i Tua for prosjektet, én linje — skjermet, med «Samtaler i Tua: 1, siste «…»»', r.status === 0 && /Siden sist i Tua \(7 dager, Testprosjekt\): /.test(r.stdout) && /Spurt «Hva bør vi gjøre/.test(r.stdout) && /Lest inn «Lagerrapport 2026»/.test(r.stdout) && /Delt med Revisor/.test(r.stdout) && /Samtaler i Tua: 1, siste «Hva foreslo \[Person A\]/.test(r.stdout) && r.stdout.trim().split('\n').length === 1 && ingenOriginaler(r.stdout), r.stdout.match(/Siden sist[^]*/)?.[0].slice(0, 300) || r.stderr.slice(0, 200))
 }
 

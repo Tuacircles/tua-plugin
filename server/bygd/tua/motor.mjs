@@ -74,7 +74,7 @@ const anslåTokens = (t, mottaker) => Math.round(String(t || '').length / (TEGN_
 // har store vinduer (200k/128k; vi holder igjen plass til svaret). Ollama: modellens kontekstvindu slik Ollama kjører den — standard num_ctx er 4096 uansett
 // modell (gemma3:4b får ikke mer før det er satt opp), så 3 000 til det som sendes; rettes i ~/.tua/config.json → ollama.kontekst (eller TUA_OLLAMA_KONTEKST).
 // Test-mottakerne har et lite budsjett med vilje, så kuttet bakfra kan prøves uten modell. standardVendinger (samtale.js) kutter bakfra og sier hva som falt utenfor.
-const BUDSJETT = { claude: 150_000, mistral: 100_000, test: 1_500, test2: 1_500, testlokal: 1_500 };
+const BUDSJETT = { claude: 150_000, mistral: 100_000, openai: 150_000, test: 1_500, test2: 1_500, testlokal: 1_500 };
 const budsjettOllama = () => { const k = Number(process.env.TUA_OLLAMA_KONTEKST) || Number(readConfig().ollama?.kontekst) || 4096; return Math.max(500, Math.round(k * 0.75)) };
 const budsjettFor = (id) => (id === 'ollama' ? budsjettOllama() : BUDSJETT[id] || null);
 
@@ -360,6 +360,40 @@ async function sendMistral({ system, melding, kontekst, json, messages }, { onDe
   return { tekst, modell, usage, stopp }
 }
 
+// OpenAI (28.10.2026, etter arbeidsstykke 33: Erik la inn nøkkelen i Innstillinger, men motoren hadde ingen mottaker — nøkkelen ga ingen rad). Samme form som
+// Mistral: egen nøkkel fra Keychain (tua-ai-openai), lest i kallet og glemt etterpå; chat completions strømmet som SSE, usage i siste bit
+// (stream_options.include_usage); json → response_format json_object + JSON_KRAV. Modell: TUA_OPENAI_MODELL eller gpt-5.5 (nyeste daterte
+// utgave nøkkelen ga 28.10.2026; «gpt-6-…»-navnene var kodenavn uten dato). Aldri kalt i tester (nøkkelen finnes ikke under testprefikset).
+const OPENAI_MODELL = process.env.TUA_OPENAI_MODELL || 'gpt-5.5';
+async function sendOpenAI({ system, melding, kontekst, json, messages }, { onDel = () => {}, signal } = {}) {
+  let nøkkel = readKey('openai');
+  if (!nøkkel) throw new MotorFeil('Ingen API-nøkkel for OpenAI i Keychain. Legg den inn under Innstillinger › AI-mottakere (platform.openai.com › API keys).')
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST', signal, headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${nøkkel}` },
+    body: JSON.stringify({ model: OPENAI_MODELL, stream: true, stream_options: { include_usage: true }, ...(json ? { response_format: { type: 'json_object' } } : {}),
+      messages: [{ role: 'system', content: json ? system + JSON_KRAV : system }, ...meldingerAv({ messages, melding, kontekst })] }),
+  });
+  nøkkel = null;
+  if (!r.ok || !r.body) { const t = await r.text().catch(() => ''); throw new MotorFeil(`OpenAI svarte ${r.status}${t ? `: ${t.slice(0, 200)}` : ''}`) }
+  let tekst = '', rest = '', modell = OPENAI_MODELL, stopp = 'end_turn', usage = { input_tokens: null, output_tokens: null };
+  const dec = new TextDecoder();
+  for await (const chunk of r.body) {
+    rest += dec.decode(chunk, { stream: true });
+    const linjer = rest.split('\n'); rest = linjer.pop();
+    for (const l of linjer) {
+      const d = l.startsWith('data:') ? l.slice(5).trim() : '';
+      if (!d || d === '[DONE]') continue
+      let j; try { j = JSON.parse(d); } catch { continue }
+      const bit = j.choices?.[0]?.delta?.content;
+      if (typeof bit === 'string' && bit) { tekst += bit; onDel(bit); }
+      if (j.choices?.[0]?.finish_reason) stopp = j.choices[0].finish_reason;
+      if (j.model) modell = j.model;
+      if (j.usage) usage = { input_tokens: j.usage.prompt_tokens ?? null, output_tokens: j.usage.completion_tokens ?? null };
+    }
+  }
+  return { tekst, modell, usage, stopp }
+}
+
 // Test-mottakerne: ekkoer det som ville blitt sendt, i biter, uten å sende noe ut av maskinen. Trust 3 → S og M går, L blokkeres (fail closed kan prøves).
 // Som vurderer (TUA_VURDERER=test) svarer «test» med faste, tolkbare forskjeller (JSON over bokstavene A, B … i konteksten) og en fast konklusjon.
 // «test2» (bare med TUA_TESTMOTTAKERE=2, til testene) ekkoer ANNERLEDES enn «test» — overskriftene i konteksten og et tilleggspunkt — så to
@@ -410,6 +444,9 @@ function lagMottakere() {
     // Mistral (skive 6-tillegg): første ekstra skymodell. Raden blir av seg selv en rad i Innstillinger › AI-mottakere og en avkryssing i Spør.
     { id: 'mistral', label: 'Mistral', endpoint: 'api.mistral.ai', modell: MISTRAL_MODELL, trust: ts.mistral || null, nøkkel: true,
       status: async () => (hasKey('mistral') ? { klar: true } : { klar: false, hvorfor: 'ingen API-nøkkel i Keychain (Innstillinger › AI-mottakere)' }), send: sendMistral },
+    // OpenAI (28.10.2026): ChatGPT som mottaker gjennom samme motor — raden blir av seg selv en rad i Innstillinger › AI-mottakere og en avkryssing i Spør/Arbeid.
+    { id: 'openai', label: 'OpenAI (GPT)', endpoint: 'api.openai.com', modell: OPENAI_MODELL, trust: ts.openai || null, nøkkel: true,
+      status: async () => (hasKey('openai') ? { klar: true } : { klar: false, hvorfor: 'ingen API-nøkkel i Keychain (Innstillinger › AI-mottakere)' }), send: sendOpenAI },
     { id: 'test', label: 'Test (ekko — sender ingenting)', endpoint: 'lokalt', modell: 'ekko', trust: TEST_TRUST('Test', 'Tua selv: ekko-mottakeren i motor.js. Score 3 er satt lavt med vilje så fail closed kan prøves (L blokkeres).'), test: true,
       status: async () => ({ klar: true }), send: sendTest },
   ];

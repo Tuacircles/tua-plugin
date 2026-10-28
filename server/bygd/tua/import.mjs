@@ -27,8 +27,10 @@ import { kortTittel, samtaleM, samtaleS, nyttPar } from './samtaletekst.mjs';
 //      .url/.webloc/.txt. Siden hentes uten innlogging; innholdet fanges når lenken åpnes i Desktop (cachen).
 //   5. Finder (M17, finder.js): dokumenter i Nedlastinger/Dokumenter/Skrivebord med AI-opphav — ved referanse, aldri kopi.
 //   6. Tua/Innboks: en eksport (zip eller mappe) fra Claude (manifest + kategori-zip) eller ChatGPT (conversations.json).
+//   7. Codex-samtalene (28.10.2026): ~/.codex/sessions/<år>/<mnd>/<dag>/rollout-*.jsonl — Codex CLI og ChatGPT-appen (Codex Desktop) skriver samme
+//      fil. Codex har ingen hooks, så importen er eneste fangst. Kilde «Codex», nøkkel codex:<tråd-id>, tittel fra ~/.codex/session_index.jsonl.
 //
-//   node import.js --code|--cowork|--desktop|--finder|--alt [--project <navn>] [--etter <ÅÅÅÅ-MM-DD>] [--min-tegn <n>] [--dry-run]
+//   node import.js --code|--cowork|--codex|--desktop|--finder|--alt [--project <navn>] [--etter <ÅÅÅÅ-MM-DD>] [--min-tegn <n>] [--dry-run]
 //   node import.js --lenke <https://claude.ai/share/…> [--dry-run]
 //   node import.js <zip|mappe> [--dry-run] [--project <navn>] [--min-tegn <n>] [--etter <ÅÅÅÅ-MM-DD>]
 //   node import.js --innboks [--dry-run] [--project <navn>]   én gjennomgang av Innboks nå — eksporter, lenkefiler og (skive 7) løse dokumenter (PDF, tekst, md, html, csv, docx) → saker
@@ -54,6 +56,11 @@ const CODE_PROJECTS = path__default.join(process.env.TUA_CODE_HOME || os.homedir
 // <konto>/<rom>/local_<økt>.json er metadata (title, userSelectedFolders, createdAt, lastActivityAt, initialMessage);
 // <konto>/<rom>/local_<økt>/.claude/projects/<mappe>/<uuid>.jsonl er transkriptet. Bare lesing.
 const COWORK_ROOT = process.env.TUA_COWORK_ROOT || path__default.join(CLAUDE_APP_DIR, 'local-agent-mode-sessions');   // M18: per OS (platform.js)
+// Codex (28.10.2026): Codex CLI (`codex exec`, originator codex_exec) og ChatGPT-appen (originator «Codex Desktop» / codex_work_desktop) skriver samme
+// rollout-fil: ~/.codex/sessions/<år>/<mnd>/<dag>/rollout-<tid>-<tråd-id>.jsonl, én linje {timestamp, type, payload}. Trådens navn står i
+// ~/.codex/session_index.jsonl ({id, thread_name, updated_at}). TUA_CODEX_HOME peker testene til et falskt tre. Bare lesing.
+const CODEX_HOME = process.env.TUA_CODEX_HOME || path__default.join(os.homedir(), '.codex');
+const CODEX_SESSIONS = path__default.join(CODEX_HOME, 'sessions');
 
 // ── små hjelpere ────────────────────────────────────────────────────────────
 const ms = (v) => (v == null ? null : typeof v === 'number' ? (v < 1e12 ? v * 1000 : v) : Date.parse(v) || null);
@@ -275,9 +282,16 @@ function listCoworkSessions(root = COWORK_ROOT) {
 // source = 'code' (Claude Code, ~/.claude/projects) eller 'cowork' (Claude Desktop Cowork). Samme parser, samme atom-form.
 function importCode({ files = null, source = 'code', dryRun = false, project = null, minChars = DEFAULT_MIN, after = null, log = () => {}, skipSession = '' } = {}) {
   const t0 = Date.now();
-  const list = files ? files.map((f) => ({ file: f })) : source === 'cowork' ? listCoworkSessions() : listCodeSessions();
-  const srcLabel = source === 'cowork' ? 'Claude Cowork' : 'Claude Code';
-  const srcRoot = source === 'cowork' ? COWORK_ROOT : CODE_PROJECTS;
+  const list = files ? files.map((f) => ({ file: f })) : source === 'cowork' ? listCoworkSessions() : source === 'codex' ? listCodexSessions() : listCodeSessions();
+  const srcLabel = source === 'cowork' ? 'Claude Cowork' : source === 'codex' ? 'Codex' : 'Claude Code';
+  const srcRoot = source === 'cowork' ? COWORK_ROOT : source === 'codex' ? CODEX_SESSIONS : CODE_PROJECTS;
+  // Codex (28.10.2026): samme løkke, egen leser (parseCodexSession), eget nøkkelprefiks codex:<tråd-id>, svarene fra «Codex» (ikke Claude), ordene i UI «samtale»/«rollout-fil»
+  const codex = source === 'codex';
+  const samtaleKey = (sid) => (codex ? `codex:${sid}` : `samtale:${sid}`);
+  const enhet = codex ? 'Codex-samtaler' : `${srcLabel}-økter`;
+  const filOrd = codex ? 'rollout-filer' : 'øktfiler';
+  const svarKilde = codex ? 'Codex' : 'Claude';
+  const øktOrd = codex ? 'Codex-samtalen' : 'Code-økta';
   const atoms = load();
   const stats = { økter: list.length, nye: 0, oppdatert: 0, uendret: 0, korte: 0, filtrert: 0, svar: 0, filer: 0, datadump: 0, feil: 0, prompter: 0, prompterAlle: 0, korteprompter: 0 };
   const perProject = {};
@@ -291,10 +305,11 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
   };
   const count = (st) => { if (st === 'ny') stats.nye++; else if (st === 'oppdatert') stats.oppdatert++; else stats.uendret++; };
   const nyeSamtaler = [];   // skive 3 (arb. 33 §7): samtale-sakene laget i denne kjøringen — gjentatte kjøringer merkes etter løkka (merkGjentatte), uavhengig av rekkefølgen i lista
-  log(`${srcLabel}-økter: ${list.length} øktfiler i ${srcRoot}${dryRun ? ' · DRY-RUN' : ''}`);
-  for (const { file, over = {} } of list) {
+  log(`${enhet}: ${list.length} ${filOrd} i ${srcRoot}${dryRun ? ' · DRY-RUN' : ''}`);
+  for (let { file, over = {} } of list) {
     try {
-      const s = parseCodeSession(file);
+      const s = codex ? parseCodexSession(file) : parseCodeSession(file);
+      if (codex) over = { ...over, project: s.project, repo: s.repo };            // Codex: prosjekt fra cwd, men ChatGPT-appens new-chat-mapper er «Uten prosjekt» (ingen repo-lenke)
       if (over.id) s.id = over.id;                                              // Cowork: mappe-uuid-en er økt-id (M17)
       if (skipSession && s.id === skipSession) continue
       if (over.convo) { s.title = kortTittel(over.convo); s.convo = s.title; }   // Cowork: tittelen brukeren ser i Desktop — kortet etter samme regel som Code-samtalene (skive 3, arb. 33 §7: meta.title kan være hele prompten)
@@ -307,13 +322,13 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
       const repo = over.repo !== undefined ? over.repo : repoRootOf(s.cwd);
       const links = repo ? [{ kind: 'repo', href: repo, label: `Repo — ${proj}` }] : [];
       const drift = erTuaRepo(repo);                                            // runde 2d (03-avisen §5 E): en økt i Tua-repoet er en byggeøkt — drift, ikke spor
-      const header = `# ${s.convo}\n\n_${srcLabel} · ${s.turns} oppgaver · ${iso(s.first)}${s.last && iso(s.last) !== iso(s.first) ? ` – ${iso(s.last)}` : ''} · ${proj}${repo ? ` · ${repo}` : ''} · øktfil ${path__default.basename(file)}_\n\n`;
+      const header = `# ${s.convo}\n\n_${srcLabel}${s.klient ? ` (${s.klient})` : ''} · ${s.turns} oppgaver · ${iso(s.first)}${s.last && iso(s.last) !== iso(s.first) ? ` – ${iso(s.last)}` : ''} · ${proj}${repo ? ` · ${repo}` : ''} · ${codex ? 'rollout-fil' : 'øktfil'} ${path__default.basename(file)}_\n\n`;
       // friksjon 20 (4a): koblingen til et arbeid etter regelen — forelder (vert), gren (felles stamme) eller tittel; importen foreslår aldri (historikk skal ikke mase)
       const filerSkrevet = [...new Set([...s.files.keys(), ...s.edited])].filter((f) => !/\/(node_modules|\.tua)\//.test(f));
       const kobling = arbeidForslag(atoms, { prosjekt: proj, tittel: s.convo, gren: s.gren, forelder: s.forelder, sid: s.id });
       // friksjon 20: har hooken alt lagret samtalen (okt:<sid>), er DEN samtale-saken — importen lager ingen dublett, men fyller inn gren og kobling om de mangler
       const hookSak = atoms.find((a) => a.key === `okt:${s.id}`);
-      const nySamtale = !hookSak && !atoms.some((a) => a.key === `samtale:${s.id}`);   // skive 3 (arb. 33 §7): nye samtaler sjekkes for gjentatte kjøringer etter løkka (rekkefølgen i lista er nyeste først)
+      const nySamtale = !hookSak && !atoms.some((a) => a.key === samtaleKey(s.id));   // skive 3 (arb. 33 §7): nye samtaler sjekkes for gjentatte kjøringer etter løkka (rekkefølgen i lista er nyeste først)
       let atom, status;
       if (hookSak) {
         atom = hookSak; status = 'uendret'; stats.hook = (stats.hook || 0) + 1;
@@ -322,8 +337,8 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
         if (!atom.hørerTil && kobling.hørerTil) { atom.hørerTil = kobling.hørerTil; if (atom.hørerTilForslag !== undefined) atom.hørerTilForslag = ''; endret = true; }
         if (endret) markDirty(atoms, atom.id);
       } else ({ atom, status } = put({
-        key: `samtale:${s.id}`, kind: 'samtale', name: s.convo, content: header + s.transcript, project: proj, convo: s.convo, source: srcLabel, by: 'regel',
-        tags: ['samtale', source], links, short: samtaleS(s), medium: samtaleM({ ...s, filer: filerSkrevet, kilde: srcLabel }), summary: `${srcLabel}-økt importert fra ${path__default.basename(file)} (${s.turns} oppgaver).`, fanget: true, ...(drift ? { drift } : {}),   // S = siste vending (friksjon 9) · M etter regel (friksjon 20) · fanget (runde 2c): alt fra en samtalelogg er fanget til det løftes inn; filer Claude skrev (fil:) er dokumenter, med vilje
+        key: samtaleKey(s.id), kind: 'samtale', name: s.convo, content: header + s.transcript, project: proj, convo: s.convo, source: srcLabel, by: 'regel',
+        tags: ['samtale', source], links, short: samtaleS(s), medium: samtaleM({ ...s, filer: filerSkrevet, kilde: srcLabel }), summary: `${codex ? 'Codex-samtale' : `${srcLabel}-økt`} importert fra ${path__default.basename(file)} (${s.turns} oppgaver).`, fanget: true, ...(drift ? { drift } : {}),   // S = siste vending (friksjon 9) · M etter regel (friksjon 20) · fanget (runde 2c): alt fra en samtalelogg er fanget til det løftes inn; filer Claude skrev (fil:) er dokumenter, med vilje
         ...(s.gren ? { gren: s.gren } : {}), ...(kobling.hørerTil ? { hørerTil: kobling.hørerTil } : {}),
       }, s.last));
       if (nySamtale) nyeSamtaler.push(atom);
@@ -337,7 +352,7 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
         stats.prompterAlle++;
         const r = put({
           key: promptKey(s.id, p.prompt), kind: 'prompt', name: promptTitle(p.prompt), content: promptL(p.prompt), project: proj, convo: s.convo, source: srcLabel, by: 'regel',
-          tags: ['prompt', source], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i ${srcLabel}-økta «${s.convo}».`, fanget: true, ...(drift ? { drift } : {}),
+          tags: ['prompt', source], links, short: firstSentence(p.prompt), summary: `Spørsmål stilt i ${codex ? 'Codex-samtalen' : `${srcLabel}-økta`} «${s.convo}».`, fanget: true, ...(drift ? { drift } : {}),
         }, p.at || s.last);
         if (r.status !== 'uendret') stats.prompter++;
         for (const a of p.answers) promptFor.set(a, r.atom);
@@ -346,8 +361,8 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
         if (isDataDump(a)) { stats.datadump++; continue }
         const pa = promptFor.get(a) || null;
         const r = put({
-          key: `svar:${s.id.slice(0, 8)}:${sha8(a)}`, kind: 'capture', name: titleOf(a, `Svar i ${s.convo}`), content: a, project: proj, convo: s.convo, source: 'Claude', by: 'regel',
-          tags: ['svar', 'auto'], links, derivedFrom: [...(pa ? [{ id: pa.id, version: pa.version || 1, level: 'L' }] : []), ...derived], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i Code-økta «${s.convo}».`, fanget: true, ...(drift ? { drift } : {}),
+          key: `svar:${s.id.slice(0, 8)}:${sha8(a)}`, kind: 'capture', name: titleOf(a, `Svar i ${s.convo}`), content: a, project: proj, convo: s.convo, source: svarKilde, by: 'regel',
+          tags: ['svar', 'auto'], links, derivedFrom: [...(pa ? [{ id: pa.id, version: pa.version || 1, level: 'L' }] : []), ...derived], short: clip(firstPara(a), S_MAX), summary: `Substansielt svar i ${øktOrd} «${s.convo}».`, fanget: true, ...(drift ? { drift } : {}),
         }, s.last);
         if (r.status !== 'uendret') stats.svar++;
         if (pa) pa.ga = mergeGa(pa.ga, [{ id: r.atom.id, version: r.atom.version || 1 }]);
@@ -369,10 +384,10 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
   stats.gjentatt = merkGjentatte(atoms, nyeSamtaler);   // skive 3 (arb. 33 §7): samme tittel, prosjekt og kilde som en samtale som alt fantes → gjentatt: true på alle unntatt den eldste
   const projLine = Object.entries(perProject).sort((a, b) => b[1] - a[1]).map(([p, n]) => `${p} (${n})`).join(', ') || '—';
   const filters = [project && `prosjekt = ${project}`, `minst ${minChars} tegn`, after && `etter ${after}`].filter(Boolean).join(' · ');
-  const title = `Import: ${srcLabel}-økter`;
+  const title = `Import: ${enhet}`;
   const report = [
     `# ${title}`, '',
-    `${srcRoot} · ${list.length} øktfiler · ${new Date().toLocaleString('no-NO')}${dryRun ? ' · **dry-run, ingenting skrevet**' : ''}`, '',
+    `${srcRoot} · ${list.length} ${filOrd} · ${new Date().toLocaleString('no-NO')}${dryRun ? ' · **dry-run, ingenting skrevet**' : ''}`, '',
     `- **Samtaler:** ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret${stats.hook ? ` (${stats.hook} alt lagret av hooken — samme sak)` : ''}`,
     `- **Hoppet over:** ${stats.korte} under ${minChars} tegn${stats.filtrert ? ` · ${stats.filtrert} utenfor filter` : ''}${stats.tuaprat ? ` · ${stats.tuaprat} Tua-prat om Tua (samtaler som starter med /tua…)` : ''}`,
     `- **Egne atomer:** ${stats.svar} substansielle svar (≥ ${MIN_SVAR} tegn) · ${stats.filer} tekstdokumenter skrevet i øktene${stats.datadump ? ` · ${stats.datadump} data-dumper (mest tall) hoppet over` : ''}`,
@@ -382,27 +397,121 @@ function importCode({ files = null, source = 'code', dryRun = false, project = n
     ...(stats.gjentatt ? [`- **Gjentatte kjøringer (arb. 33 §7):** ${stats.gjentatt} ${stats.gjentatt === 1 ? 'samtale merket' : 'samtaler merket'} \`gjentatt\` — samme tittel, prosjekt og kilde som en samtale som alt fantes; vises som én linje med «N kjøringer»`] : []),
     `- **Filter:** ${filters}`,
     stats.feil ? `- **Feil:** ${stats.feil} (se loggen)` : null, '',
-    'Hver økt er ett atom (kind «samtale») med transkript av brukerens meldinger og Claudes svar (verktøyresultater er ikke med). ' +
-    'Hvert substansielt spørsmål er en egen sak (kind «prompt») koblet til svaret det ga (ga / bygget_av) — deles ikke som standard. ' +
-    `Svar og filer som er lagret av pluginens hooks har samme nøkler og dupliseres ikke. Øktfilene (${srcRoot}) er bare lest.`,
-    source === 'cowork' ? 'Kilde per økt: audit.jsonl (HMAC-signert strøm); økt-id = mappenavnet local_<uuid>.' : 'Desktop-samtaler fanges fra appens cache (tua_import kilde=desktop); web/mobil via delt lenke eller eksport i Innboks.',
+    (codex
+      ? 'Hver samtale er ett atom (kind «samtale») med transkript av brukerens spørsmål og Codex\' svar (systemtekst, verktøykall og resonnering er ikke med). ' +
+        'Hvert substansielt spørsmål er en egen sak (kind «prompt») koblet til svaret det ga (ga / bygget_av) — deles ikke som standard. ' +
+        `Codex har ingen hooks — importen er eneste fangst; kjør den igjen når det er nye samtaler. Rollout-filene (${srcRoot}) er bare lest.`
+      : 'Hver økt er ett atom (kind «samtale») med transkript av brukerens meldinger og Claudes svar (verktøyresultater er ikke med). ' +
+        'Hvert substansielt spørsmål er en egen sak (kind «prompt») koblet til svaret det ga (ga / bygget_av) — deles ikke som standard. ' +
+        `Svar og filer som er lagret av pluginens hooks har samme nøkler og dupliseres ikke. Øktfilene (${srcRoot}) er bare lest.`),
+    codex ? 'Kilde per samtale: rollout-*.jsonl (Codex CLI og ChatGPT-appen skriver samme fil); tråd-id fra session_meta, tittelen fra session_index.jsonl, ellers første spørsmål.'
+      : source === 'cowork' ? 'Kilde per økt: audit.jsonl (HMAC-signert strøm); økt-id = mappenavnet local_<uuid>.' : 'Desktop-samtaler fanges fra appens cache (tua_import kilde=desktop); web/mobil via delt lenke eller eksport i Innboks.',
   ].filter((l) => l !== null).join('\n');
   if (!dryRun) {
     upsert(atoms, {
-      key: `import:${source}-økter`, name: title, content: report, project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], drift: true,
-      short: clip(`${srcLabel}-økter: ${stats.nye} nye og ${stats.oppdatert} oppdaterte økter, ${stats.svar} svar og ${stats.filer} dokumenter som egne atomer. Prosjekter: ${projLine}.`, S_MAX),
-      summary: `Rapport fra import av ${srcLabel}-økter ${new Date().toLocaleDateString('no-NO')}.`,
+      key: codex ? 'import:codex-samtaler' : `import:${source}-økter`, name: title, content: report, project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], drift: true,
+      short: clip(`${enhet}: ${stats.nye} nye og ${stats.oppdatert} oppdaterte ${codex ? 'samtaler' : 'økter'}, ${stats.svar} svar og ${stats.filer} dokumenter som egne atomer. Prosjekter: ${projLine}.`, S_MAX),
+      summary: `Rapport fra import av ${enhet} ${new Date().toLocaleDateString('no-NO')}.`,
     });
     const written = save(atoms);
     noteImport(source, { økter: list.length, nye: stats.nye, oppdatert: stats.oppdatert });
     if (stats.nye + stats.oppdatert) finishOnboarding('import');
-    log(`${srcLabel}-økter: ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret · ${stats.korte} korte · ${written} filer skrevet · ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    log(`${enhet}: ${stats.nye} nye · ${stats.oppdatert} oppdatert · ${stats.uendret} uendret · ${stats.korte} korte · ${written} filer skrevet · ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   }
   return { report, stats, kind: source, count: list.length }
 }
 // Hvor mange øktfiler er endret siden siste import (SessionStart-påminnelsen)
 function pendingCodeSessions(since = 0) { return listCodeSessions().filter((s) => s.mtime > since && s.size > 2000).length }
 function pendingCoworkSessions(since = 0) { return listCoworkSessions().filter((s) => s.mtime > since && s.size > 20000).length }
+
+// ── Codex-samtaler (rollout-*.jsonl, 28.10.2026) ────────────────────────────
+// Linjer: {timestamp, type, payload}. type session_meta: payload {id, cwd, timestamp, originator, cli_version}. Brukerens spørsmål: type response_item,
+// payload {type: message, role: user, content: [{type: input_text, text}]}; svarene: role assistant, content [{type: output_text, text}]. Alt annet
+// (role developer = Codex' systemprompt, reasoning, custom_tool_call, function_call, event_msg, token_usage_record, turn_context, world_state) hoppes over.
+// Verifisert mot Eriks tre filer 28.10.2026 (CLI + ChatGPT-appen). Appen pakker kontekst inn som brukermeldinger (<environment_context>…,
+// <external_codex_apps_open_page>…, <app-context>…) — de strippes som Code-øktenes <system-reminder> (stripReminders tar tagger med _ eller -), og en
+// melding som bare var slik innpakning (eller fortsatt starter med en slik tagg), var ikke et menneskes.
+const CODEX_KLIENT = { codex_exec: 'Codex CLI', codex_cli: 'Codex CLI', 'codex desktop': 'ChatGPT-appen', codex_work_desktop: 'ChatGPT-appen', codex_vscode: 'Codex i VS Code' };
+const codexKlient = (originator) => CODEX_KLIENT[String(originator || '').trim().toLowerCase()] || (originator ? `Codex (${originator})` : 'Codex');
+const CODEX_INNPAKNING = /^\s*<[a-z][a-z0-9]*(?:[-_][a-z0-9]+)+(?:\s[^>]*)?>/i;   // starter med en tagg som <environment_context> eller <app-context>
+// Prosjekt: som Code (.tua-sync.json eller repo-mappa), men ChatGPT-appens egne arbeidsmapper (~/Documents/Codex/<dato>/new-chat*) er ikke prosjekter.
+const erCodexMappe = (cwd) => /\/Documents\/Codex\/\d{4}-\d{2}-\d{2}(?:\/|$)/.test(String(cwd || '').replace(/\\/g, '/'));
+const codexProject = (cwd) => (!cwd || erCodexMappe(cwd) ? 'Uten prosjekt' : projectOfCwd(cwd));
+// Trådnavnene fra session_index.jsonl: {id → thread_name}. Fila er liten; leses på nytt når den er endret.
+let codexIndexMemo = null;
+function codexIndex(home = CODEX_HOME) {
+  const file = path__default.join(home, 'session_index.jsonl');
+  let mtime = 0; try { mtime = fs__default.statSync(file).mtimeMs; } catch { return new Map() }
+  if (codexIndexMemo && codexIndexMemo.file === file && codexIndexMemo.mtime === mtime) return codexIndexMemo.map
+  const map = new Map();
+  try { for (const line of fs__default.readFileSync(file, 'utf8').split('\n')) { if (!line.trim()) continue; try { const o = JSON.parse(line); if (o.id && o.thread_name) map.set(String(o.id), String(o.thread_name)); } catch {} } } catch {}
+  codexIndexMemo = { file, mtime, map };
+  return map
+}
+// Alle rollout-filer under sessions/<år>/<mnd>/<dag>/. Nyeste først.
+function listCodexSessions(root = CODEX_SESSIONS) {
+  const out = [];
+  const walk = (dir, depth) => {
+    let entries = []; try { entries = fs__default.readdirSync(dir, { withFileTypes: true }); } catch { return }
+    for (const e of entries) {
+      const abs = path__default.join(dir, e.name);
+      if (e.isDirectory()) { if (depth < 3) walk(abs, depth + 1); continue }
+      if (!/^rollout-.*\.jsonl$/.test(e.name)) continue
+      try { const st = fs__default.statSync(abs); out.push({ file: abs, dir: path__default.relative(root, dir), size: st.size, mtime: st.mtimeMs }); } catch {}
+    }
+  };
+  walk(root, 0);
+  return out.sort((a, b) => b.mtime - a.mtime)
+}
+// Samme utform som parseCodeSession (id, cwd, title, prompts, answers, pairs, lines, first/last, turns, transcript, convo …) så importCode bruker den som
+// den er — pluss klient (Codex CLI / ChatGPT-appen), originator, cliVersion, project og repo. Ingen filer skrevet (Codex' verktøykall er ikke med).
+function parseCodexSession(file, { maxChars = 300_000, index = null } = {}) {
+  const s = { id: '', cwd: '', title: '', prompts: [], answers: [], pairs: [], files: new Map(), edited: new Set(), lastAssistant: '', first: null, last: null, turns: 0, lines: [], gren: '', forelder: '', barn: false, harness: 0, klient: '', originator: '', cliVersion: '', started: null, hoppet: 0 };
+  let text = '';
+  try { text = fs__default.readFileSync(file, 'utf8'); } catch { return s }
+  for (const line of text.split('\n')) {
+    if (!line) continue
+    let o; try { o = JSON.parse(line); } catch { continue }
+    const p = o && typeof o.payload === 'object' && o.payload ? o.payload : {};
+    const when = ms(o.timestamp);
+    if (o.type === 'session_meta') {
+      s.id ||= String(p.id || ''); s.cwd ||= String(p.cwd || ''); s.originator = String(p.originator || ''); s.cliVersion = String(p.cli_version || '');
+      s.klient = codexKlient(p.originator); s.started = ms(p.timestamp) || when;
+      continue
+    }
+    if (o.type !== 'response_item' || p.type !== 'message') { s.hoppet++; continue }
+    const content = Array.isArray(p.content) ? p.content : [];
+    if (p.role === 'user') {
+      const rå = content.filter((b) => b && (b.type === 'input_text' || b.type === 'text') && b.text).map((b) => b.text).join('\n');
+      if (!rå.trim()) continue
+      let t = stripReminders(rå);
+      if (CODEX_INNPAKNING.test(t)) t = '';                                     // innpakning uten sluttagg — hele meldingen er appens, ikke brukerens
+      if (!t) { s.harness++; continue }
+      s.prompts.push(t); s.pairs.push(nyttPar(t, when)); s.turns++; s.first ??= when; s.last = when || s.last; s.lines.push(`**Bruker:** ${t}`);
+    } else if (p.role === 'assistant') {
+      const t = content.filter((b) => b && (b.type === 'output_text' || b.type === 'text') && b.text).map((b) => b.text).join('\n').trim();
+      if (!t) continue
+      s.lastAssistant = t; s.lines.push(`**Codex:** ${t}`); const par = s.pairs.at(-1); if (par) par.svar = t; if (t.length >= MIN_SVAR) { s.answers.push(t); par?.answers.push(t); }
+      s.last = when || s.last;
+    } else s.hoppet++;                                                           // developer: systemprompten og appens instrukser
+  }
+  s.id ||= (path__default.basename(file, '.jsonl').match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i) || [])[1] || path__default.basename(file, '.jsonl');
+  const full = s.lines.join('\n\n');
+  s.transcript = full.length > maxChars ? full.slice(0, maxChars) + `\n\n_(forkortet: ${full.length - maxChars} tegn til i rollout-fila)_` : full;
+  s.chars = full.length;
+  s.firstUser = s.prompts[0] || '';
+  const navn = (index || codexIndex()).get(s.id) || '';
+  s.title = navn ? kortTittel(navn) : '';
+  s.convo = s.title || kortTittel(s.firstUser) || `Samtale ${s.id.slice(0, 8)}`;   // tittelen fra session_index.jsonl; uten navn: første spørsmål kortet etter samme regel som Cowork (første setning ≤ 60) — promptTitle ville strippet _ i f.eks. tua_search
+  s.project = codexProject(s.cwd);
+  s.repo = s.project === 'Uten prosjekt' ? '' : repoRootOf(s.cwd);
+  s.file = file;
+  return s
+}
+// Hvor mange rollout-filer er endret siden siste Codex-import (SessionStart-påminnelsen, historyCounts). Ekte filer er ≥ 150 kB (systemprompten alene er ~20 kB);
+// terskelen er bare «mer enn session_meta» (~300 byte).
+const CODEX_MIN_BYTES = 500;
+function pendingCodexSessions(since = 0) { return listCodexSessions().filter((f) => f.mtime > since && f.size > CODEX_MIN_BYTES).length }
 
 // ── Claude-eksport ──────────────────────────────────────────────────────────
 // conversations.json: [{uuid, name, summary, created_at, updated_at, chat_messages: [{uuid, sender: human|assistant,
@@ -1000,13 +1109,14 @@ function importFinder({ dryRun = false, log = () => {}, folders = null, desktop 
 // M19/M14 (skive 8): «alt» som stegvis løp med hendelser — på('start', {kilde, label}) før hvert steg og på('del', {kilde, label, stats, report | feil})
 // etter, med et pust i hendelsesløkka mellom stegene så broen får skrevet SSE-hendelsene ut mens neste kilde leses (fremdrift i onboardingen).
 // Samme funksjoner som før (importCode/importDesktop/importFinder/processInbox/processInboxShares) — ingen logikk dupliseres.
-const IMPORT_STEG = [['code', 'Claude Code-økter'], ['cowork', 'Cowork-økter'], ['desktop', 'Desktop-samtaler'], ['finder', 'Dokumenter med AI-opphav'], ['innboks', 'Innboks']];
+const IMPORT_STEG = [['code', 'Claude Code-økter'], ['cowork', 'Cowork-økter'], ['codex', 'Codex-samtaler'], ['desktop', 'Desktop-samtaler'], ['finder', 'Dokumenter med AI-opphav'], ['innboks', 'Innboks']];
 async function importAlt(opts = {}) {
   const { på = () => {}, kilder = null, ...rest } = opts;                     // kilder: bare disse stegene (f.eks. ['code']); null = alle
   const tick = () => new Promise((r) => setImmediate(r));
   const kjør = {
     code: () => importCode({ ...rest, source: 'code' }),
     cowork: () => importCode({ ...rest, source: 'cowork' }),
+    codex: () => importCode({ ...rest, source: 'codex' }),                   // 28.10.2026: Codex CLI og ChatGPT-appen
     desktop: () => importDesktop(rest),
     finder: () => importFinder(rest),
     innboks: async () => { const d = [...processInbox(rest), ...(await processInboxShares(rest))]; return { deler: d, stats: { filer: d.length, nye: d.reduce((n, r) => n + (r.stats?.nye || 0), 0) }, report: d.length ? d.map((r) => r.report).join('\n\n---\n\n') : `Innboks: ingenting å ta med${rest.dryRun ? ' (dry-run)' : ''}.` } },
@@ -1035,6 +1145,7 @@ function historyCounts({ fresh = false, quick = false } = {}) {
     at: Date.now(),
     code: pendingCodeSessions(st.code?.at || 0), codeAll: listCodeSessions().filter((s) => s.size > 2000).length,
     cowork: pendingCoworkSessions(st.cowork?.at || 0), coworkAll: listCoworkSessions().filter((s) => s.size > 20000).length,
+    codex: pendingCodexSessions(st.codex?.at || 0), codexAll: listCodexSessions().filter((s) => s.size > CODEX_MIN_BYTES).length,   // 28.10.2026: Codex-samtaler
     desktop: 0, desktopNew: 0, dokumenter: 0, innboks: inboxPending().length + inboxShareFiles().length + innboksDokumenter().length, quick,
   };
   try {
@@ -1048,7 +1159,7 @@ function historyCounts({ fresh = false, quick = false } = {}) {
   return c
 }
 const historyLine = (c = historyCounts()) => {
-  const parts = [c.code && `${c.code} Code-økt${c.code === 1 ? '' : 'er'}`, c.cowork && `${c.cowork} Cowork-økt${c.cowork === 1 ? '' : 'er'}`, c.desktopNew > 0 && `${c.desktopNew} Desktop-samtale${c.desktopNew === 1 ? '' : 'r'}`, c.dokumenter && `${c.dokumenter} dokument${c.dokumenter === 1 ? '' : 'er'}`, c.prompter && `${c.prompter} prompt${c.prompter === 1 ? '' : 'er'}`].filter(Boolean);
+  const parts = [c.code && `${c.code} Code-økt${c.code === 1 ? '' : 'er'}`, c.cowork && `${c.cowork} Cowork-økt${c.cowork === 1 ? '' : 'er'}`, c.codex && `${c.codex} Codex-samtale${c.codex === 1 ? '' : 'r'}`, c.desktopNew > 0 && `${c.desktopNew} Desktop-samtale${c.desktopNew === 1 ? '' : 'r'}`, c.dokumenter && `${c.dokumenter} dokument${c.dokumenter === 1 ? '' : 'er'}`, c.prompter && `${c.prompter} prompt${c.prompter === 1 ? '' : 'er'}`].filter(Boolean);
   return parts.length ? `Jeg fant ${parts.join(', ')} på denne maskinen som ikke er i Tua — vil du ta dem med?` : ''
 };
 
@@ -1116,6 +1227,8 @@ if (!globalThis.__TUA_BUNDLE && process.argv[1] && path__default.resolve(process
     console.log(importCode(opts).report);
   } else if (args.includes('--cowork')) {
     console.log(importCode({ ...opts, source: 'cowork' }).report);
+  } else if (args.includes('--codex')) {
+    console.log(importCode({ ...opts, source: 'codex' }).report);
   } else if (args.includes('--desktop')) {
     console.log(importDesktop({ ...opts, all: args.includes('--alle') }).report);
   } else if (args.includes('--finder')) {
@@ -1133,7 +1246,7 @@ if (!globalThis.__TUA_BUNDLE && process.argv[1] && path__default.resolve(process
   } else if (src) {
     console.log(importExport(path__default.resolve(src), opts).report);
   } else {
-    console.error('Bruk: node import.js --code|--cowork|--desktop [--alle]|--finder|--alt [--project <navn>] [--etter <ÅÅÅÅ-MM-DD>] [--min-tegn <n>] [--dry-run]\n      node import.js --lenke <https://claude.ai/share/…> [--dry-run]\n      node import.js --tall           (hva onboardingen ville sagt)\n      node import.js <zip|mappe> [--dry-run] [--project <navn>] [--min-tegn <n>] [--etter <ÅÅÅÅ-MM-DD>]\n      node import.js --innboks [--dry-run]');
+    console.error('Bruk: node import.js --code|--cowork|--codex|--desktop [--alle]|--finder|--alt [--project <navn>] [--etter <ÅÅÅÅ-MM-DD>] [--min-tegn <n>] [--dry-run]\n      node import.js --lenke <https://claude.ai/share/…> [--dry-run]\n      node import.js --tall           (hva onboardingen ville sagt)\n      node import.js <zip|mappe> [--dry-run] [--project <navn>] [--min-tegn <n>] [--etter <ÅÅÅÅ-MM-DD>]\n      node import.js --innboks [--dry-run]');
     process.exit(2);
   }
 }

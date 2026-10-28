@@ -36,6 +36,7 @@ const CODE_HOME = path.join(SCRATCH, 'code-home')
 for (const d of [ROOT, DATA, HJEM, CODE_HOME, path.join(ROOT, 'Innboks')]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }) }
 process.env.TUA_CODE_HOME = CODE_HOME
 process.env.TUA_COWORK_ROOT = path.join(SCRATCH, 'cowork-tom')
+process.env.TUA_CODEX_HOME = path.join(path.dirname(process.env.TUA_FILES_ROOT), 'codex-tom')   // 28.10.2026: aldri Eriks ekte ~/.codex
 
 const { load, save, upsert, mkLevel, tråder, deliveryCounts, logDelivery } = await import('./store.js')
 const { samtaleS, samtaleSFraTranskript, nyttPar, importCode, parseCodeSession } = await import('./import.js')
