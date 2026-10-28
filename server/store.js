@@ -1141,6 +1141,39 @@ export function flytt(atoms, id, prosjekt) {
   markDirty(atoms, a.id)
   return { atom: a, før, flyttet: true }
 }
+// Skive A (A7, arbeidsstykke 34, V23 — Erik 28.10.2026: «TUA» slås sammen med «Tua_tua»): hele prosjektet flyttes sak for sak med flytt() (save() flytter filene,
+// indeks og written.json følger; navnekollisjon i målmappa gir id-suffiks som ellers). tørr = bare tallene. Aliaset (settProsjektAlias) sørger for at nye fangster
+// med det gamle navnet havner i målet. NB: macOS-disken skiller ikke store og små bokstaver — «TUA» og «Tua» er samme mappe, og aliaset gjelder begge.
+export function slåSammenProsjekt(atoms, fra, til, { tørr = false } = {}) {
+  const f = String(fra || '').trim(), t = String(til || '').trim()
+  if (!f || !t) throw new Error('fra og til kreves')
+  if (f.toLowerCase() === t.toLowerCase()) throw new Error('fra og til er samme prosjekt')
+  const saker = atoms.filter((a) => String(a.project || '').toLowerCase() === f.toLowerCase())
+  const iMålet = atoms.filter((a) => String(a.project || '').toLowerCase() === t.toLowerCase()).length
+  const navnIMålet = new Set(atoms.filter((a) => String(a.project || '').toLowerCase() === t.toLowerCase()).map((a) => fileNameFor(a).toLowerCase()))
+  const kollisjoner = saker.filter((a) => navnIMålet.has(fileNameFor(a).toLowerCase())).length
+  const perSlag = {}; for (const a of saker) { const k = a.kind || 'capture'; perSlag[k] = (perSlag[k] || 0) + 1 }
+  const ut = { fra: f, til: t, saker: saker.length, iMåletFør: iMålet, iMåletEtter: iMålet + saker.length, kollisjoner, perSlag, tørr }
+  if (tørr) return ut
+  let flyttet = 0
+  for (const a of saker) { if (flytt(atoms, a.id, t).flyttet) flyttet++ }
+  return { ...ut, flyttet }
+}
+export function settProsjektAlias(navn, mappe) {
+  const n = String(navn || '').trim(), m = String(mappe || '').trim()
+  if (!n || !m) throw new Error('navn og mappe kreves')
+  if (!filesMode()) throw new Error('aliasene finnes bare når arkivmappa er valgt')
+  let fil = {}
+  try { fil = JSON.parse(fs.readFileSync(ALIASES(), 'utf8')) } catch {}
+  const før = { ...fil }
+  for (const k of Object.keys(fil)) if (k !== '_' && k.toLowerCase() === n.toLowerCase()) delete fil[k]
+  fil[n] = m
+  for (const [k, v] of Object.entries(fil)) if (k !== '_' && typeof v === 'string' && v.toLowerCase() === n.toLowerCase()) fil[k] = m   // TuaCircles → TUA blir TuaCircles → Tua_tua
+  if (JSON.stringify(før) === JSON.stringify(fil)) return { endret: false, aliaser: fil }
+  fs.mkdirSync(path.dirname(ALIASES()), { recursive: true })
+  fs.writeFileSync(ALIASES(), JSON.stringify(fil, null, 2) + '\n')
+  return { endret: true, aliaser: fil }
+}
 export function giNyttNavn(atoms, id, navn) {
   const a = atoms.find((x) => x.id === id)
   if (!a) throw new Error(`fant ikke sak ${id}`)

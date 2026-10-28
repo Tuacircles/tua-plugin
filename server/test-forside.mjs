@@ -388,7 +388,7 @@ try {
 // ── Arbeidsstykke 33 skive 2 (27.10.2026, V22 «Samtalen først»): Arbeid-tilstanden — reglene appen bruker, og det Finn mistet ───────────────────────────
 {
   // adressene: #samtale/<id> og #arbeid/<id> er Arbeid; #sak/<id> er fortsatt Finn
-  ok('lesHash: #samtale/<id> og #arbeid/<id> leses; erArbeidHash skiller Arbeid fra Finn; adressene lages med encodeURIComponent', regler.lesHash('#samtale/a_1').samtale === 'a_1' && regler.lesHash('#arbeid/w1').arbeid === 'w1' && regler.erArbeidHash('#samtale/t_x_y') && regler.erArbeidHash('#arbeid/w1') && !regler.erArbeidHash('#sak/a_1') && !regler.erArbeidHash('') && regler.samtaleAdresse('a 1') === '/#samtale/a%201' && regler.arbeidAdresse('w1') === '/#arbeid/w1')
+  ok('lesHash: #samtale/<id>, #arbeid/<id> og (skive A, A6) #les/<id> leses; erArbeidHash skiller Arbeid fra Finn — en sak (#les, gamle #sak) åpnes i Arbeid; adressene lages med encodeURIComponent', regler.lesHash('#samtale/a_1').samtale === 'a_1' && regler.lesHash('#arbeid/w1').arbeid === 'w1' && regler.erArbeidHash('#samtale/t_x_y') && regler.erArbeidHash('#arbeid/w1') && regler.erArbeidHash('#sak/a_1') && regler.erArbeidHash('#les/a_1') && regler.lesHash('#les/a_1').les === 'a_1' && regler.lesAdresse('a 1') === '/#les/a%201' && !regler.erArbeidHash('#innboks') && !regler.erArbeidHash('') && regler.samtaleAdresse('a 1') === '/#samtale/a%201' && regler.arbeidAdresse('w1') === '/#arbeid/w1')
   // sidefeltets tre: prosjekt › arbeid › samtaler, nyeste først, «+ N til» over fem, drift aldri
   const t = (n) => Date.parse('2026-10-01T10:00:00Z') + n * 3600e3
   const W = { id: 'w1', name: 'Anken til Energima', project: 'Energima', kind: 'capture', capturedAt: t(0), arbeid: true }

@@ -266,5 +266,26 @@ try {
   ok('én skriver: det terminalen skrev på én sak, står etter at broen skrev en annen', igjen.beholdt === true && igjen.drift === false)
 } finally { bro.kill() }
 
+// ── Skive A (A7, arbeidsstykke 34, V23): «TUA» slås sammen med «Tua_tua» — tørrkjøring med tall først, så ekte; aliaset sender nye fangster dit ──
+{
+  const a = store.load()
+  const t1 = store.upsert(a, { key: 'a7:1', name: 'Gammel TUA-sak', content: 'Innhold i TUA.', project: 'TUA', source: 'Claude', short: 'S' }).atom
+  store.upsert(a, { key: 'a7:2', name: 'Felles navn', content: 'TUA-versjonen.', project: 'TUA', source: 'Claude', short: 'S' })
+  store.upsert(a, { key: 'a7:3', name: 'Felles navn', content: 'Tua_tua-versjonen.', project: 'Tua_tua', source: 'Claude', short: 'S' })
+  store.save(a)
+  fs.writeFileSync(path.join(ROOT, '.tua', 'project-aliases.json'), JSON.stringify({ _: 'test', TuaCircles: 'TUA' }, null, 2))
+  const før = store.load(), tørr = store.slåSammenProsjekt(før, 'TUA', 'Tua_tua', { tørr: true })
+  ok('A7: tørrkjøring gir tallene (2 saker, 1 navnekollisjon) og flytter ingenting', tørr.saker === 2 && tørr.kollisjoner === 1 && tørr.iMåletFør === 1 && tørr.iMåletEtter === 3 && store.load().filter((x) => x.project === 'TUA').length === 2, JSON.stringify(tørr))
+  const b = store.load(), r = store.slåSammenProsjekt(b, 'TUA', 'Tua_tua'); store.save(b)
+  const al = store.settProsjektAlias('TUA', 'Tua_tua')
+  const etter = store.load()
+  ok('A7: ekte — sakene ligger i Tua_tua (fila flyttet, kollisjonen fikk id-suffiks), ingen igjen i TUA; aliaset TUA → Tua_tua, og TuaCircles → TUA ble TuaCircles → Tua_tua', r.flyttet === 2 && etter.filter((x) => x.project === 'TUA').length === 0
+    && etter.find((x) => x.id === t1.id)?.project === 'Tua_tua' && fs.existsSync(store.fileOf(etter.find((x) => x.id === t1.id))) && store.fileOf(etter.find((x) => x.id === t1.id)).includes(`${path.sep}Tua_tua${path.sep}`)
+    && al.aliaser.TUA === 'Tua_tua' && al.aliaser.TuaCircles === 'Tua_tua')
+  const ny = store.upsert(etter, { key: 'a7:ny', name: 'Ny fangst', content: 'Fra kilden som sier TUA.', project: 'TUA', source: 'Claude', short: 'S' }).atom
+  const ny2 = store.upsert(etter, { key: 'a7:ny2', name: 'Ny fangst 2', content: 'Fra kilden som sier Tua Circles.', project: 'TuaCircles', source: 'Claude', short: 'S' }).atom
+  ok('A7: nye fangster med «TUA» (og «TuaCircles») havner i Tua_tua', ny.project === 'Tua_tua' && ny2.project === 'Tua_tua')
+}
+
 console.log(`\n${feil ? `${feil} FEIL` : 'alt grønt'}`)
 process.exit(feil ? 1 : 0)
