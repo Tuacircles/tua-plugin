@@ -45,7 +45,7 @@ const påTid = (x, y) => ((x.capturedAt || 0) - (y.capturedAt || 0)) || (idTid(x
 export function finnSamtale(atoms, id) {
   if (!id) return null
   const s = String(id).trim()
-  const direkte = atoms.find((a) => a.kind === 'samtale' && (a.id === s || a.key === samtaleNøkkel(s) || a.key === `samtale:${s}` || a.key === `okt:${s}`))
+  const direkte = atoms.find((a) => a.kind === 'samtale' && (a.id === s || a.key === samtaleNøkkel(s) || a.key === `samtale:${s}` || a.key === `okt:${s}` || a.key === `codex:${s}`))   // codex: Codex-samtaler (28.10.2026)
   if (direkte) return direkte
   const sak = atoms.find((a) => a.id === s)
   return sak ? samtaleFor(atoms, sak) : null

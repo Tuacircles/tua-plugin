@@ -31,6 +31,7 @@ const TUA_REPO = path.join(SCRATCH, 'falskt-tua-repo'), ANNET_REPO = path.join(S
 for (const d of [ROOT, DATA, HJEM, CODE_HOME, COWORK, FINDER_TOM, TUA_REPO, ANNET_REPO]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }) }
 process.env.TUA_CODE_HOME = CODE_HOME
 process.env.TUA_COWORK_ROOT = COWORK
+process.env.TUA_CODEX_HOME = path.join(path.dirname(process.env.TUA_FILES_ROOT), 'codex-tom')   // 28.10.2026: aldri Eriks ekte ~/.codex
 fs.mkdirSync(path.join(HJEM, '.tua'), { recursive: true }); fs.writeFileSync(path.join(HJEM, '.tua', 'config.json'), JSON.stringify({ finder: { folders: [FINDER_TOM] } }) + '\n')
 fs.mkdirSync(path.join(ROOT, 'Innboks'), { recursive: true })
 // et falskt Tua-repo: det som gjør det til Tua-repoet er tua-plugin/server/store.js (store.erTuaRepo)

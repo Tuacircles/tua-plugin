@@ -31,6 +31,7 @@ const CODE_HOME = path.join(SCRATCH, 'code-home'), COWORK = path.join(SCRATCH, '
 for (const d of [ROOT, DATA, HJEM, CODE_HOME, COWORK, FINDER_TOM, path.join(SCRATCH, 'onb-home'), path.join(SCRATCH, 'onb-data')]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }) }
 process.env.TUA_CODE_HOME = CODE_HOME
 process.env.TUA_COWORK_ROOT = COWORK
+process.env.TUA_CODEX_HOME = path.join(path.dirname(process.env.TUA_FILES_ROOT), 'codex-tom')   // 28.10.2026: aldri Eriks ekte ~/.codex
 // Finder-connectoren skal aldri lese Eriks ekte Nedlastinger i en test: pek den på en tom mappe via samme config som appen bruker
 fs.mkdirSync(path.join(HJEM, '.tua'), { recursive: true }); fs.writeFileSync(path.join(HJEM, '.tua', 'config.json'), JSON.stringify({ finder: { folders: [FINDER_TOM] } }) + '\n')
 
@@ -267,7 +268,7 @@ const sse = async (url, body) => {
     ok('steg 3: tallene — 2 Code-økter i det falske treet, 4 prompter (2 + hook-økta 1 … minst 3)', t.json.tall && t.json.tall.codeAll === 2 && t.json.tall.prompter >= 3, JSON.stringify(t.json.tall))
     const dry = await sse(`${B}/api/import`, { kilde: 'alt', dryRun: true })
     const kilder = dry.events.filter((e) => e.ev === 'start').map((e) => e.d.kilde)
-    ok('import dry-run som SSE: start for hver kilde (code, cowork, desktop, finder, innboks), ferdig med tall.prompter ≥ 3, ingenting skrevet', kilder.join() === 'code,cowork,desktop,finder,innboks' && dry.events.at(-1).ev === 'ferdig' && dry.events.at(-1).d.tall.prompter >= 3 && !fs.existsSync(path.join(nyRot, 'Prosjekt')), JSON.stringify([kilder, dry.events.at(-1)?.d?.tall]))
+    ok('import dry-run som SSE: start for hver kilde (code, cowork, codex, desktop, finder, innboks), ferdig med tall.prompter ≥ 3, ingenting skrevet', kilder.join() === 'code,cowork,codex,desktop,finder,innboks' && dry.events.at(-1).ev === 'ferdig' && dry.events.at(-1).d.tall.prompter >= 3 && !fs.existsSync(path.join(nyRot, 'Prosjekt')), JSON.stringify([kilder, dry.events.at(-1)?.d?.tall]))
     const ekte = await sse(`${B}/api/import`, { kilde: 'alt' })
     const f = ekte.events.at(-1)
     ok('import ekte som SSE: ferdig, prompter skrevet i det nye arkivet, del-hendelsene har stats', f?.ev === 'ferdig' && f.d.tall.prompter >= 3 && fs.existsSync(path.join(nyRot, 'Prosjekt')) && fs.readdirSync(path.join(nyRot, 'Prosjekt')).some((n) => n.endsWith('.md')) && ekte.events.filter((e) => e.ev === 'del').every((e) => e.d.stats || e.d.feil), JSON.stringify(f?.d?.tall))

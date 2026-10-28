@@ -35,6 +35,7 @@ const CODE_HOME = path.join(SCRATCH, 'code-home'), COWORK = path.join(SCRATCH, '
 for (const d of [ROOT, DATA, HJEM, CODE_HOME, COWORK, FINDER_TOM]) { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }) }
 process.env.TUA_CODE_HOME = CODE_HOME
 process.env.TUA_COWORK_ROOT = COWORK
+process.env.TUA_CODEX_HOME = path.join(path.dirname(process.env.TUA_FILES_ROOT), 'codex-tom')   // 28.10.2026: aldri Eriks ekte ~/.codex
 fs.mkdirSync(path.join(HJEM, '.tua'), { recursive: true }); fs.writeFileSync(path.join(HJEM, '.tua', 'config.json'), JSON.stringify({ finder: { folders: [FINDER_TOM] } }) + '\n')
 
 const store = await import('./store.js')
