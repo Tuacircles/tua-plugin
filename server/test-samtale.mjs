@@ -390,6 +390,20 @@ async function sse(body) {
 try {
   ok('broen startet mot testarkivet', broLogg.includes(ROOT), broLogg.split('\n')[0])
   const ny = await post('/api/samtale/ny', { prosjekt: 'Testprosjekt' })
+  {   // etter skive 4: POST /api/samtale/fra-traad gjør om én gammel tråd (prompt:spor: uten samtale) med ett klikk fra Arbeid
+    const atoms = load()
+    const gp2 = upsert(atoms, { key: 'prompt:spor:gammel2', kind: 'prompt', content: 'Gammelt spørsmål nummer to: hvem betaler saksomkostningene?', name: 'Hvem betaler saksomkostningene?', project: 'Testprosjekt', convo: 'Hvem betaler saksomkostningene?', source: 'Tua', tags: ['prompt'], by: 'test' }).atom
+    const gs2 = upsert(atoms, { key: 'svar:spor:gammel2', kind: 'svar', content: 'Som hovedregel den som taper.', name: 'Svar fra Test: Hvem betaler saksomkostningene?', project: 'Testprosjekt', convo: 'Hvem betaler saksomkostningene?', source: 'Test (ekko — sender ingenting)', tags: ['svar', 'test'], by: 'test', derivedFrom: [{ id: gp2.id, version: 1, level: 'L' }] }).atom
+    gp2.ga = [{ id: gs2.id, version: 1 }]
+    save(atoms)
+    const før = await get(`/api/samtale?id=${gp2.id}`)
+    const om = await post('/api/samtale/fra-traad', { id: gs2.id })
+    const etter = await get(`/api/samtale?id=${gp2.id}`)
+    const S3 = load().find((a) => a.id === om.json?.id)
+    ok('POST /api/samtale/fra-traad: 404 før på GET /api/samtale, så samtale-sak laget (kilde Tua) for akkurat den tråden, og GET /api/samtale på prompten gir spørsmål og svar (1 spørsmål)', før.status === 404 && om.status === 200 && om.json.laget === true && !!S3 && S3.kind === 'samtale' && String(S3.source) === 'Tua' && etter.status === 200 && etter.json.id === om.json.id && etter.json.vendinger.length === 2 && etter.json.antall === 1, JSON.stringify([før.status, om.json, etter.status, etter.json?.vendinger?.length, etter.json?.antall]))
+    const igjen = await post('/api/samtale/fra-traad', { id: gp2.id })
+    ok('POST /api/samtale/fra-traad igjen: samme samtale, laget: false; ukjent id gir 404', igjen.status === 200 && igjen.json.id === om.json.id && igjen.json.laget === false && (await post('/api/samtale/fra-traad', { id: 'a_finnes_ikke' })).status === 404)
+  }
   ok('POST /api/samtale/ny: reservert id (t_…) og nøkkel; ingenting lagret ennå', ny.status === 200 && /^t_/.test(ny.json.id) && ny.json.key === `samtale:tua:${ny.json.id}` && !load().some((a) => a.key === ny.json.key), JSON.stringify(ny.json))
   ok('POST /api/samtale/ny uten prosjekt → 400; med ukjent arbeid → 404', (await post('/api/samtale/ny', {})).status === 400 && (await post('/api/samtale/ny', { prosjekt: 'Testprosjekt', hørerTil: 'a_finnes_ikke' })).status === 404)
   const tom = await get(`/api/samtale?id=${ny.json.id}`)

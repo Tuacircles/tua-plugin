@@ -140,7 +140,7 @@ import { watchFinder } from './finder.js'                   // M17: dokumenter m
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
 import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, settStandard as ollamaStandard, lokale as ollamaLokale } from './ollama.js'   // friksjon 12: modellene i Ollama
 import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer, del, trekkDeling, beOmHele, mottakersideFor, standardFor } from './motor.js'
-import { finnSamtale, vendingerFor, erTuaSamtale, nySamtaleId, samtaleNøkkel, antallVendinger, sistI } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak — GET /api/samtale, POST /api/samtale/ny   // M20a/M20b: motoren — eneste vei ut til en modell
+import { finnSamtale, vendingerFor, erTuaSamtale, nySamtaleId, samtaleNøkkel, antallVendinger, sistI, gamleTråder, gjørOmTråd } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak — GET /api/samtale, POST /api/samtale/ny   // M20a/M20b: motoren — eneste vei ut til en modell
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT, lagreTekst, lagUtdrag, LIM_INN_GRENSE } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks · skive 3 (arb. 33 §6): lim inn → kilde, utdrag
 import { finnSak } from './store.js'   // skive 3 (arb. 33 §8): lenker som ikke finnes — GET /api/finn?id=
 import { inboxPending, inboxShareFiles } from './import.js'
@@ -806,6 +806,23 @@ http
         return json(res, 200, { id: s.id, key: s.key || null, tittel: s.name, prosjekt: s.project, kilde: s.source || '', kind: s.kind, tua: erTuaSamtale(s), start: s.createdAt || s.capturedAt, sist: sistI(s, vend), versjon: s.version || 1, antall: antallVendinger(vend),
           hører_til: s.hørerTil || null, del_av: delAv(alle, s, følgereAv(alle)), lenker: linksFor(s), fanget: s.fanget === true, drift: s.drift === true, S: levelOf(s, 'S').text,
           vendinger: vend, standard, mottakere: ms.map(({ id: mid, label, aktiv, budsjett, standard: std, local }) => ({ id: mid, label, aktiv, budsjett: budsjett || null, standard: std, local })) })
+      }
+      // Etter skive 4 (28.10.2026): «Fortsett ›» på en tråd fra før skive 1 skal ikke sende Erik til terminalen — POST /api/samtale/fra-traad {id: <prompt, svar eller
+      //   konklusjon i tråden>} gjør om akkurat den tråden (samme gjørOmTråd som review --traader / Innstillinger-knappen, én gruppe) og svarer {id, key, laget};
+      //   har saken alt en samtale, svares den (laget: false). 404 når saken ikke er en gammel Tua-tråd.
+      if (req.method === 'POST' && url.pathname === '/api/samtale/fra-traad') {
+        const b = await readBody(req)
+        const id = String(b.id || '').trim()
+        if (!id) return json(res, 400, { error: 'id kreves — en sak i tråden' })
+        const alle = load()
+        const har = finnSamtale(alle, id)
+        if (har) return json(res, 200, { id: har.id, key: har.key || null, laget: false })
+        const g = gamleTråder(alle).find((x) => x.saker.some((a) => a.id === id) || x.prompter.some((a) => a.id === id))
+        if (!g) return json(res, 404, { error: `${id} er ikke en gammel Tua-tråd uten samtale-sak` })
+        const s = gjørOmTråd(alle, g)
+        const filer = save(alle)
+        console.error(`[tua-bro] gammel tråd → samtale: «${g.convo}» (${g.project}) · ${g.saker.length} saker · ${filer} filer`)
+        return json(res, 200, { id: s.id, key: s.key || null, laget: true, saker: g.saker.length, filer })
       }
       if (req.method === 'POST' && url.pathname === '/api/samtale/ny') {
         const b = await readBody(req)
