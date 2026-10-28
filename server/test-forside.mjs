@@ -536,6 +536,8 @@ try {
   const rader2 = [{ id: 'a', ider: ['x'], tid: 3 }, { id: 'b', ider: ['y'], tid: 2 }, { id: 'c', ider: ['z'], tid: 1 }]
   ok('A1/§6: sorterRader — relevans følger rangen (også i Dokumenter), uten rang sist; dato siste først', regler.sorterRader(rader2, { sortering: 'relevans', rang: new Map([['z', 0], ['y', 1]]) }).map((r) => r.id).join('') === 'cba'
     && regler.sorterRader(rader2).map((r) => r.id).join('') === 'abc')
+  { const src = fs.readFileSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', 'arbeid-start.js'), 'utf8')
+    ok('A6: «‹ Finn» går aldri til en Arbeid-adresse (husket «/#sak/<id>» fra før ga én sak i løkke) — fraFinn sjekker erArbeidHash; Forside åpner saker med tilLes (husker hvor du sto)', /fraFinn = \(\) => \{[^\n]*erArbeidHash/.test(src) && src.includes('export function tilLes') && !/navigate\((les|sak)Adresse\(/.test(fs.readFileSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', 'pages', 'Forside.jsx'), 'utf8'))) }
   ok('flateRader: filteret (passer) gjelder en sak i raden', regler.flateRader(alleA, { passer: (a) => a?.id === 'sv2' }).samtaler.map((r) => r.id).join() === 'logg' && regler.flateRader(alleA, { passer: (a) => a?.id === 'sv2' }).dokumenter.length === 0)
 }
 
