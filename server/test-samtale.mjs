@@ -260,6 +260,14 @@ let DESK
   ok('skive 3: en Desktop-samtale uten saker — alle fire vendingene fra transkriptet, syntetiske id-er, Claude som modell, kilden Claude Desktop', vd.length === 4 && vd.every((v) => v.syntetisk && erSynt(v.id)) && vd.map((v) => v.rolle).join(' ') === 'bruker modell bruker modell' && vd[0].L === D1 && vd[2].L === D2 && vd[1].modell === 'Claude' && vd[1].kilde === 'Claude Desktop' && vd[3].L === 'Da regnes fristen fra du burde ha fått det. Be om kopi.', JSON.stringify(vd.map((v) => [v.id, v.rolle])))
   const vh = vendingerFor(load(), les(HOOK.id))
   ok('skive 3: hookens samtale-sak (## Oppgaver, ## Siste svar) — to brukervendinger og siste svar på den siste', vh.length === 3 && vh[0].rolle === 'bruker' && vh[0].L === 'Rydd i testarkivet og si hva som er dobbelt.' && vh[1].rolle === 'bruker' && vh[2].rolle === 'modell' && vh[2].prompt === vh[1].id && vh[2].L.startsWith('De to notatene'), JSON.stringify(vh.map((v) => [v.rolle, v.L.slice(0, 20)])))
+  { // skive A (§6, 28.10.2026): samme spørsmål to ganger på rad i transkriptet (Cowork) er ÉN vending; svarene henges på den første, id-ene står
+    const a8 = load(), Q = 'Opptre som en advokat og les dokumentene i mappa.'
+    const tx = [`# Dobbel`, '', `_Claude Cowork · 3 meldinger · 2026-10-25 · prosjekt Testprosjekt_`, '', `**Bruker:** ${Q}`, '', `**Bruker:** ${Q}`, '', `**Claude:** Jeg leser dokumentene.`, '', `**Claude:** Ferdig.`, '', `**Bruker:** Lag en zip.`, '', `**Claude:** Zip-filen er klar.`].join('\n')
+    const DB = upsert(a8, { key: 'samtale:dobb0001-aaaa-bbbb-cccc-ddddeeeeffff', kind: 'samtale', name: 'Dobbel', content: tx, project: 'Testprosjekt', convo: 'Dobbel', source: 'Claude Cowork', by: 'regel', tags: ['samtale', 'cowork'], fanget: true, short: 'x' }).atom
+    save(a8)
+    const vdb = vendingerFor(load(), les(DB.id))
+    ok('skive A (§6): et spørsmål som står to ganger på rad i transkriptet er én vending — svarene under den første; neste spørsmål beholder sin plass-id', vdb.map((v) => v.rolle).join(' ') === 'bruker modell modell bruker modell' && vdb[1].prompt === vdb[0].id && vdb[2].prompt === vdb[0].id && vdb[3].id.endsWith('_5') && vdb[0].id.endsWith('_1'), JSON.stringify(vdb.map((v) => [v.rolle, v.id.slice(-3)])))
+  }
   ok('skive 3: en Tua-samtale leser ikke transkriptet (sakene er vendingene) — vendingerAvTranskript gir null', vendingerAvTranskript(load(), les(S1.id)) === null)
   const versjonFør = les(DESK.id).version || 1
   const h = []

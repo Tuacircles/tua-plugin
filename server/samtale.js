@@ -94,13 +94,17 @@ export function vendingerAvTranskript(atoms, samtale) {
   const syntetisk = (n, rolle, tekst, ekstra = {}) => ({ id: syntetiskId(samtale, n), rolle, kind: 'vending', tid: ekstra.tid ?? null, modell: rolle === 'bruker' ? null : kortModell(samtale.source), kilde: samtale.source || '', nivå: null, S: clip(flat(tekst), 300), L: tekst, tegn: tekst.length, versjon: samtale.version || 1,
     beholdt: false, status: 'endelig', vault: isVault(samtale), låst: false, syntetisk: true, samtale: samtale.id, ...ekstra })
   const ut = []
-  let n = 0
+  let n = 0, forrige = null
   for (const p of lest.pairs) {
     n++
+    // skive A (§6, 28.10.2026): samme spørsmål to ganger på rad i transkriptet (Cowork skriver meldingen på nytt når en kjøring startes igjen) er ÉN vending —
+    // svarene henges på den første. n telles likevel, så de syntetiske id-ene står som før.
+    if (forrige && !forrige.svar && flat(p.prompt) === flat(forrige.tekst)) { forrige.svar = (p.answers?.length || 0) + (p.svar ? 1 : 0); for (const a of p.answers?.length ? p.answers : p.svar ? [p.svar] : []) { n++; const ss = svar.get(sid8 ? `svar:${sid8}:${sha8(a)}` : '') || svar.get(hashOf(a)) || null; ut.push(ss ? rad(ss, 'modell', { prompt: forrige.v.id, nivå: null }) : syntetisk(n, 'modell', a, { prompt: forrige.v.id })) } continue }
     const ps = prompter.get(sid8 ? `prompt:${sid8}:${hashOf(p.prompt)}` : '') || prompter.get(hashOf(p.prompt)) || null
     const bruker = ps ? rad(ps, 'bruker', { prompt: ps.id, forskjeller: [] }) : syntetisk(n, 'bruker', p.prompt, { tid: p.at || null })
     bruker.prompt = bruker.id
     ut.push(bruker)
+    forrige = { v: bruker, tekst: p.prompt, svar: (p.answers?.length || 0) + (p.svar && !p.answers?.length ? 1 : 0) }
     for (const a of p.answers?.length ? p.answers : p.svar ? [p.svar] : []) {
       n++
       const ss = svar.get(sid8 ? `svar:${sid8}:${sha8(a)}` : '') || svar.get(hashOf(a)) || null

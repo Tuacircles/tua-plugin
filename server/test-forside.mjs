@@ -480,5 +480,64 @@ try {
   ok('Sidefelt.jsx: den foldede raden viser «N kjøringer» og folder kjøringene ut', kode('pages/Sidefelt.jsx').includes('antallKjøringer') && kode('pages/Sidefelt.jsx').includes('sb-kjøringer'))
 }
 
+// ── Skive A «Rydd flaten» (arbeidsstykke 34, V23, 28.10.2026): samtalen er én rad, dokumentet er én rad, drift i én linje, tittelen først ──
+{
+  const T = Date.parse('2026-10-28T12:00:00'); const DAY = 86400e3
+  const s = (id, o) => ({ id, project: 'Oppgjør Skado', capturedAt: T, kind: 'capture', tags: [], ...o })
+  const alleA = [
+    s('logg', { kind: 'samtale', name: 'Skado – energima m.m.', convo: 'Skado – energima', source: 'Claude Cowork', key: 'samtale:x', levels: { S: { text: 'Sist: … · 61 vendinger' } }, links: [{ kind: 'claude-chat', href: 'claude://claude.ai/chat/x' }] }),
+    s('p1', { kind: 'prompt', name: 'Les dokumentene', convo: 'Skado – energima', source: 'Claude Cowork', capturedAt: T - 5000 }),
+    s('sv1', { name: 'Nå setter jeg opp en arbeidsplan', convo: 'Skado – energima', source: 'Claude Cowork', key: 'svar:x:1', tags: ['svar', 'auto'], capturedAt: T - 4000 }),
+    s('sv2', { name: 'Samlet analyse — Energima-saken', convo: 'Skado – energima', source: 'Claude Cowork', key: 'svar:x:2', tags: ['svar', 'auto'], capturedAt: T - 3000 }),
+    s('d-md', { name: 'Ankeerklæring v4', convo: 'Skado – energima', source: 'Claude Cowork', key: 'fil:/x/Ankeerklæring v4.md', tags: ['dokument'], capturedAt: T - 2500 }),
+    s('d-md5', { name: 'Ankeerklæring v5', convo: 'Skado – energima', source: 'Claude Cowork', key: 'fil:/x/Ankeerklæring v5.md', tags: ['dokument'], capturedAt: T - 2000 }),
+    s('d-pdf', { name: 'Ankeerklæring v5', convo: 'Skado – energima', source: 'Claude Cowork', key: 'fil:/x/Ankeerklæring v5.pdf', tags: ['dokument'], capturedAt: T - 1900 }),
+    // fangede svar uten samtale-sak: samlet rad for gruppen, ingen skriving
+    s('g1', { project: 'aksjer', name: 'Jeg legger opp et kurs i trinn', convo: 'Tokenisering av eiendeler', source: 'ChatGPT', key: 'svar:y:1', tags: ['svar', 'auto'] }),
+    s('g2', { project: 'aksjer', name: 'Trinn 2', convo: 'Tokenisering av eiendeler', source: 'ChatGPT', key: 'svar:y:2', tags: ['svar', 'auto'], capturedAt: T + 1000 }),
+    // økt-sak fra hooken: samtalen selv, tittel uten «Økt:»
+    s('økt', { project: 'empty', name: 'Økt: Opptre som en advokat med spesialfelt innen avtale og e', convo: 'Opptre som en advokat med spesialfelt innen avtale og eiend…', source: 'Claude', key: 'okt:z', tags: ['økt', 'auto'] }),
+    s('økt-sv', { project: 'empty', name: 'Verifisering og oppdatert anke (v3)', convo: 'Opptre som en advokat med spesialfelt innen avtale og eiend…', source: 'Claude', key: 'svar:z:1', tags: ['svar', 'auto'] }),
+    // drift: sync, helsesjekk, status-kopier, gjentatte kjøringer
+    s('h', { project: 'TUA', name: 'Helsesjekk 2026-10-28', source: 'Tua', key: 'helsesjekk:2026-10-28', tags: ['helsesjekk', 'auto'] }),
+    s('c', { project: 'Tua_tua', name: 'Commit-logg — tua', source: 'Claude Code · sync', key: 'commit-logg:tua' }),
+    s('st1', { project: 'Tua_tua', name: 'Tua 2.0 — status', source: 'Claude', key: 'fil:/a/status.md', tags: ['dokument'] }),
+    s('st2', { project: 'Tua_tua', name: 'Tua 2.0 — status', source: 'Claude', key: 'fil:/b/status.md', tags: ['dokument'], capturedAt: T - DAY }),
+    s('dok', { project: 'Tua_tua', name: 'Gjennomgang av appen', source: 'Claude Code · sync', key: 'dok:concepts/34/samlet.html', tags: ['dokument'] }),
+    ...[1, 2, 3].map((i) => s('uke' + i, { project: 'Ionian', kind: 'samtale', name: 'Ionian realty weekly sweep', convo: 'Ionian realty weekly sweep', source: 'Claude Cowork', key: 'samtale:u' + i, capturedAt: T - i * 7 * DAY })),
+    s('erik', { project: 'Intern Erik', name: 'Status for meg selv', source: 'Erik', key: 'status:meg' }),
+  ]
+  const f = regler.flateRader(alleA)
+  const sk = f.samtaler.find((r) => r.convo === 'Skado – energima')
+  ok('A0: samtalen er ÉN rad — spørsmålet og svarene (også fangede svar:-saker) foldes inn, ingen egne rader', !!sk && sk.id === 'logg' && sk.spørsmål === 1 && sk.svar === 2 && f.samtaler.filter((r) => r.convo === 'Skado – energima').length === 1
+    && !f.dokumenter.some((r) => ['p1', 'sv1', 'sv2'].includes(r.id)) && regler.avisRader(f).every((r) => !['p1', 'sv1', 'sv2'].includes(r.id)))
+  ok('A0: dokumentene er egne rader med «fra samtalen», og samtalen viser dokumentene den laget', f.dokumenter.some((r) => r.fra?.id === 'logg') && sk.dokumenter.length === 1 && sk.dokumenter[0].id === 'd-md5')
+  const g = f.samtaler.find((r) => r.convo === 'Tokenisering av eiendeler')
+  ok('A0: uten samtale-sak lages en samlet rad for gruppen (ingen skriving) — åpnes på nyeste sak', !!g && g.samlet === true && g.svar === 2 && f.samtaler.filter((r) => r.convo === 'Tokenisering av eiendeler').length === 1)
+  const ø = f.samtaler.find((r) => r.project === 'empty')
+  ok('A0/A4: hookens «Økt:»-sak er samtalen selv, og tittelen er kort og uten prefiks', !!ø && ø.id === 'økt' && ø.svar === 1 && ø.navn === 'Advokat med spesialfelt innen avtale', ø?.navn)
+  ok('A0b: kildefargen følger raden — samtalen med modellen den ble ført med (ChatGPT → kf-gpt), dokumentet med modellen som skrev (Cowork → kf-claude)', g.kilde === 'kf kf-gpt' && sk.kilde === 'kf kf-claude' && f.dokumenter.find((r) => r.id === 'd-md5')?.kilde === 'kf kf-claude')
+  const ank = f.dokumenter.filter((r) => /ankeerklæring/i.test(r.navn))
+  ok('A3: ett dokument, én rad — md og PDF er merker, eldre versjon (v4) bak «v2»', ank.length === 1 && ank[0].formater.includes('md') && ank[0].formater.includes('PDF') && ank[0].antallVersjoner === 3 && ank[0].sak.id === 'd-md5', JSON.stringify(ank.map((r) => [r.navn, r.formater, r.antallVersjoner])))
+  ok('A2: drift (helsesjekk, commit-logg fra sync, «— status»-kopier som én linje, gjentatte kjøringer ≥ 3) står ikke i avisen; dok: fra sync og Eriks egne saker gjør det',
+    ['h', 'c', 'st1', 'st2', 'uke1'].every((id) => !regler.avisRader(f).some((r) => r.ider.includes(id))) && f.drift.filter((r) => r.ider.includes('st1')).length === 1 && f.drift.find((r) => r.ider.includes('st1')).ider.includes('st2')
+    && f.drift.some((r) => r.ider.includes('uke1') && r.ider.includes('uke3')) && f.dokumenter.some((r) => r.id === 'dok') && f.dokumenter.some((r) => r.id === 'erik'))
+  ok('A2: «Tua-drift · N i dag»', regler.driftTekst(f.drift, T) === `Tua-drift · ${f.drift.filter((r) => r.tid >= new Date(new Date(T).setHours(0, 0, 0, 0)).getTime()).length} i dag` && /^Tua-drift · \d+$/.test(regler.driftTekst([], T)))
+  ok('A4: visTittel — «Økt:» bort, promptstart kort; vanlige titler uendret', regler.visTittel('Økt: Tua 2.0 onboarding') === 'Tua 2.0 onboarding' && regler.visTittel('Du lager min daglige greske morgenbriefing.') === 'Daglige greske morgenbriefing' && regler.visTittel('Ankeerklæring v5') === 'Ankeerklæring v5')
+  ok('A7: «empty» vises som «Uten prosjekt»', regler.prosjektVis('empty') === 'Uten prosjekt' && regler.prosjektVis('') === 'Uten prosjekt' && regler.prosjektVis('Tua_tua') === 'Tua_tua')
+  ok('A5: Siden sist høyst tre linjer, resten bak «+ N til»', regler.sidenSistKutt([1, 2, 3, 4, 5]).vis.length === 3 && regler.sidenSistKutt([1, 2, 3, 4, 5]).flere === 2 && regler.sidenSistKutt([1, 2]).flere === 0 && regler.sidenSistKutt([1, 2, 3, 4], true).vis.length === 4)
+  // A1: søket som én liste, gruppert prosjekt → samtaler → dokumenter; relevans virker i alle visninger
+  const rang = new Map([['dok', 0], ['sv2', 1], ['økt-sv', 2], ['d-pdf', 3]])
+  const fl = regler.søkeFlate('energima anke', { flate: f, rang, prosjekter: [{ navn: 'Energima anke', via: 'navn', alias: [] }], sortering: 'relevans' })
+  ok('A1: søket er én liste gruppert prosjekt → samtaler → dokumenter; prosjektnavnet som treffer står øverst, så etter beste treff', fl[0]?.navn === 'Energima anke' && fl[1]?.navn === 'Tua_tua' && fl.find((p) => p.navn === 'Oppgjør Skado')?.samtaler[0]?.id === 'logg'
+    && fl.find((p) => p.navn === 'Oppgjør Skado')?.dokumenter[0]?.id === 'd-md5' && fl.find((p) => p.navn === 'empty')?.vis === 'Uten prosjekt', JSON.stringify(fl.map((p) => [p.navn, p.rang])))
+  const flD = regler.søkeFlate('energima anke', { flate: f, rang, prosjekter: [], sortering: 'dato' })
+  ok('A1: dato-bryteren sorterer prosjektene og radene på dato', flD.length === 3 && flD.every((p, i) => i === 0 || flD[i - 1].sist >= p.sist))
+  const rader2 = [{ id: 'a', ider: ['x'], tid: 3 }, { id: 'b', ider: ['y'], tid: 2 }, { id: 'c', ider: ['z'], tid: 1 }]
+  ok('A1/§6: sorterRader — relevans følger rangen (også i Dokumenter), uten rang sist; dato siste først', regler.sorterRader(rader2, { sortering: 'relevans', rang: new Map([['z', 0], ['y', 1]]) }).map((r) => r.id).join('') === 'cba'
+    && regler.sorterRader(rader2).map((r) => r.id).join('') === 'abc')
+  ok('flateRader: filteret (passer) gjelder en sak i raden', regler.flateRader(alleA, { passer: (a) => a?.id === 'sv2' }).samtaler.map((r) => r.id).join() === 'logg' && regler.flateRader(alleA, { passer: (a) => a?.id === 'sv2' }).dokumenter.length === 0)
+}
+
 console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT}`)
 process.exit(feil ? 1 : 0)
