@@ -50,6 +50,7 @@ ok('testarkiv skrevet', fs.existsSync(path.join(ROOT, 'Testprosjekt')), ROOT)
   const l = await mottakere()
   ok('mottakere: test og test2 finnes (TUA_TESTMOTTAKERE=2), begge aktive, ingen av dem standard', l.some((m) => m.id === 'test' && m.aktiv) && l.some((m) => m.id === 'test2' && m.aktiv && m.test) && !l.some((m) => m.test && m.standard), JSON.stringify(l.map((m) => [m.id, m.aktiv, m.standard])))
   ok('mottakere: Mistral er mottaker (api.mistral.ai, EU, egen nøkkel) — ikke klar under testprefikset, aldri standard', (() => { const m = l.find((x) => x.id === 'mistral'); return m && m.endpoint === 'api.mistral.ai' && m.nøkkel === 'ikke satt' && m.aktiv === false && !m.standard && m.trust?.region === 'EU' && typeof m.tegnPerToken === 'number' })(), JSON.stringify(l.find((x) => x.id === 'mistral')?.hvorfor))
+  ok('mottakere: OpenAI (GPT) er mottaker (api.openai.com, USA, egen nøkkel, budsjett 150k) — ikke klar under testprefikset, aldri standard', (() => { const m = l.find((x) => x.id === 'openai'); return m && m.endpoint === 'api.openai.com' && m.nøkkel === 'ikke satt' && m.aktiv === false && !m.standard && m.trust?.region === 'USA' && m.budsjett === 150000 })(), JSON.stringify(l.find((x) => x.id === 'openai')?.hvorfor))
   const v = await vurderer()
   ok('vurderer: TUA_VURDERER=test gir test-mottakeren som vurderer', v.m?.id === 'test', v.grunn)
 }
