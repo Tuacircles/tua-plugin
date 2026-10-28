@@ -24,6 +24,7 @@ import {
   linksFor, fileOf, sources, renderStatus, isVault, vaultClamp, hasExternalEdits,
 } from './store.js'
 import { lever, skjermerFor } from './motor.js'                                   // runde 3a: kortet gjennom motoren
+import { utfordringInfo } from './utfordring.js'   // skive C (arb. 34): «Utfordret av …» i kortet
 import { samtaleInfo, samtaleLinje } from './samtale.js'   // skive 1+4 (arb. 33): samtaler som samtaler i kortet («4 vendinger · siste 27.10 · gemma3 · konklusjon låst», lenke til #samtale/<id>)
 import { delingerFor, lenkerFor } from './deling.js'                               // runde 3b: delingen (lenke, mottakere, trukket) på en delingssak
 import { sidenSist, skalVise, trådFørst, instruksFor } from './dora.js'          // runde 3a: Tua → Claude
@@ -73,6 +74,7 @@ function atomCard(atoms, cur, level, context, { client = 'Claude' } = {}) {
   return {
     id: cur.id, name: lv.felt.navn, project: cur.project, convo: lv.felt.samtale, source: cur.source || '',
     ...(samtale ? { samtale } : {}),
+    ...((u) => (u ? { utfordret: { tekst: u.tekst, av: u.av, dato: u.dato, innvendinger: u.innvendinger, tatt_inn: u.tatt_inn, låst: u.låst } } : {}))(utfordringInfo(atoms, cur)),   // skive C
     date: date(cur.capturedAt), version: cur.version || 1, kind: cur.kind || 'capture', tags: cur.tags || [],
     level: eff, max, vault: isVault(cur), stale, clipped: lv.linje || '', shielded: lv.treff, logged: lv.logget,
     S: lv.felt.S, why: lv.felt.hvorfor,
@@ -98,6 +100,7 @@ const atomText = (a) =>
   (a.builtBy.length ? `Bygget av: ${a.builtBy.map((s) => `[${s.id}] ${s.name} v${s.version}/${s.level}${s.stale ? ' ⚠' : ''}`).join(' · ')}\n` : '') +
   (a.deling ? `Delt med: ${a.deling.til.map((t) => t.navn).join(', ')} · nivå ${a.deling.nivå}${a.deling.trukket ? ' · TRUKKET TILBAKE' : ` · mottakersiden: ${a.deling.http} · som fil: ${a.deling.html}`}${a.deling.forespørsler ? ` · ${a.deling.forespørsler} forespørsel/-ler om hele` : ''}\n` : '') +
   (a.samtale ? `${a.samtale.linje}\n` : '') +
+  (a.utfordret ? `${a.utfordret.tekst}${a.utfordret.låst ? ' · låst' : ''}\n` : '') +
   `Adresse: ${a.address}\n\n${a.text}`
 
 // ── «Åpne i …» fra kortet: samme faste liste som broen (V13). Aldri shell. macOS: open · Windows: explorer/rundll32 · Linux: xdg-open (platform.js)

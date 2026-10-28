@@ -8,6 +8,7 @@ import { ensureArchive, archiveOptions, FILES_ROOT, filesMode, rootLabel, choose
 import { DEFAULT_MIN, processInbox, processInboxShares, inboxPending, importShare, importDesktop, importFinder, importAll, historyCounts, importCode, watchInbox, watchDesktop, historyLine } from './bygd/tua/import.mjs';
 import { watchFinder } from './bygd/tua/finder.mjs';
 import { skjermerFor, lever, endepunkt, maksNivå as maksNiv_, leverSamtale, MotorFeil, anslåTokens as ansl_Tokens, ord, del } from './bygd/tua/motor.mjs';
+import { utfordringInfo } from './bygd/tua/utfordring.mjs';
 import { finnSamtale, samtaleInfo, samtaleLinje as samtaleLinje$1 } from './bygd/tua/samtale.mjs';
 import { instruksFor, trådFørst as tr_dF_rst, trådLinje as tr_dLinje, skalVise, sidenSist } from './bygd/tua/dora.mjs';
 import { lesInnInnboks } from './bygd/tua/innlesing.mjs';
@@ -367,6 +368,7 @@ server.registerTool(
     const lines = hits.map(({ atom: a, S, max, snippet: s, tråd }, i) =>
       `${i + 1}. [${a.id}] ${sk.skjerm(a.name)}\n   ${a.project}${refMark(a, max)} · ${sk.skjerm(a.convo || '—')} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
       (tråd ? `\n   ${sk.skjerm(tr_dLinje(tråd))}${tråd.traff.length > 1 ? ` · traff også: ${tråd.traff.filter((id) => id !== a.id).map((id) => `[${id}]`).join(' ')}` : ''}` : '') +
+      ((u) => (u ? `\n   ${u.tekst}${u.låst ? ' · låst' : ''}` : ''))(utfordringInfo(atoms, a)) +   // skive C: utfordret av …
       (a.kind === 'samtale' ? `\n   ${samtaleLinje(atoms, a)}` : '') +   // skive 1 (arb. 33): «Samtale i Tua: 4 vendinger, siste 27.10.2026»
       `\n   ${sLabel(S)}: ${sk.skjerm(S.text)}${staleNote(a, 'S')}` +
       (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${sk.skjerm(a.summary)}` : '') +
@@ -430,6 +432,7 @@ server.registerTool(
         (a.tags?.length ? `\nTagger: ${a.tags.join(', ')}` : '') +
         (cur.refs?.length ? `\nSynlig også i: ${shareLine(cur)}` : '') +
         (cur.fanget ? '\nFanget: automatisk (hook/import), ikke løftet inn — står utenfor avisen og søket til brukeren beholder, slår sammen eller kaster den i appen' : '') +
+        ((u) => (u ? `\n${u.tekst} (${u.sjekkNavn.toLowerCase()}${u.låst ? ', låst' : u.åpne ? `, ${u.åpne} ikke vurdert` : ''}${u.antall > 1 ? `, ${u.antall} utfordringer i alt` : ''})` : ''))(utfordringInfo(atoms, cur)) +   // skive C
         (cur.kind === 'samtale' ? `\n${samtaleLinje(atoms, cur)}\nTranskriptet: S = siste vending, M = sammendrag, L = alt. Fortsett samtalen med flere vendinger: tua_compose(samtale=«${id}»).` : '') +   // skive 4 (arb. 33)
         `\nAdresse: ${cur.kind === 'samtale' ? `${APP}#samtale/${encodeURIComponent(id)}` : addr(id)}` +
         openLines(cur) +

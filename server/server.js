@@ -38,6 +38,7 @@ import {
 } from './import.js'   // M14: «ta med historikken» + Innboks
 import { watchFinder } from './finder.js'
 import { lever, del, skjermerFor, endepunkt, maksNivå, anslåTokens, ord, leverSamtale, MotorFeil } from './motor.js'   // runde 3a: Claude-døra gjennom motoren (lese → klippe → skjerme → logge) · skive 4 (arb. 33): en samtale gjennom motoren
+import { utfordringInfo } from './utfordring.js'   // skive C (arb. 34): «Utfordret av ChatGPT 28.10 · 3 innvendinger · 2 tatt inn» i tua_get og tua_search
 import { finnSamtale, samtaleInfo, samtaleLinje as samtaleLinjeAv } from './samtale.js'   // skive 1+4 (arb. 33): samtaler vises som samtaler («4 vendinger · siste 27.10 · gemma3, Claude · konklusjon låst · fortsett i Tua: …#samtale/<id>»), tua_compose kan ta en samtale
 import { sidenSist, skalVise, trådFørst, trådLinje, instruksFor } from './dora.js'              // runde 3a: Tua → Claude (Siden sist, tråder øverst, instruksen)
 // M17: vaktene — Innboks (eksporter og delte lenker), Desktop-cachen (hvert 10. min), Finder-mappene. Ingenting før arkivet er valgt.
@@ -374,6 +375,7 @@ server.registerTool(
     const lines = hits.map(({ atom: a, S, max, snippet: s, tråd }, i) =>
       `${i + 1}. [${a.id}] ${sk.skjerm(a.name)}\n   ${a.project}${refMark(a, max)} · ${sk.skjerm(a.convo || '—')} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
       (tråd ? `\n   ${sk.skjerm(trådLinje(tråd))}${tråd.traff.length > 1 ? ` · traff også: ${tråd.traff.filter((id) => id !== a.id).map((id) => `[${id}]`).join(' ')}` : ''}` : '') +
+      ((u) => (u ? `\n   ${u.tekst}${u.låst ? ' · låst' : ''}` : ''))(utfordringInfo(atoms, a)) +   // skive C: utfordret av …
       (a.kind === 'samtale' ? `\n   ${samtaleLinje(atoms, a)}` : '') +   // skive 1 (arb. 33): «Samtale i Tua: 4 vendinger, siste 27.10.2026»
       `\n   ${sLabel(S)}: ${sk.skjerm(S.text)}${staleNote(a, 'S')}` +
       (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${sk.skjerm(a.summary)}` : '') +
@@ -438,6 +440,7 @@ server.registerTool(
         (a.tags?.length ? `\nTagger: ${a.tags.join(', ')}` : '') +
         (cur.refs?.length ? `\nSynlig også i: ${shareLine(cur)}` : '') +
         (cur.fanget ? '\nFanget: automatisk (hook/import), ikke løftet inn — står utenfor avisen og søket til brukeren beholder, slår sammen eller kaster den i appen' : '') +
+        ((u) => (u ? `\n${u.tekst} (${u.sjekkNavn.toLowerCase()}${u.låst ? ', låst' : u.åpne ? `, ${u.åpne} ikke vurdert` : ''}${u.antall > 1 ? `, ${u.antall} utfordringer i alt` : ''})` : ''))(utfordringInfo(atoms, cur)) +   // skive C
         (cur.kind === 'samtale' ? `\n${samtaleLinje(atoms, cur)}\nTranskriptet: S = siste vending, M = sammendrag, L = alt. Fortsett samtalen med flere vendinger: tua_compose(samtale=«${id}»).` : '') +   // skive 4 (arb. 33)
         `\nAdresse: ${cur.kind === 'samtale' ? `${APP}#samtale/${encodeURIComponent(id)}` : addr(id)}` +
         openLines(cur) +

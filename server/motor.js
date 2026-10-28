@@ -37,6 +37,7 @@ import { fileURLToPath } from 'node:url'
 import { load, save, upsert, levelOf, clampLevel, maxLevel, isVault, logDelivery, setStatus, statusOf, LEVELS, LONG_L, FILES_ROOT, filesMode, DATA_DIR, hashOf, markDirty, readConfig } from './store.js'
 import { samtaleForSpor, samtaleFor, finnSamtale, vendingerFor, standardVendinger, oppdaterSamtale, pekPåSamtale, erTuaSamtale, erSyntetiskId } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak, vendingene i hvert kall
 import { readKey, hasKey, ollamaStatus } from './keychain.js'
+import { SJEKKER, sjekkAv, instruksFor, tolkInnvendinger, STATUSER, utfordringerFor, infoAv, samtaleDokumenter, resultatVending, kortKontroll } from './utfordring.js'   // skive C (arb. 34): Utfordre — de rene reglene
 import { OLLAMA_URL, OLLAMA_VERT } from './ollama.js'   // friksjon 12: adressen og standardmodellen (ollamaStatus().modell) bor der
 import { løsMottakere, registrerDeling, skrivMottakere, lagreDeling, hentDeling, delingerFor, trekkTilbake, noterForespørsel, lenkerFor, nyttToken, eier, mottakerside, trukketSide, BASE } from './deling.js'   // runde 3b: personer, sirkler som emerger, delinger med token, mottakersiden
 
@@ -425,6 +426,15 @@ async function sendTest({ system, melding, kontekst, oppgave, messages }, { onDe
     const flat = String(kontekst).replace(/^## .*\n+/, '').replace(/\s+/g, ' ').trim()
     const ut = JSON.stringify({ S: `Test-ingress: ${flat.slice(0, 200)}`, M: `Test-sammendrag (ingenting sendt ut av maskinen): ${flat.slice(0, 1200)}` })
     await strøm(ut, onDel); return testSvar(ut, inn, 'test')
+  }
+  if (oppgave === 'utfordre') {   // skive C: faste, tolkbare innvendinger — tre stykker på formen instruksen ber om
+    const ut = '1. Påstanden i første avsnitt er ikke begrunnet.\n   Hvor: første avsnitt\n   Begrunnelse: Svaret sier det som sikkert, men viser ikke til noe i kildene (test-mottakeren, ingenting sendt ut av maskinen).\n\n' +
+      '2. Et tall er ikke sjekket mot kilden.\n   Hvor: midt i svaret\n   Begrunnelse: Tallet bør stå i kilden det er hentet fra.\n\n3. Motpartens syn er ikke nevnt.\n   Hvor: konklusjonen\n   Begrunnelse: Uten den andre siden virker svaret ensidig.'
+    await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
+  }
+  if (oppgave === 'ny-versjon') {
+    const ut = `Ny versjon fra test-mottakeren (ingenting er sendt ut av maskinen), med ${(String(kontekst).match(/^- /gm) || []).length} godtatte innvendinger tatt inn.\n\n${String(kontekst).split('## Svaret')[1]?.split('## ')[0]?.trim().slice(0, 400) || ''}`
+    await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
   }
   const ut = `Ekko fra test-mottakeren (ingenting er sendt ut av maskinen).\n\nSystem: ${system}\n\n${tekstAv(meldingerAv({ messages, melding, kontekst }))}`   // skive 1: med vendinger ekkoes hele lista, merket per rolle
   await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
@@ -1169,3 +1179,231 @@ export function mottakersideFor(token, { base, frittstående = false } = {}) {
   return { kode: 200, html: mottakerside(d, { base: base || BASE(), frittstående }), deling: d }
 }
 const fmtTid = (d) => d.toLocaleString('no-NO', { dateStyle: 'short', timeStyle: 'short' })
+
+// ── 8) Utfordre (skive C i arbeidsstykke 34, §5 C1–C4, V23, 28.10.2026) ──────────────────────────────────────────────
+// «Også til …» spurte på nytt; ingen modell ble bedt om å finne feil i SVARET. Nå: en kontrollmodell Erik velger hver gang får bare RESULTATET og
+// KILDENE det bygger på (C3) — aldri transkriptet — med én av fire ferdige instrukser (utfordring.SJEKKER), gjennom de samme trinnene som spor():
+// fail closed (Vault bare lokalt, nivå etter Trust Score) → skjerm → send → avskjerm → Utlevert-linje (tool: utfordre). Svaret tolkes til innvendinger.
+//   utfordringsGrunnlag()  hva som sendes: resultatet (saken på L, en konklusjon, eller et svar i en samtale — også en vending fra transkriptet) på det høyeste
+//                          kontrollmodellen får, og kildene (bygget_av, dokumentene samtalen skrev) på standardnivået. Over budsjettet: kildene ned L → M → S,
+//                          så færre kilder, og først til slutt kuttes resultatet — hvert kutt er en notat-linje («Kildene er kuttet til M …»).
+//   forhåndsvisUtfordring() Sendes-linja før noe sendes: nivå, ca. tokens, budsjett, antall skjermet, kildene — ingenting sendes eller logges.
+//   utfordre()             sender; lagrer instruksen som prompt-sak (V16, prompt:utfordre:<sjekk> i sakens prosjekt, `ga` vokser) og utfordringen som egen sak:
+//                          kind svar, tagger svar + utfordring + mottakeren, `utfordrer` → saken {id, version, vending?}, `utfordring` {sjekk, mottaker, label, modell,
+//                          forfatter, dato, innvendinger [{nr, tekst, hvor, begrunnelse, status}], låst}. Bygget_av → prompten, resultatet og kildene.
+//   settInnvending()       åpen · godtatt · avvist — metadata på utfordringen, ingen ny versjon av teksten.
+//   nyVersjon()            forfattermodellen (eller valgt) skriver resultatet på nytt med de GODTATTE innvendingene: sak kind svar, tagg ny-versjon, nøkkel ny-versjon:<utfordring>
+//                          («igjen» gir ny versjon av samme sak), bygget_av → utfordringen og resultatet. Samme trinn og egen Utlevert-linje (tool: ny-versjon).
+//   låsUtfordring()        «Lås med innvendingene»: en konklusjon (endelig, tagg utfordring — den står på saken, ikke som egen rad) med det som ble tatt inn,
+//                          avvist og ikke vurdert, bygget_av → saken, utfordringen og en ny versjon når den finnes. Utfordringen merkes låst. Ingenting sendes.
+const SYSTEM_KONTROLL = `${SYSTEM} Du er kontrollmodell: du vurderer et svar en annen modell har skrevet. Svar bare med innvendingene, på formen du blir bedt om.`
+const UTFORDRE_MAKS_KILDER = 8
+const ned = (n) => (n === 'L' ? 'M' : 'S')
+const nivåTekst = (ks) => [...new Set(ks.map((k) => k.level))].join('/')
+function finnKontroll(mId) {
+  const m = lagMottakere().find((x) => x.id === mId)
+  if (!m) throw new MotorFeil(`ukjent kontrollmodell «${mId}» — en av ${lagMottakere().map((x) => x.id).join(', ')}`)
+  return m
+}
+// Resultatet som skal utfordres, og kildene det bygger på. sak = en sak-id (dokument, svar, konklusjon) eller en samtale; vending = et svar i samtalen.
+export function utfordringsMål(atoms, { sak: sakId, vending: vId = null } = {}) {
+  const a = atoms.find((x) => x.id === sakId) || null
+  const samtale = a?.kind === 'samtale' ? a : vId ? finnSamtale(atoms, sakId) : null
+  if (!a && !samtale) throw new MotorFeil(`fant ikke sak ${sakId}`)
+  let resultat, mål = a || samtale, vending = null
+  if (samtale && (a?.kind === 'samtale' || vId)) {
+    const vend = vendingerFor(atoms, samtale)
+    const v = vId ? vend.find((x) => x.id === vId) : resultatVending(vend)
+    if (!v) throw new MotorFeil(vId ? `fant ikke svaret ${vId} i samtalen «${samtale.name}»` : `samtalen «${samtale.name}» har ikke noe svar å utfordre ennå`)
+    vending = v
+    const sakV = v.syntetisk ? null : atoms.find((x) => x.id === v.id) || null
+    resultat = sakV ? { atom: sakV, id: sakV.id, name: sakV.name, version: sakV.version || 1, vault: isVault(sakV) }
+      : { atom: { id: samtale.id, name: `Resultat: ${samtale.name}`, content: v.L || '', levels: v.S ? { S: { text: v.S } } : undefined, version: samtale.version || 1 }, id: samtale.id, name: `Resultat i «${samtale.name}»`, version: samtale.version || 1, vault: isVault(samtale) || !!v.vault, syntetisk: true }
+    mål = samtale
+  } else resultat = { atom: a, id: a.id, name: a.name, version: a.version || 1, vault: isVault(a) }
+  const forfatter = String(vending ? (vending.kilde && vending.kilde !== 'Tua' ? vending.kilde : vending.modell) || '' : resultat.atom.source || '').trim()
+  // kildene: det resultatet er bygget av (ikke prompten, samtalen, Forskjeller eller andre utfordringer), og dokumentene samtalen skrev
+  const nei = new Set([resultat.id, mål.id])
+  const fraBygget = (resultat.atom.derivedFrom || []).map((d) => atoms.find((x) => x.id === d.id)).filter((x) => x && !['prompt', 'samtale'].includes(x.kind) && !(x.tags || []).includes('forskjeller') && !x.utfordring)
+  const fraSamtale = samtale ? samtaleDokumenter(atoms, samtale) : []
+  const kilder = [...new Map([...fraBygget, ...fraSamtale].filter((x) => !nei.has(x.id)).map((x) => [x.id, x])).values()].slice(0, UTFORDRE_MAKS_KILDER)
+  return { mål, samtale, vending, resultat, forfatter, kilder }
+}
+export function utfordringsGrunnlag(atoms, { sak, vending = null, sjekk, mottaker: mId, sk = null } = {}) {
+  const s = sjekkAv(sjekk); if (!s) throw new MotorFeil(`ukjent sjekk «${sjekk}» — en av ${SJEKKER.map((x) => x.id).join(', ')}`)
+  const m = finnKontroll(mId)
+  const mål = utfordringsMål(atoms, { sak, vending })
+  const maks = maksNivå(m)
+  // Vault (V15, C2): bare en lokal modell får utfordre. Ikke klipp i stillhet til S — en kontroll av ingressen er verdiløs.
+  const vaultSaker = [mål.resultat, ...mål.kilder.map((k) => ({ name: k.name, vault: isVault(k) }))].filter((x) => x.vault)
+  if (vaultSaker.length && !m.local) throw new Blokkert(`Utfordringen er stoppet: ${vaultSaker.map((x) => `«${x.name}»`).join(', ')} er Vault-merket og kan bare utfordres av en lokal modell. Velg Ollama (eller en annen lokal modell).`, vaultSaker.map((x) => `«${x.name}» er Vault-merket`))
+  const notater = []
+  let resNivå = clampLevel('L', maks)
+  if (resNivå !== 'L') notater.push(`${m.label} har Trust Score ${Number(m.trust?.score) || 1}/5 og får svaret på ${resNivå}, ikke hele (L).`)
+  let ks = mål.kilder.map((k) => ({ atom: k, id: k.id, name: k.name, version: k.version || 1, vault: isVault(k), level: standardNivå(m, k) }))
+  sk = sk || lagSkjermer(kjentePersoner(atoms))
+  const instruks = instruksFor(s.id)
+  let resTekst = levelOf(mål.resultat.atom, resNivå).text.trim(), kuttet = false
+  const bygg = () => {
+    const deler = [`## Svaret som skal utfordres (${mål.forfatter ? `skrevet av ${mål.forfatter}` : 'forfatter ukjent'}, nivå ${resNivå}${kuttet ? ', kuttet' : ''})\n\n${sk.skjerm(resTekst)}`,
+      ...ks.map((k) => `## Kilde: ${sk.skjerm(k.name)}\n_v${k.version} · nivå ${k.level}_\n\n${sk.skjerm(levelOf(k.atom, k.level).text.trim())}`)]
+    const kontekst = deler.join('\n\n')
+    return { kontekst, sendes: `${SYSTEM_KONTROLL}\n\n${byggMelding(instruks, kontekst)}` }
+  }
+  // budsjettet (C3): kildene ned først, så færre kilder, så kuttes svaret — og det sies
+  const budsjett = m.budsjett || budsjettFor(m.id)
+  let b = bygg(), tokens = anslåTokens(b.sendes, m.id)
+  const førKilder = ks.map((k) => k.level).join('')
+  for (const steg of ['M', 'S']) { if (!budsjett || tokens <= budsjett) break; let endret = false; for (const k of ks) if (LEVELS.indexOf(k.level) > LEVELS.indexOf(steg)) { k.level = steg; endret = true } if (endret) { b = bygg(); tokens = anslåTokens(b.sendes, m.id) } }
+  if (ks.map((k) => k.level).join('') !== førKilder) notater.push(`Kildene er kuttet til ${nivåTekst(ks)} for å holde budsjettet (${budsjett.toLocaleString('no-NO')} tokens hos ${m.label}).`)
+  const førAntall = ks.length
+  while (budsjett && tokens > budsjett && ks.length) { ks = ks.slice(0, -1); b = bygg(); tokens = anslåTokens(b.sendes, m.id) }
+  if (ks.length < førAntall) notater.push(`${førAntall - ks.length} av ${førAntall} kilder er tatt ut for å holde budsjettet.`)
+  if (budsjett && tokens > budsjett) {
+    const tegnPer = TEGN_PER_TOKEN[m.id] || 3.5
+    const rom = Math.max(400, Math.floor((budsjett - anslåTokens(`${SYSTEM_KONTROLL}\n\n${instruks}`, m.id) - 60) * tegnPer))
+    const før = resTekst.length
+    resTekst = resTekst.slice(0, rom).trimEnd() + '…'; kuttet = true; b = bygg(); tokens = anslåTokens(b.sendes, m.id)
+    notater.push(`Svaret er kuttet til de første ${resTekst.length.toLocaleString('no-NO')} av ${før.toLocaleString('no-NO')} tegn for å holde budsjettet — resten blir ikke sjekket.`)
+  }
+  const kilderSendt = [{ id: mål.resultat.id, name: mål.resultat.name, version: mål.resultat.version, level: resNivå, vault: mål.resultat.vault }, ...ks.map(({ id, name, version, level, vault }) => ({ id, name, version, level, vault }))]
+  sjekkTillatt(m, kilderSendt)   // fail closed som alltid (Trust Score) — Vault er tatt over
+  return { m, sjekk: s, instruks, ...b, tokens: { ca: tokens }, budsjett: budsjett || null, over: !!budsjett && tokens > budsjett, sk, notater, mål, resultat: { id: mål.resultat.id, name: mål.resultat.name, nivå: resNivå, tegn: resTekst.length, kuttet, syntetisk: !!mål.resultat.syntetisk },
+    kilder: ks.map(({ id, name, version, level }) => ({ id, name, version, level })), kilderSendt }
+}
+const linjeAv = (g) => `Sendes: svaret på ${g.resultat.nivå}${g.kilder.length ? ` · ${g.kilder.length} ${g.kilder.length === 1 ? 'kilde' : 'kilder'} på ${nivåTekst(g.kilder.map((k) => ({ level: k.level })))}` : ' · ingen kilder'} · ${g.sk.treff ? `${g.sk.treff} skjermet` : 'ingenting skjermet'} · ca. ${g.tokens.ca.toLocaleString('no-NO')} tokens${g.over ? ' — over budsjettet' : ''} → ${g.m.label}`
+export function forhåndsvisUtfordring({ sak, vending = null, sjekk = 'svakheter', mottaker } = {}) {
+  if (!sak) throw new MotorFeil('sak kreves')
+  if (!mottaker) throw new MotorFeil('mottaker kreves — velg kontrollmodellen')
+  const atoms = load()
+  try {
+    const g = utfordringsGrunnlag(atoms, { sak, vending, sjekk, mottaker })
+    return { mottaker: g.m.id, label: g.m.label, sjekk: g.sjekk.id, instruks: g.instruks, tekst: g.sendes, tokens: g.tokens, budsjett: g.budsjett, over: g.over, antall: { ...g.sk.antall }, treff: g.sk.treff,
+      resultat: g.resultat, kilder: g.kilder, notater: g.notater, forfatter: g.mål.forfatter, linje: linjeAv(g), blokkert: null }
+  } catch (e) {
+    if (!(e instanceof Blokkert)) throw e
+    return { mottaker, blokkert: { feil: e.message, detaljer: e.detaljer } }
+  }
+}
+// Utfordringene av en sak (nyeste først) slik panelet viser dem — og hvem som skrev resultatet
+export function utfordringerAv(sak, { vending = null } = {}) {
+  const atoms = load()
+  const mål = utfordringsMål(atoms, { sak, vending })
+  return { sak: mål.mål.id, navn: mål.mål.name, forfatter: mål.forfatter, vault: !!mål.resultat.vault || isVault(mål.mål), resultat: { id: mål.resultat.id, name: mål.resultat.name, syntetisk: !!mål.resultat.syntetisk, vending: mål.vending?.id || null },
+    kilder: mål.kilder.map((k) => ({ id: k.id, name: k.name })), sjekker: SJEKKER.map(({ id, navn, kort, instruks }) => ({ id, navn, kort, instruks: instruksFor(id) })),
+    utfordringer: utfordringerFor(atoms, mål.mål).map(utfordringVis) }
+}
+export const utfordringVis = (u) => ({ id: u.id, version: u.version || 1, ...u.utfordring, sjekkNavn: sjekkAv(u.utfordring?.sjekk)?.navn || '', tekst: u.content || '', info: infoAv(u) })
+
+export async function utfordre({ sak, vending = null, sjekk = 'svakheter', mottaker, klient = 'app', signal, på = () => {} } = {}) {
+  if (!sak) throw new MotorFeil('sak kreves')
+  if (!mottaker) throw new MotorFeil('mottaker kreves — Erik velger kontrollmodellen hver gang (V23)')
+  const atoms = load()
+  const g = utfordringsGrunnlag(atoms, { sak, vending, sjekk, mottaker })
+  const { m, mål } = g
+  const st = await m.status(); if (!st.klar) throw new MotorFeil(`${m.label} er ikke klar: ${st.hvorfor}`)
+  if (g.sk.nye.size) kjentePersoner([], { lær: [...g.sk.nye] })
+  på('skjermet', { mottaker: m.id, antall: { ...g.sk.antall }, treff: g.sk.treff, ord: ord(g.sendes), tokens: g.tokens, tekst: g.sendes, budsjett: g.budsjett, over: g.over, resultat: g.resultat, kilder: g.kilder, notater: g.notater, linje: linjeAv(g) })
+  const proj = mål.mål.project || 'Uten prosjekt'
+  // V16: instruksen er en prompt-sak — samme sjekk i samme prosjekt er samme sak, og `ga` vokser
+  const { atom: promptAtom } = upsert(atoms, { key: `prompt:utfordre:${g.sjekk.id}`, kind: 'prompt', content: g.instruks, name: `Utfordre: ${g.sjekk.navn}`, project: proj, convo: '', tags: ['prompt', 'utfordring'], source: 'Tua', by: 'regel',
+    short: `Tuas faste instruks til kontrollmodellen: ${g.sjekk.navn.toLowerCase()} — ${g.sjekk.kort}`.slice(0, 300), summary: 'Instruksen «Utfordre» sender sammen med resultatet og kildene (skive C, V23).' })
+  save(atoms)
+  let strømmet = ''
+  const r = await m.send({ system: SYSTEM_KONTROLL, melding: g.instruks, kontekst: g.kontekst, oppgave: 'utfordre' }, { signal, onDel: (t) => { strømmet += t; på('del', { mottaker: m.id, tekst: t }) } })
+  const svarTekst = avskjerm(r.tekst || strømmet, g.sk.kobling).trim()
+  const innvendinger = tolkInnvendinger(svarTekst)
+  const tokens = { ca: g.tokens.ca, inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
+  const dato = new Date().toISOString()
+  const tittel = String(mål.mål.name || 'saken').slice(0, 60)
+  const vault = !!mål.resultat.vault || g.kilderSendt.some((k) => k.vault)
+  const { atom: u } = upsert(atoms, { key: `utfordring:${mål.mål.id}:${Date.now().toString(36)}`, kind: 'svar', content: svarTekst, name: `Utfordring (${g.sjekk.navn.toLowerCase()}): ${tittel}`.slice(0, 90), project: proj, convo: mål.mål.convo || (mål.samtale ? mål.samtale.name : ''),
+    tags: ['svar', 'utfordring', m.id, ...(vault ? ['vault'] : [])], source: m.label, by: 'regel', ...(mål.mål.hørerTil ? { hørerTil: mål.mål.hørerTil } : {}),
+    derivedFrom: [{ id: promptAtom.id, version: promptAtom.version || 1, level: 'L' }, ...g.kilderSendt.map(({ id, version, level }) => ({ id, version, level }))],
+    short: `${kortKontroll({ mottaker: m.id, label: m.label, modell: r.modell })} utfordret «${tittel}» (${g.sjekk.navn.toLowerCase()}): ${innvendinger.length ? `${innvendinger.length} ${innvendinger.length === 1 ? 'innvending' : 'innvendinger'}` : 'ingen innvendinger'}.`.slice(0, 300) })
+  u.utfordrer = { id: mål.mål.id, version: mål.mål.version || 1, ...(mål.vending ? { vending: mål.vending.id } : {}) }
+  u.utfordring = { sjekk: g.sjekk.id, mottaker: m.id, label: m.label, modell: r.modell || st.modell || m.modell || '', forfatter: mål.forfatter, dato, innvendinger, låst: false, resultat: g.resultat.id, nivå: g.resultat.nivå, ...(g.notater.length ? { notater: g.notater } : {}) }
+  setStatus(u, 'utkast')
+  promptAtom.ga = [...(promptAtom.ga || []).filter((x) => x.id !== u.id), { id: u.id, version: u.version || 1 }]
+  markDirty(atoms, u.id); markDirty(atoms, promptAtom.id)
+  save(atoms)
+  logDelivery({ tool: 'utfordre', client: klient, mottaker: m.id, endpoint: m.endpoint, modell: r.modell, saker: g.kilderSendt.map(({ id, version, level }) => ({ id, version, level })),
+    skjermet: { ...g.sk.antall }, ord: ord(g.sendes), tokens, prompt: promptAtom.id, svar: u.id, utfordrer: mål.mål.id, sjekk: g.sjekk.id, context: proj })
+  const ferdig = { utfordring: utfordringVis(u), tokens, modell: r.modell }
+  på('ferdig', ferdig)
+  return ferdig
+}
+function hentUtfordring(atoms, id) {
+  const u = atoms.find((x) => x.id === id)
+  if (!u || !u.utfordring) throw new MotorFeil(`fant ikke utfordringen ${id}`)
+  return u
+}
+export function settInnvending({ id, nr, status } = {}) {
+  if (!STATUSER.includes(status)) throw new MotorFeil(`status må være ${STATUSER.join(', ')}`)
+  const atoms = load()
+  const u = hentUtfordring(atoms, id)
+  const iv = (u.utfordring.innvendinger || []).find((x) => Number(x.nr) === Number(nr))
+  if (!iv) throw new MotorFeil(`utfordringen har ingen innvending nr. ${nr}`)
+  if (u.utfordring.låst) throw new MotorFeil('utfordringen er låst — start en ny utfordring for å vurdere på nytt')
+  iv.status = status
+  u.utfordring = { ...u.utfordring, innvendinger: [...u.utfordring.innvendinger] }
+  markDirty(atoms, u.id); save(atoms)
+  return utfordringVis(u)
+}
+const mottakerAvKilde = (navn) => { const s = String(navn || '').toLowerCase(); return lagMottakere().find((m) => s && (s.includes(m.id) || s.includes(String(m.label).split(' (')[0].toLowerCase()) || (m.id === 'openai' && /gpt|chatgpt/.test(s)) || (m.id === 'ollama' && /gemma|llama|qwen|lokal/.test(s)) || (m.id === 'claude' && /claude|opus|sonnet|haiku/.test(s)))) || null }
+export async function nyVersjon({ id, mottaker = null, klient = 'app', signal, på = () => {} } = {}) {
+  const atoms = load()
+  const u = hentUtfordring(atoms, id)
+  const godtatt = (u.utfordring.innvendinger || []).filter((x) => x.status === 'godtatt')
+  if (!godtatt.length) throw new MotorFeil('godta minst én innvending før du ber om en ny versjon')
+  // forfattermodellen når den er klar, ellers kontrollmodellen (som da skriver om sitt eget utgangspunkt — det sies i svaret: label)
+  const forfatterM = mottaker ? null : mottakerAvKilde(u.utfordring.forfatter)
+  const mId = mottaker || (forfatterM && (await forfatterM.status()).klar ? forfatterM.id : u.utfordring.mottaker)
+  const g = utfordringsGrunnlag(atoms, { sak: u.utfordrer.id, vending: u.utfordrer.vending || null, sjekk: u.utfordring.sjekk, mottaker: mId })
+  const { m, mål } = g
+  const st = await m.status(); if (!st.klar) throw new MotorFeil(`${m.label} er ikke klar: ${st.hvorfor}`)
+  const oppgave = 'Skriv SVARET under på nytt, med de godtatte innvendingene tatt inn. Behold det som ikke berøres av dem, og behold formen og språket. ' +
+    'Svar bare med den nye teksten — ingen innledning, ingen liste over endringer. Bruk plassholdere som [Person A] uendret.'
+  const kontekst = `${g.kontekst.replace(/^## Svaret som skal utfordres[^\n]*/, '## Svaret')}\n\n## Godtatte innvendinger\n\n${godtatt.map((x) => `- ${g.sk.skjerm(x.tekst)}${x.hvor ? ` (hvor: ${g.sk.skjerm(x.hvor)})` : ''}${x.begrunnelse ? ` — ${g.sk.skjerm(x.begrunnelse)}` : ''}`).join('\n')}`
+  const sendes = `${SYSTEM}\n\n${byggMelding(oppgave, kontekst)}`
+  const tokensCa = anslåTokens(sendes, m.id)
+  på('skjermet', { mottaker: m.id, treff: g.sk.treff, tokens: { ca: tokensCa }, notater: g.notater })
+  const r = await m.send({ system: SYSTEM, melding: oppgave, kontekst, oppgave: 'ny-versjon' }, { signal, onDel: (t) => på('del', { mottaker: m.id, tekst: t }) })
+  const tekst = avskjerm(r.tekst, g.sk.kobling).trim()
+  const tittel = String(mål.mål.name || 'saken').slice(0, 70)
+  const { atom: nv } = upsert(atoms, { key: `ny-versjon:${u.id}`, kind: 'svar', content: tekst, name: `Ny versjon: ${tittel}`.slice(0, 90), project: mål.mål.project, convo: mål.mål.convo || (mål.samtale ? mål.samtale.name : ''),
+    tags: ['svar', 'ny-versjon', m.id, ...((u.tags || []).includes('vault') ? ['vault'] : [])], source: m.label, by: 'regel', ...(mål.mål.hørerTil ? { hørerTil: mål.mål.hørerTil } : {}),
+    derivedFrom: [{ id: u.id, version: u.version || 1, level: 'L' }, ...g.kilderSendt.map(({ id: kid, version, level }) => ({ id: kid, version, level }))],
+    short: `Ny versjon av «${tittel}» fra ${m.label}, med ${godtatt.length} ${godtatt.length === 1 ? 'innvending' : 'innvendinger'} fra ${kortKontroll(u.utfordring)} tatt inn.`.slice(0, 300) })
+  setStatus(nv, 'utkast')
+  u.utfordring = { ...u.utfordring, nyVersjon: nv.id }
+  markDirty(atoms, u.id); save(atoms)
+  logDelivery({ tool: 'ny-versjon', client: klient, mottaker: m.id, endpoint: m.endpoint, modell: r.modell, saker: [{ id: u.id, version: u.version || 1, level: 'L' }, ...g.kilderSendt.map(({ id: kid, version, level }) => ({ id: kid, version, level }))],
+    skjermet: { ...g.sk.antall }, ord: ord(sendes), tokens: { ca: tokensCa, inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }, svar: nv.id, utfordrer: mål.mål.id, context: mål.mål.project })
+  const ferdig = { id: nv.id, version: nv.version || 1, name: nv.name, tekst, mottaker: m.id, label: m.label, modell: r.modell, utfordring: utfordringVis(u) }
+  på('ferdig', ferdig)
+  return ferdig
+}
+export function låsUtfordring({ id } = {}) {
+  const atoms = load()
+  const u = hentUtfordring(atoms, id)
+  const sak = atoms.find((x) => x.id === u.utfordrer.id)
+  const iv = u.utfordring.innvendinger || []
+  const info = infoAv(u)
+  const nv = u.utfordring.nyVersjon ? atoms.find((x) => x.id === u.utfordring.nyVersjon) : null
+  const liste = (l) => l.map((x) => `- ${x.tekst}${x.begrunnelse ? ` — ${x.begrunnelse}` : ''}`).join('\n')
+  const tatt = iv.filter((x) => x.status === 'godtatt'), avvist = iv.filter((x) => x.status === 'avvist'), åpne = iv.filter((x) => !x.status || x.status === 'åpen')
+  const tekst = [`${info.tekst} (${info.sjekkNavn.toLowerCase()}).`,
+    tatt.length ? `## Tatt inn\n\n${liste(tatt)}` : '', avvist.length ? `## Avvist\n\n${liste(avvist)}` : '', åpne.length ? `## Ikke vurdert\n\n${liste(åpne)}` : '',
+    !iv.length ? 'Kontrollmodellen hadde ingen innvendinger.' : '', nv ? `## Ny versjon\n\n${nv.content || ''}` : ''].filter(Boolean).join('\n\n')
+  const navn = String(sak?.name || u.name).slice(0, 70)
+  const { atom: k } = upsert(atoms, { key: `konklusjon:utfordring:${u.id}`, kind: 'konklusjon', content: tekst, name: `Konklusjon etter utfordring: ${navn}`.slice(0, 90), project: u.project, convo: u.convo || '', tags: ['konklusjon', 'utfordring', ...((u.tags || []).includes('vault') ? ['vault'] : [])],
+    source: 'Tua', by: 'regel', ...(u.hørerTil ? { hørerTil: u.hørerTil } : {}),
+    derivedFrom: [...(sak ? [{ id: sak.id, version: sak.version || 1, level: 'L' }] : []), { id: u.id, version: u.version || 1, level: 'L' }, ...(nv ? [{ id: nv.id, version: nv.version || 1, level: 'L' }] : [])],
+    short: `${info.tekst}. Låst av brukeren.`.slice(0, 300) })
+  setStatus(k, 'endelig')
+  u.utfordring = { ...u.utfordring, låst: true, konklusjon: k.id, låstDato: new Date().toISOString() }
+  setStatus(u, 'endelig')
+  markDirty(atoms, u.id); save(atoms)
+  return { konklusjon: { id: k.id, name: k.name, version: k.version || 1, tekst }, utfordring: utfordringVis(u) }
+}

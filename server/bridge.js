@@ -139,7 +139,8 @@ import { watchInbox, watchDesktop, importAlt, IMPORT_STEG, historyCounts, countP
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
 import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, settStandard as ollamaStandard, lokale as ollamaLokale } from './ollama.js'   // friksjon 12: modellene i Ollama
-import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer, del, trekkDeling, beOmHele, mottakersideFor, standardFor } from './motor.js'
+import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer, del, trekkDeling, beOmHele, mottakersideFor, standardFor, forhåndsvisUtfordring, utfordre, utfordringerAv, settInnvending, nyVersjon, låsUtfordring } from './motor.js'
+import { utfordringKart, utfordringInfo, samtaleDokumenter, erUtfordring } from './utfordring.js'   // skive C (arb. 34): «Utfordret av …» på sakene, dokumentene en samtale skrev
 import { finnSamtale, vendingerFor, erTuaSamtale, nySamtaleId, samtaleNøkkel, antallVendinger, sistI, gamleTråder, gjørOmTråd } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak — GET /api/samtale, POST /api/samtale/ny   // M20a/M20b: motoren — eneste vei ut til en modell
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT, lagreTekst, lagUtdrag, LIM_INN_GRENSE } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks · skive 3 (arb. 33 §6): lim inn → kilde, utdrag
 import { finnSak } from './store.js'   // skive 3 (arb. 33 §8): lenker som ikke finnes — GET /api/finn?id=
@@ -533,12 +534,13 @@ http
         // Runde 2d (03-avisen §2–§4): klasse (arbeid · spor · drift · tråd), vekt og sist_rørt per sak; `tråden` samlet på prompt-saken ({svar, forskjeller, konklusjon, åpen, …}).
         // `tråd` er fortsatt prompt-id (streng) på alle sakene i en tråd — appen (regler.slåSammenTråder) leser den slik; det samlede objektet har eget navn så ingenting brekker.
         const { av: trådAv, per: trådPer } = trådSamlet(all), sendinger = deliveryCounts(), utlev = deliveryInfo(), bruk = brukInfo(), now = Date.now(), fraUlest = ulestFra(now)
+        const utf = utfordringKart(all)   // skive C: «Utfordret av ChatGPT 28.10 · 3 innvendinger · 2 tatt inn» per sak (C4/C5)
         const følgere = følgereAv(all), arbeidTall = new Map(arbeider(all).map((r) => [r.id, r]))   // friksjon 20: hvem som er arbeid, og tallene («3 samtaler, 2 tråder»)
         const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0, mtime: mtimeAv(fileOf(a)),   // mtime (runde 2a): visningen Mapper sorterer som Finder — nyeste fil øverst
           klasse: klasseAv(a), vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), tråd: a.kind === 'konklusjon' || a.kind === 'svar' ? trådPer.get(trådAv.get(a.id)) || null : null, now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }), tråden: a.kind === 'prompt' ? trådPer.get(a.id) || null : null,
           ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }),   // friksjon 16: nyere enn siste «sett alt» (ellers sju dager) og ikke åpnet/sett/lest siden den ble skrevet
           // friksjon 20: hører_til (arbeidet saken henger på), del_av («Del av: <arbeid> · samtale 7 av 12»), arbeid (saken er et arbeid) med tall, hører_til_forslag bare når det venter på svar
-          hører_til: a.hørerTil || null, del_av: delAv(all, a, følgere), arbeid: erArbeid(a, følgere), ...(arbeidTall.has(a.id) ? { arbeid_tall: (({ samtaler, tråder, filer, saker, sist, åpen }) => ({ samtaler, tråder, filer, saker, sist, åpen }))(arbeidTall.get(a.id)) } : {}), ...(harForslag(a) ? { hører_til_forslag: a.hørerTilForslag } : {}) }))
+          hører_til: a.hørerTil || null, del_av: delAv(all, a, følgere), arbeid: erArbeid(a, følgere), ...(arbeidTall.has(a.id) ? { arbeid_tall: (({ samtaler, tråder, filer, saker, sist, åpen }) => ({ samtaler, tråder, filer, saker, sist, åpen }))(arbeidTall.get(a.id)) } : {}), ...(harForslag(a) ? { hører_til_forslag: a.hørerTilForslag } : {}), ...(utf.has(a.id) ? { utfordret: utf.get(a.id) } : {}), ...(erUtfordring(a) ? { er_utfordring: true } : {}) }))
         ATOMS_MINNE = { nøkkel: nøkkelAtoms, tid: Date.now(), tekst: JSON.stringify({ atoms, total: all.length, offset, file: ARKIV(), klasser: tellKlasser(all), uleste: atoms.filter((a) => a.ulest && a.klasse === 'arbeid').length, sett_alt: settAltSist() || null }), etag: null, gz: null }
         return jsonTekst(res, 200, ATOMS_MINNE.tekst, {}, ATOMS_MINNE)
       }
@@ -558,7 +560,7 @@ http
           if (!prosjektLenke.has(p)) { const uuid = register[p]?.claudeProject; prosjektLenke.set(p, uuid ? [{ kind: 'claude-project', href: `claude://claude.ai/project/${uuid}` }] : []) }
           return egne.some((l) => l.kind === 'claude-project') ? egne : [...egne, ...prosjektLenke.get(p)] }
         const erFsk = (a) => a.kind === 'svar' && (a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller')
-        const med = (a) => ['samtale', 'prompt', 'svar', 'konklusjon'].includes(a.kind) || !!a.convo || arbeidIder.has(a.id) || erArbeid(a, følgere)
+        const med = (a) => !erUtfordring(a) && (['samtale', 'prompt', 'svar', 'konklusjon'].includes(a.kind) || !!a.convo || arbeidIder.has(a.id) || erArbeid(a, følgere))   // skive C: utfordringene står på saken, ikke i sidefeltet
         const iProsjekt = (a) => !prosjekt || same(a.project || 'Uten prosjekt', prosjekt)
         const saker = all.filter((a) => med(a) && (iProsjekt(a) || arbeidIder.has(a.id))).map((a) => {
           const ut = { id: a.id, kind: a.kind || 'capture', project: a.project, convo: a.convo || '', capturedAt: a.capturedAt, klasse: klasseAv(a), tråd: trådAv.get(a.id) || null, ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }), hører_til: a.hørerTil || null }
@@ -813,6 +815,7 @@ http
         const standard = Object.fromEntries(ms.filter((m) => m.aktiv).map((m) => [m.id, standardFor(vend, m.id)]))
         return json(res, 200, { id: s.id, key: s.key || null, tittel: s.name, prosjekt: s.project, kilde: s.source || '', kind: s.kind, tua: erTuaSamtale(s), start: s.createdAt || s.capturedAt, sist: sistI(s, vend), versjon: s.version || 1, antall: antallVendinger(vend),
           hører_til: s.hørerTil || null, del_av: delAv(alle, s, følgereAv(alle)), lenker: linksFor(s), fanget: s.fanget === true, drift: s.drift === true, S: levelOf(s, 'S').text,
+          utfordret: utfordringInfo(alle, s), dokumenter: samtaleDokumenter(alle, s).slice(0, 20).map((d) => ({ id: d.id, name: d.name, kind: d.kind || 'capture', kilde: d.source || '', tid: d.capturedAt || 0 })),   // skive C (C6): resultatet øverst — filene samtalen skrev
           vendinger: vend, standard, mottakere: ms.map(({ id: mid, label, aktiv, budsjett, standard: std, local }) => ({ id: mid, label, aktiv, budsjett: budsjett || null, standard: std, local })) })
       }
       // Etter skive 4 (28.10.2026): «Fortsett ›» på en tråd fra før skive 1 skal ikke sende Erik til terminalen — POST /api/samtale/fra-traad {id: <prompt, svar eller
@@ -922,6 +925,49 @@ http
           if (strøm) { hendelse('feil', { feil: e.message, blokkert: e instanceof Blokkert }); return res.end() }
           return json(res, e instanceof Blokkert ? 403 : 500, { error: e.message })
         }
+      }
+      // ── Skive C (arb. 34, V23): Utfordre — alt gjennom motoren (resultatet og kildene, aldri transkriptet; Erik velger kontrollmodellen hver gang) ──
+      //   GET  /api/utfordringer?sak=<id>[&vending=<id>]  → { sak, navn, forfatter, vault, resultat, kilder, sjekker [{id, navn, kort, instruks}], utfordringer [nyeste først] }
+      //   POST /api/utfordre/forhandsvis {sak, vending?, sjekk, mottaker} → Sendes-linja (linje, tokens, budsjett, over, treff, resultat {nivå, tegn, kuttet}, kilder, notater, blokkert)
+      //   POST /api/utfordre {sak, vending?, sjekk, mottaker}  SSE: skjermet → del … → ferdig {utfordring} · blokkert · feil
+      //   POST /api/utfordre/innvending {id, nr, status: åpen|godtatt|avvist} → {utfordring}
+      //   POST /api/utfordre/ny-versjon {id, mottaker?}  SSE: skjermet → del … → ferdig {id, tekst, utfordring} · feil
+      //   POST /api/utfordre/las {id} → {konklusjon, utfordring}
+      if (req.method === 'GET' && url.pathname === '/api/utfordringer') {
+        const sak = String(url.searchParams.get('sak') || '').trim()
+        if (!sak) return json(res, 400, { error: 'sak kreves' })
+        try { return json(res, 200, utfordringerAv(sak, { vending: url.searchParams.get('vending') || null })) } catch (e) { return json(res, e instanceof MotorFeil ? 404 : 500, { error: e.message }) }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/utfordre/forhandsvis') {
+        const b = await readBody(req)
+        try { return json(res, 200, forhåndsvisUtfordring({ sak: String(b.sak || ''), vending: b.vending ? String(b.vending) : null, sjekk: String(b.sjekk || 'svakheter'), mottaker: String(b.mottaker || '') })) }
+        catch (e) { return json(res, e instanceof MotorFeil ? 400 : 500, { error: e.message }) }
+      }
+      if (req.method === 'POST' && (url.pathname === '/api/utfordre' || url.pathname === '/api/utfordre/ny-versjon')) {
+        const b = await readBody(req)
+        const nyV = url.pathname.endsWith('/ny-versjon')
+        if (nyV ? !b.id : !b.sak || !b.mottaker) return json(res, 400, { error: nyV ? 'id kreves (utfordringen)' : 'sak og mottaker kreves — velg kontrollmodellen' })
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, data) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`) }
+        const ctl = new AbortController(); req.on('close', () => ctl.abort())
+        try {
+          if (nyV) { const r = await nyVersjon({ id: String(b.id), mottaker: b.mottaker ? String(b.mottaker) : null, klient: 'app', signal: ctl.signal, på: hendelse }); console.error(`[tua-bro] ny versjon etter utfordring ${b.id} → ${r.mottaker} · ${r.id} v${r.version}`) }
+          else { const r = await utfordre({ sak: String(b.sak), vending: b.vending ? String(b.vending) : null, sjekk: String(b.sjekk || 'svakheter'), mottaker: String(b.mottaker), klient: 'app', signal: ctl.signal, på: hendelse }); console.error(`[tua-bro] utfordre ${b.sak} (${b.sjekk}) → ${b.mottaker} · ${r.utfordring.innvendinger.length} innvendinger · ${r.utfordring.id}`) }
+        } catch (e) {
+          const blokkert = e instanceof Blokkert
+          console.error(`[tua-bro] utfordre ${blokkert ? 'BLOKKERT' : 'FEIL'}: ${e.message}`)
+          hendelse(blokkert ? 'blokkert' : 'feil', { feil: e.message, ...(blokkert ? { detaljer: e.detaljer } : {}) })
+        }
+        return res.end()
+      }
+      if (req.method === 'POST' && url.pathname === '/api/utfordre/innvending') {
+        const b = await readBody(req)
+        try { return json(res, 200, { utfordring: settInnvending({ id: String(b.id || ''), nr: Number(b.nr), status: String(b.status || '') }) }) } catch (e) { return json(res, e instanceof MotorFeil ? 400 : 500, { error: e.message }) }
+      }
+      if (req.method === 'POST' && ['/api/utfordre/las', '/api/utfordre/lås', '/api/utfordre/l%C3%A5s'].includes(url.pathname)) {
+        const b = await readBody(req)
+        try { const r = låsUtfordring({ id: String(b.id || '') }); console.error(`[tua-bro] utfordring ${b.id} låst → konklusjon ${r.konklusjon.id}`); return json(res, 200, r) } catch (e) { return json(res, e instanceof MotorFeil ? 400 : 500, { error: e.message }) }
       }
       // ── Skive 8 (M19): datasettet — én JSONL-linje per konklusjon. Lokal fil, ingen Utlevert-linje (ingenting går ut). ──
       if (req.method === 'GET' && url.pathname === '/api/datasett.jsonl') {
@@ -1214,10 +1260,10 @@ http
         const rad = (a, tid = null) => ({ id: a.id, name: a.name, project: a.project, convo: a.convo, source: a.source, kind: a.kind || 'capture', capturedAt: a.capturedAt, version: a.version || 1, S: levelOf(a, 'S').text, status: statusOf(a), klasse: klasseAv(a), tråd: av.get(a.id) || null, vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }),
           ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest, tid }) })   // friksjon 16: ulest til linja er sett eller saken åpnet; et spørsmål er nytt når noe i tråden er nytt (tid = trådens sist)
         // Spørsmål i arbeid: åpne tråder (ingen konklusjon låst, ingen svar beholdt) rørt siste N dager — prompten med tråden samlet
-        const spørsmål = [...per.values()].filter((t) => t.åpen && t.sist >= fra && byId.has(t.prompt) && byId.get(t.prompt).fanget !== true && byId.get(t.prompt).drift !== true && !fjernetAv(bruk.get(t.prompt), t.sist))   // × i Siden sist: borte til noe nytt skjer i tråden
+        const spørsmål = [...per.values()].filter((t) => t.åpen && t.sist >= fra && byId.has(t.prompt) && !erUtfordring(byId.get(t.prompt)) && byId.get(t.prompt).fanget !== true && byId.get(t.prompt).drift !== true && !fjernetAv(bruk.get(t.prompt), t.sist))   // × i Siden sist: borte til noe nytt skjer i tråden
           .sort((x, y) => y.sist - x.sist).map((t) => ({ ...rad(byId.get(t.prompt), t.sist), tråden: t, konklusjon_venter: !!t.konklusjon && t.konklusjon_status !== 'endelig' }))
         // Svar som kom tilbake: svar-saker (fra Spør, ikke fanget) som ikke er beholdt eller låst, siste N dager
-        const svarKom = alle.filter((a) => a.kind === 'svar' && a.fanget !== true && a.drift !== true && klasseAv(a) === 'tråd' && (a.capturedAt || 0) >= fra && !(a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller') && !fjernetAv(bruk.get(a.id), a.capturedAt) && !fjernetAv(bruk.get(av.get(a.id)), a.capturedAt))   // × på spørsmålet tar hele tråden
+        const svarKom = alle.filter((a) => a.kind === 'svar' && !erUtfordring(a) && a.fanget !== true && a.drift !== true && klasseAv(a) === 'tråd' && (a.capturedAt || 0) >= fra && !(a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller') && !fjernetAv(bruk.get(a.id), a.capturedAt) && !fjernetAv(bruk.get(av.get(a.id)), a.capturedAt))   // × på spørsmålet tar hele tråden
           .sort((x, y) => y.capturedAt - x.capturedAt).map((a) => ({ ...rad(a), tråd: av.get(a.id) || null }))
         // Konklusjoner som venter på låsing (utkast)
         const konklusjoner = alle.filter((a) => a.kind === 'konklusjon' && statusOf(a) !== 'endelig' && !fjernetAv(bruk.get(a.id), a.capturedAt) && !fjernetAv(bruk.get(av.get(a.id)), a.capturedAt)).sort((x, y) => y.capturedAt - x.capturedAt).map((a) => ({ ...rad(a), tråd: av.get(a.id) || null }))

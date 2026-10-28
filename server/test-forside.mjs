@@ -541,5 +541,42 @@ try {
   ok('flateRader: filteret (passer) gjelder en sak i raden', regler.flateRader(alleA, { passer: (a) => a?.id === 'sv2' }).samtaler.map((r) => r.id).join() === 'logg' && regler.flateRader(alleA, { passer: (a) => a?.id === 'sv2' }).dokumenter.length === 0)
 }
 
+// ── Skive C «Utfordre» (arb. 34 §5 C1–C6, V23): reglene i appen ─────────────────────────────────────────────────────────────
+{
+  const u = { id: 'u1', tekst: 'Utfordret av ChatGPT 28.10 · 3 innvendinger · 2 tatt inn', dato: '2026-10-28T10:00:00', låst: false }
+  const alle = [
+    { id: 'dok1', kind: 'capture', name: 'Ankeerklæring v5', project: 'Energima', source: 'Claude Cowork', capturedAt: 3, utfordret: u },
+    { id: 'dok2', kind: 'capture', name: 'Prisliste for lageret', project: 'Energima', source: 'Claude Cowork', capturedAt: 2 },
+    { id: 'k1', kind: 'konklusjon', name: 'Konklusjon: skal vi anke', project: 'Energima', convo: 'Anke?', source: 'Tua', capturedAt: 4 },
+    { id: 'ut1', kind: 'svar', name: 'Utfordring (finn svakhetene): Ankeerklæring', project: 'Energima', source: 'OpenAI (GPT)', tags: ['svar', 'utfordring', 'openai'], er_utfordring: true, capturedAt: 5 },
+    { id: 'up1', kind: 'prompt', name: 'Utfordre: Finn svakhetene', project: 'Energima', source: 'Tua', tags: ['prompt', 'utfordring'], capturedAt: 5 },
+    { id: 'nv1', kind: 'svar', name: 'Ny versjon: Ankeerklæring', project: 'Energima', source: 'Claude', tags: ['svar', 'ny-versjon'], capturedAt: 6 },
+  ]
+  const f = regler.flateRader(alle)
+  const ider = [...f.samtaler, ...f.dokumenter].flatMap((r) => r.ider)
+  ok('C4: utfordringer, deres prompter og nye versjoner får ingen egne rader (de står på saken)', !ider.includes('ut1') && !ider.includes('up1') && !ider.includes('nv1') && ider.includes('dok1') && ider.includes('k1'), ider.join())
+  const r1 = f.dokumenter.find((r) => r.id === 'dok1'), r2 = f.dokumenter.find((r) => r.id === 'dok2'), rk = f.samtaler.find((r) => r.ider.includes('k1'))
+  ok('C5: raden bærer `utfordret` fra saken', r1?.utfordret?.id === 'u1' && !r2?.utfordret)
+  ok('C5: «utfordret» (grønt) med «Utfordret av …» som tittel', regler.utfordringMerke(r1)?.tekst === 'utfordret' && regler.utfordringMerke(r1).klasse === 'er-utfordret' && /Utfordret av ChatGPT/.test(regler.utfordringMerke(r1).tittel))
+  ok('C5: «ikke utfordret» bare på konklusjoner og hovedsaker — ikke på et vanlig dokument', regler.utfordringMerke(rk)?.tekst === 'ikke utfordret' && regler.utfordringMerke(r2) === null && regler.utfordringMerke(r2, { hoved: true })?.tekst === 'ikke utfordret' && regler.utfordringMerke({ sak: { arbeid: true } })?.tekst === 'ikke utfordret')
+  ok('C5: nyesteUtfordret velger den nyeste av flere', regler.nyesteUtfordret([{ utfordret: { id: 'a', dato: '2026-10-27' } }, { utfordret: { id: 'b', dato: '2026-10-28' } }, {}])?.id === 'b')
+  const ms = [{ id: 'ollama', label: 'Ollama (lokal)', modell: 'gemma3:4b', aktiv: true, local: true }, { id: 'claude', label: 'Claude (Anthropic)', aktiv: true }, { id: 'openai', label: 'OpenAI (GPT)', aktiv: true }, { id: 'mistral', label: 'Mistral', aktiv: false }, { id: 'test', label: 'Test (ekko — sender ingenting)', aktiv: true, test: true }]
+  const k1 = regler.kontrollmodeller(ms, { forfatter: 'Claude (Anthropic)' })
+  ok('C2: forfatter Claude → en annen familie foreslås øverst (Ollama), Claude etter de andre, test sist, Mistral (ikke klar) ute', k1.map((x) => x.m.id).join() === 'ollama,openai,claude,test' && k1[0].forslag && !k1[1].forslag && k1[2].samme, k1.map((x) => x.m.id).join())
+  ok('C2: forfatter gemma3 (lokal) → Claude foreslås, Ollama som samme familie', regler.kontrollmodeller(ms, { forfatter: 'gemma3:4b' }).map((x) => x.m.id).join() === 'claude,openai,ollama,test')
+  ok('C2: Vault-merket → bare lokale modeller', regler.kontrollmodeller(ms, { forfatter: 'Claude', vault: true }).map((x) => x.m.id).join() === 'ollama')
+  ok('C2: familieAv kjenner igjen leverandøren som kildefargene', regler.familieAv('OpenAI (GPT)') === 'gpt' && regler.familieAv('Claude Cowork') === 'claude' && regler.familieAv('Test (ekko)') === 'test' && regler.familieAv('Tua') === '')
+  const vend = [{ id: 'b1', rolle: 'bruker', L: 'Lag ankeutkast' }, { id: 'm1', rolle: 'modell', L: 'Nå setter jeg opp en arbeidsplan og begynner å lese kildedokumentene.' }, { id: 'm2', rolle: 'modell', L: 'La meg lese vedtaket først.' },
+    { id: 'm3', rolle: 'modell', L: 'Ankeutkastet er klart. ' + 'Begrunnelse og påstand. '.repeat(40) }, { id: 'b2', rolle: 'bruker', L: 'Lag zip' }, { id: 'm4', rolle: 'modell', L: 'Ferdig.' }]
+  const res = regler.samtaleResultat(vend)
+  ok('C6: resultatet er siste svar med innhold (ikke «Ferdig.»), arbeidsstegene er resten av de korte', res.resultat?.id === 'm3' && [...res.steg].join() === 'm1,m2,m4' && res.antallSteg === 3)
+  ok('C6: en samtale ført i Tua folder ingenting', regler.samtaleResultat(vend, { tua: true }).steg.size === 0)
+  const fold = regler.foldSteg(vend, res.steg)
+  ok('C6: foldSteg slår sammenhengende arbeidssteg sammen til én rad («2 arbeidssteg»)', fold.map((x) => (x.type === 'steg' ? `steg${x.vendinger.length}` : x.id)).join() === 'b1,steg2,m3,b2,steg1' && regler.stegTekst(2) === '2 arbeidssteg')
+  ok('C6: et langt svar som begynner som et arbeidsnotat, er ikke et arbeidssteg', !regler.erArbeidssteg({ rolle: 'modell', L: 'Nå har jeg lest alt. ' + 'Funn. '.repeat(400) }))
+  const src = fs.readFileSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', 'pages', 'Samtale.jsx'), 'utf8')
+  ok('C1: «Også til» bare på siste svar i runden i en Tua-samtale; «Utfordre» står på resultatet', /const kanOgså = \(v\) => \{ if \(!samtale\?\.tua\) return \[\];[^\n]*iRunden\.at\(-1\)\?\.id !== v\.id/.test(src) && src.includes("utfordreKnapp({ sak: samtale.id, vending: res.resultat.id })"))
+}
+
 console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT}`)
 process.exit(feil ? 1 : 0)

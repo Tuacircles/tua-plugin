@@ -422,6 +422,15 @@ async function sendTest({ system, melding, kontekst, oppgave, messages }, { onDe
     const ut = JSON.stringify({ S: `Test-ingress: ${flat.slice(0, 200)}`, M: `Test-sammendrag (ingenting sendt ut av maskinen): ${flat.slice(0, 1200)}` });
     await strøm(ut, onDel); return testSvar(ut, inn, 'test')
   }
+  if (oppgave === 'utfordre') {   // skive C: faste, tolkbare innvendinger — tre stykker på formen instruksen ber om
+    const ut = '1. Påstanden i første avsnitt er ikke begrunnet.\n   Hvor: første avsnitt\n   Begrunnelse: Svaret sier det som sikkert, men viser ikke til noe i kildene (test-mottakeren, ingenting sendt ut av maskinen).\n\n' +
+      '2. Et tall er ikke sjekket mot kilden.\n   Hvor: midt i svaret\n   Begrunnelse: Tallet bør stå i kilden det er hentet fra.\n\n3. Motpartens syn er ikke nevnt.\n   Hvor: konklusjonen\n   Begrunnelse: Uten den andre siden virker svaret ensidig.';
+    await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
+  }
+  if (oppgave === 'ny-versjon') {
+    const ut = `Ny versjon fra test-mottakeren (ingenting er sendt ut av maskinen), med ${(String(kontekst).match(/^- /gm) || []).length} godtatte innvendinger tatt inn.\n\n${String(kontekst).split('## Svaret')[1]?.split('## ')[0]?.trim().slice(0, 400) || ''}`;
+    await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
+  }
   const ut = `Ekko fra test-mottakeren (ingenting er sendt ut av maskinen).\n\nSystem: ${system}\n\n${tekstAv(meldingerAv({ messages, melding, kontekst }))}`;   // skive 1: med vendinger ekkoes hele lista, merket per rolle
   await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
 }

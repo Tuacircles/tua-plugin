@@ -35,7 +35,7 @@ const H_WHY = '## Hvorfor'
 const H_M = '## Sammendrag (M)'
 const H_L = '## Innhold (L)'
 // nøklene parse() forstår; alt annet i frontmatter er `ekstra` (runde 3c)
-export const KJENTE_NØKLER = new Set(['tua_id', 'prosjekt', 'samtale', 'kilde', 'dato', 'versjon', 'key', 'kind', 'status', 'fanget', 'drift', 'beholdt', 'tagger', 'synlig_i', 'lenker', 'bygget_av', 'ga', 'gjengivelser', 'nivaa', 'S_av', 'S_versjon', 'S_dato', 'M_av', 'M_versjon', 'M_dato', 'tittel', 'hører_til', 'hører_til_forslag', 'arbeid', 'gren', 'vert', 'start', 'gjentatt'])
+export const KJENTE_NØKLER = new Set(['tua_id', 'prosjekt', 'samtale', 'kilde', 'dato', 'versjon', 'key', 'kind', 'status', 'fanget', 'drift', 'beholdt', 'tagger', 'synlig_i', 'lenker', 'bygget_av', 'ga', 'gjengivelser', 'nivaa', 'S_av', 'S_versjon', 'S_dato', 'M_av', 'M_versjon', 'M_dato', 'tittel', 'hører_til', 'hører_til_forslag', 'arbeid', 'gren', 'vert', 'start', 'gjentatt', 'utfordrer', 'utfordring'])
 
 const isoLocal = (ms) => {
   const d = new Date(ms)
@@ -83,6 +83,8 @@ export function serialize(atom) {
     ...(atom.links?.length ? { lenker: atom.links } : {}),
     ...(atom.derivedFrom?.length ? { bygget_av: atom.derivedFrom } : {}),
     ...(atom.ga?.length ? { ga: atom.ga } : {}),                  // M20b (skive 6, V16): svarene en prompt-sak ga — [{id, version}], én per mottaker
+    ...(atom.utfordrer?.id ? { utfordrer: atom.utfordrer } : {}),   // skive C (arb. 34): utfordringen peker på saken den utfordrer — {id, version, vending?}
+    ...(atom.utfordring ? { utfordring: atom.utfordring } : {}),   // skive C: {sjekk, mottaker, label, modell, forfatter, dato, innvendinger: [{nr, tekst, hvor, begrunnelse, status}], låst, nyVersjon, konklusjon}
     ...(atom.renders?.length ? { gjengivelser: atom.renders } : {}),
     ...(atom.share && Object.keys(atom.share).length ? { nivaa: atom.share } : {}),
     ...(atom.levels?.S ? { S_av: atom.levels.S.by || '', S_versjon: atom.levels.S.of ?? null, ...(atom.levels.S.at ? { S_dato: atom.levels.S.at } : {}) } : {}),
@@ -175,6 +177,8 @@ export function parse(text, { fallbackId } = {}) {
   if (Array.isArray(fm.lenker) && fm.lenker.length) atom.links = fm.lenker.filter((l) => l && l.href)
   if (Array.isArray(fm.bygget_av) && fm.bygget_av.length) atom.derivedFrom = fm.bygget_av.filter((d) => d && d.id)
   if (Array.isArray(fm.ga) && fm.ga.length) atom.ga = fm.ga.filter((d) => d && d.id)
+  if (fm.utfordrer && typeof fm.utfordrer === 'object' && fm.utfordrer.id) atom.utfordrer = fm.utfordrer   // skive C
+  if (fm.utfordring && typeof fm.utfordring === 'object') atom.utfordring = { ...fm.utfordring, innvendinger: Array.isArray(fm.utfordring.innvendinger) ? fm.utfordring.innvendinger : [] }
   if (Array.isArray(fm.gjengivelser) && fm.gjengivelser.length) atom.renders = fm.gjengivelser.filter((r) => r && (r.path || r.url))
   const levels = {}
   if (fm.S_av !== undefined && ingress) levels.S = { text: ingress, by: fm.S_av, of: fm.S_versjon ?? null, ...(typeof fm.S_dato === 'string' && fm.S_dato ? { at: fm.S_dato } : {}) }

@@ -6,6 +6,7 @@ import { FILE_MANAGER, openSpawn } from './platform.mjs';
 import { N3, K3, p } from '../vendor/@modelcontextprotocol/ext-apps/src/server/index.mjs';
 import { load, visibleIn, hasExternalEdits, save, search, vaultClamp, maxLevel, related, linksFor, isStale, fileOf, renderStatus, sources, isVault, fmtTime } from './store.mjs';
 import { skjermerFor, lever } from './motor.mjs';
+import { utfordringInfo } from './utfordring.mjs';
 import { samtaleInfo, samtaleLinje } from './samtale.mjs';
 import { delingerFor, lenkerFor } from './deling.mjs';
 import { trådFørst as tr_dF_rst, skalVise, sidenSist, instruksFor } from './dora.mjs';
@@ -72,6 +73,7 @@ function atomCard(atoms, cur, level, context, { client = 'Claude' } = {}) {
   return {
     id: cur.id, name: lv.felt.navn, project: cur.project, convo: lv.felt.samtale, source: cur.source || '',
     ...(samtale ? { samtale } : {}),
+    ...((u) => (u ? { utfordret: { tekst: u.tekst, av: u.av, dato: u.dato, innvendinger: u.innvendinger, tatt_inn: u.tatt_inn, låst: u.låst } } : {}))(utfordringInfo(atoms, cur)),   // skive C
     date: date(cur.capturedAt), version: cur.version || 1, kind: cur.kind || 'capture', tags: cur.tags || [],
     level: eff, max, vault: isVault(cur), stale, clipped: lv.linje || '', shielded: lv.treff, logged: lv.logget,
     S: lv.felt.S, why: lv.felt.hvorfor,
@@ -97,6 +99,7 @@ const atomText = (a) =>
   (a.builtBy.length ? `Bygget av: ${a.builtBy.map((s) => `[${s.id}] ${s.name} v${s.version}/${s.level}${s.stale ? ' ⚠' : ''}`).join(' · ')}\n` : '') +
   (a.deling ? `Delt med: ${a.deling.til.map((t) => t.navn).join(', ')} · nivå ${a.deling.nivå}${a.deling.trukket ? ' · TRUKKET TILBAKE' : ` · mottakersiden: ${a.deling.http} · som fil: ${a.deling.html}`}${a.deling.forespørsler ? ` · ${a.deling.forespørsler} forespørsel/-ler om hele` : ''}\n` : '') +
   (a.samtale ? `${a.samtale.linje}\n` : '') +
+  (a.utfordret ? `${a.utfordret.tekst}${a.utfordret.låst ? ' · låst' : ''}\n` : '') +
   `Adresse: ${a.address}\n\n${a.text}`;
 
 // ── «Åpne i …» fra kortet: samme faste liste som broen (V13). Aldri shell. macOS: open · Windows: explorer/rundll32 · Linux: xdg-open (platform.js)
