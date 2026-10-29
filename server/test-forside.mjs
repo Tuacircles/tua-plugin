@@ -578,5 +578,42 @@ try {
   ok('C1: «Også til» bare på siste svar i runden i en Tua-samtale; «Utfordre» står på resultatet', /const kanOgså = \(v\) => \{ if \(!samtale\?\.tua\) return \[\];[^\n]*iRunden\.at\(-1\)\?\.id !== v\.id/.test(src) && src.includes("utfordreKnapp({ sak: samtale.id, vending: res.resultat.id })"))
 }
 
+// Avissiden (arbeidsstykke 34, skissen skisse-avisside.png, Erik 29.10.2026) + skive B1: funn i stedet for systemtekst, hovedsak aldri Tua-bygging, kolonner per prosjekt
+{
+  const T = Date.now(), t = (h) => T - h * 3600e3
+  const sak = (id, o) => ({ id, name: id, project: 'P', capturedAt: t(1), tags: [], links: [], version: 1, ...o })
+  const alle = [
+    sak('tua1', { kind: 'samtale', project: 'Tua_tua', convo: 'Bygg', name: 'Bygg', vekt: 99, capturedAt: t(1), content: '# Bygg\n\n**Claude:** Avisen er bygget og testene er grønne, og alt er flettet til main etter prøving i nettleseren.', levels: { S: { text: 'Background (from the session that started this one): …', by: 'regel' } } }),
+    sak('tua2', { kind: 'notat', project: 'Tua_tua', name: 'Notat om bygging', vekt: 5, capturedAt: t(2) }),
+    sak('ank', { kind: 'samtale', project: 'Energima anke', convo: 'Anke', name: 'energima anke', vekt: 30, capturedAt: t(3),
+      content: '# energima anke\n\n_Tua · 1 vending · 2026-10-24 · Energima anke_\n\n**Du · 24.10.2026:** kan du vurdere anken?\n\n**Claude · L/M:** # Ny vurdering\n\n**Hovedfunn:** Det sterkeste ankepunktet mangler i utkastet. Tingretten tok ikke stilling til fakturaene, jf. tvl. § 19-6. Dette bør stå først.\n\n' + 'Mer begrunnelse. '.repeat(30),
+      levels: { S: { text: 'This session is being continued from a previous conversation that ran out of context.', by: 'regel' } } }),
+    sak('dok', { kind: 'leveranse', project: 'Energima anke', name: 'Ankeerklæring v5', vekt: 6, capturedAt: t(5), levels: { S: { text: 'Ankeerklæring v5 (10 sider, fristavbrytende form). Fem hovedlinjer, jf. § 36.', by: 'Claude' } } }),
+    sak('ski', { kind: 'notat', project: 'Skigaarden', name: 'Gjeld', vekt: 8, capturedAt: t(6), content: '# Gjeld\n\n*Laget 28.10.2026 · fra Claude*\n\nUten Danske Bank er gjelden 533 MNOK. Resten er pant i eiendommen.', levels: { S: { text: 'Gjeld', by: 'regel' } } }),
+    sak('gml', { kind: 'notat', project: 'Gammelt', name: 'Gammelt notat', vekt: 50, capturedAt: T - 20 * 86400e3 }),
+    sak('log', { kind: 'notat', project: 'P', key: 'helsesjekk:1', name: 'Helsesjekk 29.10', source: 'Tua', capturedAt: t(1) }),
+  ]
+  const f = regler.flateRader(alle)
+  const side = regler.avisSide(regler.avisRader(f), { now: T })
+  ok('Avis: hovedsaken er mest arbeid siste sju dager — aldri Tua_tua (vekt 99) og aldri eldre enn uka (vekt 50)', side.hoved?.id === 'ank')
+  ok('Avis: kolonnene er prosjektene utenom Tua-bygging og drift, uten hovedsaken; høyst tre saker per prosjekt', side.prosjekter.map((p) => p.vis).join() === 'Skigaarden,Energima anke' && side.prosjekter.every((p) => p.rader.length <= 3) && !side.prosjekter.some((p) => p.rader.some((r) => r.id === 'ank')))
+  ok('Avis: «N prosjekter i arbeid denne uka» teller ikke Tua_tua eller eldre prosjekter', side.antallProsjekter === 2)
+  ok('Avis: Tua-byggingen i én linje — «Bygging av Tua · 1 samtale, 1 dokument i dag»', regler.byggingTekst(side.bygging) === 'Bygging av Tua · 1 samtale, 1 dokument i dag' && regler.erTuaBygging('Tua_tua') && regler.erTuaBygging('TUA') && !regler.erTuaBygging('Tua Business'))
+  const fa = regler.funnAv(side.hoved)
+  ok('B1: hovedsakens tittel er et funn fra siste svar — «Hovedfunn:» tatt bort, aldri «This session …»', fa.tittel === 'Det sterkeste ankepunktet mangler i utkastet' && /^Tingretten tok ikke stilling til fakturaene, jf\. tvl\. § 19-6\./.test(fa.ingress) && fa.kilde === 'regel')
+  const fd = regler.funnAv(f.dokumenter.find((r) => r.id === 'dok'))
+  ok('B1: modell-ingressen (S.by ≠ regel) brukes først; «jf.» deler ikke setningen', fd.kilde === 'modell' && fd.tittel === 'Ankeerklæring v5 (10 sider, fristavbrytende form)' && fd.ingress === 'Fem hovedlinjer, jf. § 36.')
+  const fs2 = regler.funnAv(f.dokumenter.find((r) => r.id === 'ski'))
+  ok('B1: dokumentets første avsnitt — kursiv metalinje og overskrift hoppes over', fs2.tittel === 'Uten Danske Bank er gjelden 533 MNOK' && fs2.ingress === 'Resten er pant i eiendommen.')
+  ok('B1: lesbare tar aldri systemtekst, verktøylinjer eller arbeidssteg', regler.lesbare('Background (from the session that started this one): x\n\nThis session is being continued from a previous conversation.\n\n[søk: noe]\n\nLa meg sjekke dette først.\n\nSist: a → b\n\n12 oppgaver i Tua_tua, 3 filer skrevet.').length === 0)
+  ok('B1: statussetninger («Begge er oppdatert til v2 …») blir ikke tittel', regler.funnAv({ slag: 'dokument', navn: 'X', sak: { content: 'Begge er oppdatert til v2 — samme atom-id. Anken bør bygge på Red Rock-dommen.' } }).tittel === 'Anken bør bygge på Red Rock-dommen')
+  ok('B1: uten lesbar tekst er navnet tittelen', regler.funnAv({ slag: 'samtale', navn: 'Terje Bjerkan oversikt', sak: { content: '# Terje\n\n_meta_' } }).kilde === 'navn')
+  ok('Avis: kolonnetittelen er funnet for samtaler og modell-ingresser, ellers navnet', regler.kolonneTittel(side.hoved) === 'Det sterkeste ankepunktet mangler i utkastet' && regler.kolonneTittel(f.dokumenter.find((r) => r.id === 'ski')) === 'Gjeld')
+  ok('Avis: metalinja og typen — «Claude · N vendinger», «samtale»/«konklusjon»', regler.avisMeta({ kildeNavn: 'Claude Desktop', dokumenter: [1, 2, 3, 4], vendinger: 12 }) === 'Claude · 4 dokumenter · 12 vendinger' && regler.avisType({ slag: 'samtale', konklusjon: {} }) === 'konklusjon' && regler.avisType({ slag: 'dokument', sak: {} }) === 'dokument')
+  const src = fs.readFileSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', 'pages', 'Forside.jsx'), 'utf8')
+  ok('Avis: fanen har ikke lenger den flate lista («Siste sju dager» / «Tidligere»); den bor i Samtaler og Dokumenter', !src.includes('>Siste sju dager<') && !src.includes('>Tidligere<') && src.includes("avisSide(flateAvis"))
+  ok('Avis: et klikk til på en sak folder sammen; knappen går til Arbeid (Erik 29.10)', /const klikkRad = \(r\) => \{ const k = radNøkkel\(r\); if \(utfoldet === k\) \{ setUtfoldet\(null\); return \}/.test(src) && src.includes('{ut && a && radKnapper(r, ut)}'))
+}
+
 console.log(`\n${feil ? `${feil} FEIL` : 'Alt grønt'} · testarkiv: ${ROOT}`)
 process.exit(feil ? 1 : 0)
