@@ -615,6 +615,7 @@ try {
   ok('Avis: metalinja og typen — «Claude · N vendinger», «samtale»/«konklusjon»', regler.avisMeta({ kildeNavn: 'Claude Desktop', dokumenter: [1, 2, 3, 4], vendinger: 12 }) === 'Claude · 4 dokumenter · 12 vendinger' && regler.avisType({ slag: 'samtale', konklusjon: {} }) === 'konklusjon' && regler.avisType({ slag: 'dokument', sak: {} }) === 'dokument')
   const src = fs.readFileSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', 'pages', 'Forside.jsx'), 'utf8')
   ok('Avis: fanen har ikke lenger den flate lista («Siste sju dager» / «Tidligere»); den bor i Samtaler og Dokumenter', !src.includes('>Siste sju dager<') && !src.includes('key="sek-tidl"') && src.includes("avisSide(flateAvis") && src.includes('className="av-tidligere"'))
+  ok("Avis: «Tidligere» henter neste ni prosjekter av seg selv når bunnen kommer til syne (Erik 29.10: «vil gjerne scrolle nedover»)", src.includes("new IntersectionObserver") && src.includes("ref={tidlBunn}"))
   // Erik 29.10: HELE samtalen er atomet — dokumentene den laget står bare inne i samtalens rad, ikke som egne rader i avisen
   const sd = [
     sak('økt', { kind: 'samtale', project: 'Tua_tua', convo: 'Skive A', name: 'Økt: Skive A', key: 'okt:1', capturedAt: t(2) }),
