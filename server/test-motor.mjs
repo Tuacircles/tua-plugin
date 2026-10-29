@@ -25,7 +25,7 @@ fs.rmSync(ROOT, { recursive: true, force: true }); fs.rmSync(DATA, { recursive: 
 fs.mkdirSync(ROOT, { recursive: true }); fs.mkdirSync(DATA, { recursive: true })
 
 const { load, save, upsert, deliveries, fileOf } = await import('./store.js')
-const { skjerm, lagSkjermer, avskjerm, gyldigFødselsnummer, kjentePersoner, minimer, sjekkTillatt, spor, mottakere, Blokkert, MotorFeil, anslåTokens, standardNivå, standardNivåer, forhåndsvis } = await import('./motor.js')
+const { skjerm, lagSkjermer, avskjerm, gyldigFødselsnummer, kjentePersoner, minimer, sjekkTillatt, spor, mottakere, Blokkert, MotorFeil, anslåTokens, standardNivå, standardNivåer, forhåndsvis, oppdiktetPlassholder } = await import('./motor.js')
 
 let feil = 0
 const ok = (navn, cond, info = '') => { console.log(`${cond ? '✓' : '✗'} ${navn}${info ? ` — ${info}` : ''}`); if (!cond) feil++ }
@@ -48,6 +48,10 @@ const V1 = [3, 7, 6, 1, 8, 9, 4, 5, 2], V2 = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2]
 const k = (d, v) => { const s = d.reduce((a, x, i) => a + x * v[i], 0); const r = 11 - (s % 11); return r === 11 ? 0 : r }
 let fnr = null
 for (let i = 100; i < 999 && !fnr; i++) { const d = ('999999' + i).split('').map(Number); const k1 = k(d, V1); if (k1 === 10) continue; const k2 = k([...d, k1], V2); if (k2 === 10) continue; fnr = d.join('') + k1 + k2 }
+// Erik 29.10: gemma kopierte «[Person A]» fra instruksen inn i ingresser der ingen person var skjermet
+ok('oppdiktetPlassholder: [Person A] som ikke står i kilden er oppdiktet', oppdiktetPlassholder('MVA-refusjonen kan bevares for [Person A]', 'MVA-refusjonen kan bevares') === true)
+ok('oppdiktetPlassholder: plassholder som står i kilden er ekte', oppdiktetPlassholder('[Person A] skal sende', 'Svar: [Person A] skal sende') === false)
+ok('oppdiktetPlassholder: vanlig tekst', oppdiktetPlassholder('Anken bygger på § 36', '') === false)
 const fnrUgyldig = fnr.slice(0, 10) + ((Number(fnr[10]) + 1) % 10)
 ok('gyldigFødselsnummer: gyldig', gyldigFødselsnummer(fnr))
 ok('gyldigFødselsnummer: ugyldig kontrollsiffer', !gyldigFødselsnummer(fnrUgyldig))

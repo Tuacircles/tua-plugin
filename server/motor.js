@@ -581,10 +581,12 @@ export function regelNivåer(tekst, { tittel = '' } = {}) {
   return { S, M: setningKutt(linjer.join('\n'), 2500) }
 }
 // Erik 29.10.2026: ingressen er et FUNN (avissiden viser den som overskrift og ingress), ikke en beskrivelse av dokumentet.
-const NIVÅ_OPPGAVE = (medM, tegn, kuttet) => `Teksten under er et dokument fra brukerens arkiv (${tegn.toLocaleString('no-NO')} tegn${kuttet ? ', bare begynnelsen er med' : ''}). Svar med ett JSON-objekt: ` +
+const NIVÅ_OPPGAVE = (medM, tegn, kuttet, plassholdere = true) => `Teksten under er et dokument fra brukerens arkiv (${tegn.toLocaleString('no-NO')} tegn${kuttet ? ', bare begynnelsen er med' : ''}). Svar med ett JSON-objekt: ` +
   (medM ? '{"S": "…", "M": "…"}. S = ingress: én til to setninger, høyst 300 tegn, med det viktigste funnet, svaret eller beslutningen i teksten — konkret, med tallene og navnene som bærer det. Begynn med selve funnet, aldri med «Dette dokumentet», «Denne samtalen», «Teksten» eller lignende. M = sammendrag, høyst 2 500 tegn: hovedpunktene, tallene og navnene som står i teksten, i den rekkefølgen de står. '
     : '{"S": "…"}. S = ingress: én til to setninger, høyst 300 tegn, med det viktigste funnet, svaret eller beslutningen i teksten — konkret, med tallene og navnene som bærer det. Begynn med selve funnet, aldri med «Dette dokumentet», «Denne samtalen», «Teksten» eller lignende. ') +
-  'På norsk. Ikke finn på noe som ikke står i teksten. Plassholdere som [Person A] brukes uendret.'
+  'På norsk. Ikke finn på noe som ikke står i teksten.' + (plassholdere ? ' Plassholdere i hakeparentes som står i teksten, brukes uendret.' : '')   // Erik 29.10: med «[Person A]» som eksempel fant gemma på plassholdere som ikke fantes
+// En plassholder som står igjen etter avskjerm() fantes ikke i det som ble sendt — modellen fant den på (gemma kopierte eksempelet «[Person A]»).
+export const oppdiktetPlassholder = (t, kilde = '') => [...String(t || '').matchAll(/\[(?:Person [A-ZÆØÅ]{1,2}|(?:E-post|Adresse|Telefon|Beløp|Kontonummer|Fødselsnummer|Org\.nr\.?) \d+)\]/g)].some((m) => !String(kilde).includes(m[0]))   // står den i kilden (arkivert skjermet svar), er den ekte
 export const NIVÅ_MAKS_TEGN = 12000
 export const NIVÅ_MAKS_LOKALT = 7000
 // Skriv S (og M når teksten er lang) for én tekst. Returnerer { S, M, av, modell, tokens, utlevert, grunn? } — faller alltid tilbake til regler, aldri feil.
@@ -604,7 +606,7 @@ export async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, k
   const maks = m.local ? NIVÅ_MAKS_LOKALT : NIVÅ_MAKS_TEGN   // gemma3:4b har 4 096 tokens kontekst — 12 000 tegn + instruks fylte den, og svaret kom uten JSON
   const kuttet = t.length > maks
   const kontekst = `## ${sk.skjerm(tittel || 'Dokument')}\n\n${sk.skjerm(kuttet ? t.slice(0, maks) : t)}${kuttet ? '\n\n[…]' : ''}`
-  const oppgave = NIVÅ_OPPGAVE(medM, t.length, kuttet)
+  const oppgave = NIVÅ_OPPGAVE(medM, t.length, kuttet, Object.keys(sk.kobling).length > 0)
   const sendes = `${SYSTEM}${JSON_KRAV}\n\n${byggMelding(oppgave, kontekst)}`
   const tokensCa = anslåTokens(sendes, m.id)
   på('skriver', { mottaker: m.id, label: m.label, modell: v.modell, lokalt: !!m.local || !!m.test, tokens: { ca: tokensCa }, medM })
@@ -612,7 +614,7 @@ export async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, k
   try { r = await m.send({ system: SYSTEM, melding: oppgave, kontekst, json: true, oppgave: 'nivåer' }, { signal }) }
   catch (e) { return { ...regel, av: 'regel', modell: null, tokens: null, utlevert: false, grunn: `${m.label} svarte ikke (${e.message}) — S og M er skrevet etter regler.` } }
   const j = plukkJson(r.tekst) || {}
-  const S = setningKutt(avskjerm(typeof j.S === 'string' ? j.S : typeof j.s === 'string' ? j.s : typeof j.ingress === 'string' ? j.ingress : '', sk.kobling), 300)
+  const Sm = setningKutt(avskjerm(typeof j.S === 'string' ? j.S : typeof j.s === 'string' ? j.s : typeof j.ingress === 'string' ? j.ingress : '', sk.kobling), 300)
   const Mrå = typeof j.M === 'string' ? j.M : typeof j.m === 'string' ? j.m : typeof j.sammendrag === 'string' ? j.sammendrag : ''
   const M = medM ? avskjerm(Mrå, sk.kobling).trim().slice(0, 2500) : ''
   const tokens = { ca: tokensCa, inn: r.usage?.input_tokens ?? null, ut: r.usage?.output_tokens ?? null }
@@ -623,6 +625,8 @@ export async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, k
     utlevert = true
   }
   if (sk.nye.size) kjentePersoner([], { lær: [...sk.nye] })
+  if (Sm && oppdiktetPlassholder(Sm, t)) return { ...regel, av: 'regel', modell: r.modell, tokens, utlevert, grunn: `${m.label} fant på en plassholder som ikke står i teksten — S og M er skrevet etter regler.` }
+  const S = Sm
   if (!S) return { ...regel, av: 'regel', modell: r.modell, tokens, utlevert, grunn: `${m.label} ga ingen ingress — S og M er skrevet etter regler.` }
   return { S, M: M || (medM ? regel.M : ''), av, M_av: M ? av : medM ? 'regel' : null, modell: r.modell, tokens, utlevert, skjermet: { ...sk.antall } }
 }
