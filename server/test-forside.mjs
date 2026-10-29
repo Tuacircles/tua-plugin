@@ -612,6 +612,16 @@ try {
   ok('Avis: metalinja og typen — «Claude · N vendinger», «samtale»/«konklusjon»', regler.avisMeta({ kildeNavn: 'Claude Desktop', dokumenter: [1, 2, 3, 4], vendinger: 12 }) === 'Claude · 4 dokumenter · 12 vendinger' && regler.avisType({ slag: 'samtale', konklusjon: {} }) === 'konklusjon' && regler.avisType({ slag: 'dokument', sak: {} }) === 'dokument')
   const src = fs.readFileSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', 'pages', 'Forside.jsx'), 'utf8')
   ok('Avis: fanen har ikke lenger den flate lista («Siste sju dager» / «Tidligere»); den bor i Samtaler og Dokumenter', !src.includes('>Siste sju dager<') && !src.includes('>Tidligere<') && src.includes("avisSide(flateAvis"))
+  // Erik 29.10: HELE samtalen er atomet — dokumentene den laget står bare inne i samtalens rad, ikke som egne rader i avisen
+  const sd = [
+    sak('økt', { kind: 'samtale', project: 'Tua_tua', convo: 'Skive A', name: 'Økt: Skive A', key: 'okt:1', capturedAt: t(2) }),
+    sak('d1', { kind: 'notat', project: 'Tua_tua', convo: 'Skive A', name: 'Skive A — slik ble det', key: 'fil:/x/02-skive-a.md', capturedAt: t(1) }),
+    sak('d2', { kind: 'notat', project: 'Tua_tua', name: 'Skive A overlevering', key: 'fil:/x/over.md', bygget_av: ['økt'], capturedAt: t(1) }),
+    sak('d3', { kind: 'notat', project: 'Tua_tua', name: 'Frittstående notat om noe annet', capturedAt: t(3) }),
+  ]
+  const fsd = regler.flateRader(sd), ar = regler.avisRader(fsd)
+  ok('Avis: samtale + 2 egne dokumenter → 1 rad (dokumentene under «2 dokumenter»); dokument uten samtale får egen rad; Dokumenter viser alle', ar.length === 2 && ar.some((r) => r.slag === 'samtale' && r.dokumenter.length === 2) && ar.some((r) => r.id === 'd3') && fsd.dokumenter.length === 3)
+  ok('Avis: Tua_tua havner uansett bare i bunnlinja «Bygging av Tua»', (() => { const sx = regler.avisSide(ar, { now: T }); return !sx.hoved && sx.prosjekter.length === 0 && regler.byggingTekst(sx.bygging) === 'Bygging av Tua · 1 samtale, 1 dokument i dag' })())
   ok('Avis: et klikk til på en sak folder sammen; knappen går til Arbeid (Erik 29.10)', /const klikkRad = \(r\) => \{ const k = radNøkkel\(r\); if \(utfoldet === k\) \{ setUtfoldet\(null\); return \}/.test(src) && src.includes('{ut && a && radKnapper(r, ut)}'))
 }
 
