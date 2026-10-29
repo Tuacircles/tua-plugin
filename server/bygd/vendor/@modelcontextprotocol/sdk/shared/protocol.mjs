@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.9 — bygd av bygg.mjs 2026-10-29. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { safeParse } from '../server/zod-compat.mjs';
 import { CancelledNotificationSchema, ProgressNotificationSchema, PingRequestSchema, GetTaskRequestSchema, McpError, ErrorCode, GetTaskPayloadRequestSchema, ListTasksRequestSchema, CancelTaskRequestSchema, isJSONRPCResultResponse, isJSONRPCErrorResponse, isJSONRPCRequest, isJSONRPCNotification, RELATED_TASK_META_KEY, isTaskAugmentedRequestParams, CreateTaskResultSchema, GetTaskResultSchema, ListTasksResultSchema, CancelTaskResultSchema, TaskStatusNotificationSchema } from '../types.mjs';
 import { isTerminal } from '../experimental/tasks/interfaces.mjs';

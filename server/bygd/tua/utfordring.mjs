@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.9 — bygd av bygg.mjs 2026-10-29. IKKE REDIGER: kilden er server/*.js og node_modules.
 // utfordring.js — skive C «Utfordre» (arbeidsstykke 34 §5 C1–C6, V23, 28.10.2026): de rene reglene. Ingen sending her — det er motor.js (utfordre()).
 //
 // Problemet før: «Også til <modell>» sendte SPØRSMÅLET på nytt; ingen modell ble bedt om å gå løs på SVARET, og å utfordre en fanget samtale

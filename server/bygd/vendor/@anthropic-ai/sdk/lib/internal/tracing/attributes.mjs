@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.9 — bygd av bygg.mjs 2026-10-29. IKKE REDIGER: kilden er server/*.js og node_modules.
 // Named as `@opentelemetry/semantic-conventions` names them, and copied: that package exports the
 // `gen_ai.*` names only from its unstable `incubating` entry point, which says to copy them.
 const ATTR_GEN_AI_AGENT_NAME = 'gen_ai.agent.name';

@@ -22,6 +22,10 @@ All notable changes to the Tua plugin. Versions follow `version` in `.claude-plu
 - **Tua → Claude:** «Siden sist i Tua» (Spør threads, conclusions, shares, files read in — last 7 days, captured and drift atoms excluded) on the first `tua_card`/`tua_search` call in a conversation and as one line in the Code SessionStart hook; `tua_search` lists Spør threads and conclusions first, one line per thread; a project-instruction text for Claude Desktop (`docs/desktop-prosjekt-instruks.md`, offered by `tua_setup` and the card's «Kopier instruksen» when the project has a Desktop uuid).
 - Tests: `server/test-dora.mjs` (47 checks over MCP stdio against a scratch archive).
 
+## 0.5.9 — 2026-10-29 (rebuild: the build had fallen behind the sources)
+
+- No new behaviour. The health check reported R7 red on the night of 29 October: `ollama.js`, `keychain.js` and `motor.js` were changed during the day (ingresses with gemma, the newspaper page) without `node bygg.mjs`, so the installed plugin ran old code. Rebuilt, tests green, version raised so `claude plugin update tua@tua-lokal` actually refreshes the cache (it skips when the version is unchanged).
+
 ## 0.5.8 — 2026-10-24 (prompts are first-class atoms — V16)
 
 - **Every substantial prompt becomes its own atom** (`kind: prompt`, key `prompt:<session8>:<sha8>`): in the Code/Cowork import, in the Desktop-cache and export readers, and live in Claude Code through a new `UserPromptSubmit` hook (silent — it writes nothing to stdout). S is the first sentence (≤ 300 chars), the atom lives in the project folder with the tag `prompt`, and it is never shared by default. Threshold: ≥ 80 characters, not a slash command, not a bare confirmation («ja», «fortsett»).

@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.8 — bygd av bygg.mjs 2026-10-28. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.9 — bygd av bygg.mjs 2026-10-29. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { spawnSync } from 'node:child_process';
 import { OLLAMA_URL, standardModell, OLLAMA_VERT } from './ollama.mjs';
 
@@ -55,7 +55,7 @@ const keyStatus = () => Object.fromEntries(PROVIDERS.filter((p) => !p.local).map
 
 // Ollama lokalt: GET /api/tags på OLLAMA_URL (127.0.0.1:11434; TUA_OLLAMA_URL bare i tester). Kort tidsavbrudd; aldri et kall mot en modell (det er M20).
 // Friksjon 12: `modell` er standardmodellen motoren vil bruke (valgt i Innstillinger, lagret i config; ellers den første), `kilde` sier hvorfor.
-async function ollamaStatus(timeoutMs = 1500) {
+async function ollamaStatus(timeoutMs = 6000) {   // 6 s (Erik 29.10): en Ollama som er opptatt med forrige sak, svarer tregt — 1,5 s ga «kjører ikke» midt i en gjennomgang (avslått tilkobling svarer straks uansett)
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
