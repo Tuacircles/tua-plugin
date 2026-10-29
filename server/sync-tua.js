@@ -63,6 +63,8 @@ if (args.includes('--install-hook')) {
 # og dokumenter inn i Tua. Nye versjoner erstatter gamle. (installert av sync-tua.js)
 cd "$(git rev-parse --show-toplevel)" || exit 0
 if command -v node >/dev/null 2>&1; then
+  # Byggvakten (29.10.2026): sier fra her og nå hvis server/*.js er nyere enn bygget eller versjonene spriker
+  node "${path.join(path.dirname(SCRIPT), 'byggvakt.js')}" || true
   node "${SCRIPT}" 2>/dev/null | tail -1 | sed 's/^/[tua-sync] /'
 else
   echo "[tua-sync] node ikke funnet — kjør manuelt: node ${SCRIPT}" >&2

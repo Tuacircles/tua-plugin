@@ -24,7 +24,8 @@ All notable changes to the Tua plugin. Versions follow `version` in `.claude-plu
 
 ## 0.5.9 — 2026-10-29 (rebuild: the build had fallen behind the sources)
 
-- No new behaviour. The health check reported R7 red on the night of 29 October: `ollama.js`, `keychain.js` and `motor.js` were changed during the day (ingresses with gemma, the newspaper page) without `node bygg.mjs`, so the installed plugin ran old code. Rebuilt, tests green, version raised so `claude plugin update tua@tua-lokal` actually refreshes the cache (it skips when the version is unchanged).
+- **A build guard in the post-commit hook** (`server/byggvakt.js`, installed by `sync-tua.js --install-hook`): after every commit it checks the same thing as R7 — sources that are part of the build newer than `server/tua-server.mjs`, or versions that differ between `server.js`, `package.json` and `plugin.json` — and prints a loud warning plus a note the next Claude session reads aloud. It blocks nothing; it just moves the finding from 03:30 to the moment of the commit.
+- No new behaviour otherwise. The health check reported R7 red on the night of 29 October: `ollama.js`, `keychain.js` and `motor.js` were changed during the day (ingresses with gemma, the newspaper page) without `node bygg.mjs`, so the installed plugin ran old code. Rebuilt, tests green, version raised so `claude plugin update tua@tua-lokal` actually refreshes the cache (it skips when the version is unchanged).
 
 ## 0.5.8 — 2026-10-24 (prompts are first-class atoms — V16)
 
