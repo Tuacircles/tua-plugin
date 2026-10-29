@@ -622,6 +622,20 @@ try {
   const fsd = regler.flateRader(sd), ar = regler.avisRader(fsd)
   ok('Avis: samtale + 2 egne dokumenter → 1 rad (dokumentene under «2 dokumenter»); dokument uten samtale får egen rad; Dokumenter viser alle', ar.length === 2 && ar.some((r) => r.slag === 'samtale' && r.dokumenter.length === 2) && ar.some((r) => r.id === 'd3') && fsd.dokumenter.length === 3)
   ok('Avis: Tua_tua havner uansett bare i bunnlinja «Bygging av Tua»', (() => { const sx = regler.avisSide(ar, { now: T }); return !sx.hoved && sx.prosjekter.length === 0 && regler.byggingTekst(sx.bygging) === 'Bygging av Tua · 1 samtale, 1 dokument i dag' })())
+  // Erik 29.10: samtalefraser er ikke funn — hopp over og prøv neste kilde; ender alt der, er tittelen navnet. Uten prosjekt får ingen kolonne.
+  const fraseRad = (navn, svar, S = '') => ({ slag: 'samtale', navn, sak: { kind: 'samtale', name: navn, content: `# ${navn}\n\n**Bruker:** spørsmål\n\n**Claude:** ${svar}`, levels: { S: { text: S, by: 'regel' } } } })
+  const fem = [
+    ['Tokenisering av eiendeler', 'Kort svar: nei, ikke i dag.'],
+    ['Sammendrag av vedlagt fil', 'Sammendrag av vedlagt fil.'],
+    ['Fjellbadet prosjekt analyse', 'Jeg har sjekket mot atomet om OCB-vinlageret i Tua (sist oppdatert 13.10).'],
+    ['Lese aksjer.md og gi en vurdering av løsningen?', 'Vennligst last opp filen «aksjer.md» slik at jeg kan lese den og gi en vurdering.'],
+    ['har du samme oppfatning som claude', 'Jeg må vite hva Claude mener for å kunne svare på det spørsmålet.'],
+  ]
+  for (const [navn, svar] of fem) { const fx = regler.funnAv(fraseRad(navn, svar)); ok(`Funn: «${svar.slice(0, 40)}» er en samtalefrase → tittelen er navnet «${navn}»`, fx.kilde === 'navn' && fx.tittel === navn && regler.kolonneTittel(fraseRad(navn, svar), fx) === navn) }
+  ok('Funn: frasen hoppes over og neste setning med innhold brukes; under fem ord er ikke et funn', regler.funnAv(fraseRad('X', 'Kort svar: nei. Tokenisering løser et problem dere neppe har nå.')).tittel === 'Tokenisering løser et problem dere neppe har nå' && regler.funnAv(fraseRad('Y', 'Ferdig med det.')).kilde === 'navn')
+  ok('Funn: neste kilde prøves — frase i siste svar, funn i regel-ingressens «→»-del', regler.funnAv(fraseRad('Z', 'Ok.', 'Sist: hva nå? → Leieavtalen bør reforhandles før nyttår, med kortere binding. · 4 vendinger')).tittel === 'Leieavtalen bør reforhandles før nyttår, med kortere binding')
+  const up = regler.avisSide([{ slag: 'samtale', id: 'h', project: 'A', tid: T - 1000, vekt: 10, sak: {} }, { slag: 'samtale', id: 'u1', project: 'empty', tid: T - 2000, vekt: 50, sak: {} }, { slag: 'dokument', id: 'u2', project: 'Uten prosjekt', tid: T - 3000, vekt: 40, sak: {} }, { slag: 'dokument', id: 'b', project: 'B', tid: T - 3000, vekt: 1, sak: {} }], { now: T })
+  ok('Avis: Uten prosjekt (også «empty») får ingen egen kolonne', !up.prosjekter.some((p) => p.vis === 'Uten prosjekt') && up.prosjekter.some((p) => p.vis === 'B'))
   ok('Avis: et klikk til på en sak folder sammen; knappen går til Arbeid (Erik 29.10)', /const klikkRad = \(r\) => \{ const k = radNøkkel\(r\); if \(utfoldet === k\) \{ setUtfoldet\(null\); return \}/.test(src) && src.includes('{ut && a && radKnapper(r, ut)}'))
 }
 
