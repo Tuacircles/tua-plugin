@@ -596,7 +596,9 @@ try {
   const f = regler.flateRader(alle)
   const side = regler.avisSide(regler.avisRader(f), { now: T })
   ok('Avis: hovedsaken er mest arbeid siste sju dager — aldri Tua_tua (vekt 99) og aldri eldre enn uka (vekt 50)', side.hoved?.id === 'ank')
-  ok('Avis: kolonnene er prosjektene utenom Tua-bygging og drift, uten hovedsaken; høyst tre saker per prosjekt', side.prosjekter.map((p) => p.vis).join() === 'Skigaarden,Energima anke' && side.prosjekter.every((p) => p.rader.length <= 3) && !side.prosjekter.some((p) => p.rader.some((r) => r.id === 'ank')))
+  ok('Avis: kolonnene er prosjektene utenom Tua-bygging og drift, uten hovedsaken; høyst tre saker per prosjekt', side.prosjekter.map((p) => p.vis).join() === 'Skigaarden,Energima anke' && side.prosjekter.every((p) => p.rader.length <= 5) && !side.prosjekter.some((p) => p.rader.some((r) => r.id === 'ank')))
+  ok('Avis: lenger — TIDLIGERE har prosjektene med eldre arbeid (sist rørt først, høyst tre saker); denne uka har ingen tak på antall prosjekter', side.tidligere.map((p) => p.vis).join() === 'Gammelt' && side.tidligere[0].rader.length === 1 && side.flere.length === 0
+    && regler.avisSide([{ slag: 'dokument', id: 'ny', project: 'Ny', tid: T - 1000, vekt: 1, sak: {} }, ...Array.from({ length: 20 }, (_, i) => ({ slag: 'dokument', id: 'x' + i, project: 'P' + (i % 10), tid: T - 1000 * (i + 1) - 30 * 86400e3, vekt: 0, sak: {} }))], { now: T }).tidligere.length === 10)
   ok('Avis: «N prosjekter i arbeid denne uka» teller ikke Tua_tua eller eldre prosjekter', side.antallProsjekter === 2)
   ok('Avis: Tua-byggingen i én linje — «Bygging av Tua · 1 samtale, 1 dokument i dag»', regler.byggingTekst(side.bygging) === 'Bygging av Tua · 1 samtale, 1 dokument i dag' && regler.erTuaBygging('Tua_tua') && regler.erTuaBygging('TUA') && !regler.erTuaBygging('Tua Business'))
   const fa = regler.funnAv(side.hoved)
@@ -607,11 +609,12 @@ try {
   ok('B1: dokumentets første avsnitt — kursiv metalinje og overskrift hoppes over', fs2.tittel === 'Uten Danske Bank er gjelden 533 MNOK' && fs2.ingress === 'Resten er pant i eiendommen.')
   ok('B1: lesbare tar aldri systemtekst, verktøylinjer eller arbeidssteg', regler.lesbare('Background (from the session that started this one): x\n\nThis session is being continued from a previous conversation.\n\n[søk: noe]\n\nLa meg sjekke dette først.\n\nSist: a → b\n\n12 oppgaver i Tua_tua, 3 filer skrevet.').length === 0)
   ok('B1: statussetninger («Begge er oppdatert til v2 …») blir ikke tittel', regler.funnAv({ slag: 'dokument', navn: 'X', sak: { content: 'Begge er oppdatert til v2 — samme atom-id. Anken bør bygge på Red Rock-dommen.' } }).tittel === 'Anken bør bygge på Red Rock-dommen')
+  ok('B1: frontmatter-linjer («name: …») er ikke funn', regler.lesbare('name: project-manifest-status-2026-06-11\ndescription: noe her som er langt nok\n\nPrislisten for 2027 er klar til gjennomgang.').join('|') === 'Prislisten for 2027 er klar til gjennomgang.')
   ok('B1: uten lesbar tekst er navnet tittelen', regler.funnAv({ slag: 'samtale', navn: 'Terje Bjerkan oversikt', sak: { content: '# Terje\n\n_meta_' } }).kilde === 'navn')
   ok('Avis: kolonnetittelen er funnet for samtaler og modell-ingresser, ellers navnet', regler.kolonneTittel(side.hoved) === 'Det sterkeste ankepunktet mangler i utkastet' && regler.kolonneTittel(f.dokumenter.find((r) => r.id === 'ski')) === 'Gjeld')
   ok('Avis: metalinja og typen — «Claude · N vendinger», «samtale»/«konklusjon»', regler.avisMeta({ kildeNavn: 'Claude Desktop', dokumenter: [1, 2, 3, 4], vendinger: 12 }) === 'Claude · 4 dokumenter · 12 vendinger' && regler.avisType({ slag: 'samtale', konklusjon: {} }) === 'konklusjon' && regler.avisType({ slag: 'dokument', sak: {} }) === 'dokument')
   const src = fs.readFileSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', 'pages', 'Forside.jsx'), 'utf8')
-  ok('Avis: fanen har ikke lenger den flate lista («Siste sju dager» / «Tidligere»); den bor i Samtaler og Dokumenter', !src.includes('>Siste sju dager<') && !src.includes('>Tidligere<') && src.includes("avisSide(flateAvis"))
+  ok('Avis: fanen har ikke lenger den flate lista («Siste sju dager» / «Tidligere»); den bor i Samtaler og Dokumenter', !src.includes('>Siste sju dager<') && !src.includes('key="sek-tidl"') && src.includes("avisSide(flateAvis") && src.includes('className="av-tidligere"'))
   // Erik 29.10: HELE samtalen er atomet — dokumentene den laget står bare inne i samtalens rad, ikke som egne rader i avisen
   const sd = [
     sak('økt', { kind: 'samtale', project: 'Tua_tua', convo: 'Skive A', name: 'Økt: Skive A', key: 'okt:1', capturedAt: t(2) }),
