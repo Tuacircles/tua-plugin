@@ -580,11 +580,13 @@ export function regelNivåer(tekst, { tittel = '' } = {}) {
   }
   return { S, M: setningKutt(linjer.join('\n'), 2500) }
 }
+// Erik 29.10.2026: ingressen er et FUNN (avissiden viser den som overskrift og ingress), ikke en beskrivelse av dokumentet.
 const NIVÅ_OPPGAVE = (medM, tegn, kuttet) => `Teksten under er et dokument fra brukerens arkiv (${tegn.toLocaleString('no-NO')} tegn${kuttet ? ', bare begynnelsen er med' : ''}). Svar med ett JSON-objekt: ` +
-  (medM ? '{"S": "…", "M": "…"}. S = ingress: én til to setninger, høyst 300 tegn, som sier hva dokumentet er og hva det handler om. M = sammendrag, høyst 2 500 tegn: hovedpunktene, tallene og navnene som står i teksten, i den rekkefølgen de står. '
-    : '{"S": "…"}. S = ingress: én til to setninger, høyst 300 tegn, som sier hva dokumentet er og hva det handler om. ') +
+  (medM ? '{"S": "…", "M": "…"}. S = ingress: én til to setninger, høyst 300 tegn, med det viktigste funnet, svaret eller beslutningen i teksten — konkret, med tallene og navnene som bærer det. Begynn med selve funnet, aldri med «Dette dokumentet», «Denne samtalen», «Teksten» eller lignende. M = sammendrag, høyst 2 500 tegn: hovedpunktene, tallene og navnene som står i teksten, i den rekkefølgen de står. '
+    : '{"S": "…"}. S = ingress: én til to setninger, høyst 300 tegn, med det viktigste funnet, svaret eller beslutningen i teksten — konkret, med tallene og navnene som bærer det. Begynn med selve funnet, aldri med «Dette dokumentet», «Denne samtalen», «Teksten» eller lignende. ') +
   'På norsk. Ikke finn på noe som ikke står i teksten. Plassholdere som [Person A] brukes uendret.'
 export const NIVÅ_MAKS_TEGN = 12000
+export const NIVÅ_MAKS_LOKALT = 7000
 // Skriv S (og M når teksten er lang) for én tekst. Returnerer { S, M, av, modell, tokens, utlevert, grunn? } — faller alltid tilbake til regler, aldri feil.
 export async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, klient = 'app', skriver: ønsket, signal, på = () => {} } = {}) {
   const t = String(tekst || '')
@@ -599,8 +601,9 @@ export async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, k
     try { sjekkTillatt(m, kilder) } catch (e) { if (e instanceof Blokkert) return { ...regel, av: 'regel', modell: null, tokens: null, utlevert: false, grunn: `${m.label} fikk ikke lese fila: ${e.message}` }; throw e }
   }
   const sk = lagSkjermer(kjentePersoner(atoms))
-  const kuttet = t.length > NIVÅ_MAKS_TEGN
-  const kontekst = `## ${sk.skjerm(tittel || 'Dokument')}\n\n${sk.skjerm(kuttet ? t.slice(0, NIVÅ_MAKS_TEGN) : t)}${kuttet ? '\n\n[…]' : ''}`
+  const maks = m.local ? NIVÅ_MAKS_LOKALT : NIVÅ_MAKS_TEGN   // gemma3:4b har 4 096 tokens kontekst — 12 000 tegn + instruks fylte den, og svaret kom uten JSON
+  const kuttet = t.length > maks
+  const kontekst = `## ${sk.skjerm(tittel || 'Dokument')}\n\n${sk.skjerm(kuttet ? t.slice(0, maks) : t)}${kuttet ? '\n\n[…]' : ''}`
   const oppgave = NIVÅ_OPPGAVE(medM, t.length, kuttet)
   const sendes = `${SYSTEM}${JSON_KRAV}\n\n${byggMelding(oppgave, kontekst)}`
   const tokensCa = anslåTokens(sendes, m.id)
