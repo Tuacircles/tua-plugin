@@ -136,6 +136,9 @@ try {
     try {
       const sf = path.join(FILES_ROOT, '.tua', 'helsesjekk-siste.json'); const s = JSON.parse(fs.readFileSync(sf, 'utf8'))
       if (s && s.id && !s.shown) { parts.push(`Helsesjekken ${s.date} er klar (${s.S}) — vis den som kort med en gang: tua_card(id="${s.id}")`); fs.writeFileSync(sf, JSON.stringify({ ...s, shown: true, shownAt: Date.now() }, null, 2) + '\n') }
+      // 30.10: stillhetsvakt for helsesjekken selv — natt til 30.10 døde launchd-jobben (EX_CONFIG, loggfila hadde fått TCC-merke) uten
+      // et ord i noen logg. Siste rapport eldre enn 36 timer etter kl. 04 → si fra, så det ikke går dager før noen merker det.
+      if (s && s.at && Date.now() - s.at > 36 * 3600 * 1000 && new Date().getHours() >= 4) parts.push(`VARSEL: Tua-helsesjekken har ikke kjørt siden ${s.date} — launchd-jobben kan ha stoppet (se: launchctl print gui/$(id -u)/com.tuacircles.helsesjekk | grep "last exit"). Kjør den nå: cd tua-plugin && node server/helsesjekk.js. Si det til brukeren først`)
     } catch {}
     // 20.10: stillhetsvakt — leseren var blind fra 15.09 til 20.10 uten at noen merket det. Desktop i bruk, men ingen ny samtale sett på 14 dager → si fra.
     try { const ds = desk.desktopStaleness(); if (ds.stale) parts.push(`VARSEL: Desktop-leseren har ikke sett noen ny samtale på ${ds.days} dager selv om Claude Desktop er i bruk — Desktop kan ha flyttet samtalene igjen (som 15.09.2026, se STATUS.md «Desktop-leseren»). Si det til brukeren`) } catch {}

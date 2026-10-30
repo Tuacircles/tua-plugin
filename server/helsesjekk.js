@@ -340,7 +340,12 @@ const LABEL = 'com.tuacircles.helsesjekk'
 const PLIST = path.join(HOME, 'Library', 'LaunchAgents', `${LABEL}.plist`)
 function installLaunchd() {
   if (process.platform !== 'darwin') { console.error('launchd finnes bare på macOS — bruk cron/Task Scheduler her'); process.exitCode = 1; return }
-  const logDir = DATA_DIR; fs.mkdirSync(logDir, { recursive: true })
+  // Loggen ligger i ~/Library/Logs/Tua, ikke i data/: 30.10.2026 fikk data/helsesjekk.log et com.apple.macl-merke (TCC, etter at
+  // fila var åpnet fra en app med filtilgang), og da nektet launchd å åpne den som stdout — jobben døde med EX_CONFIG (78) før
+  // node startet, uten en linje i noen logg. Library/Logs er utenfor TCC-mappene (Documents/Desktop/Downloads).
+  const logDir = path.join(HOME, 'Library', 'Logs', 'Tua'); fs.mkdirSync(logDir, { recursive: true })
+  const oldLog = path.join(DATA_DIR, 'helsesjekk.log'), newLog = path.join(logDir, 'helsesjekk.log')
+  if (fs.existsSync(oldLog) && !fs.existsSync(newLog)) { try { fs.writeFileSync(newLog, fs.readFileSync(oldLog)); fs.unlinkSync(oldLog) } catch {} }
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
