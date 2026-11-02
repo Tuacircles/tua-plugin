@@ -8,6 +8,7 @@ All notable changes to the Tua plugin. Versions follow `version` in `.claude-plu
 - Shielding tightened: «Siden sist» in `tua_search` and in the hook, related-atom names in `tua_get`, and the conversation title in `tua_compose` are now shielded like everything else Claude gets.
 - Bridge (app server): `GET /api/sidefelt` (what the work-mode sidebar needs — 70 KB gzipped instead of 28 MB on a 1 783-atom archive), gzip + ETag/304 for large JSON responses, `POST /api/samtaler/traader` and `/api/samtaler/gjentatt` (the two one-off reviews as buttons in Settings, dry-run first), `usikker` on `/api/mottakere` until Ollama has answered (no default recipient reported as Claude for a moment at startup).
 - Tests: `server/test-sidefelt.mjs` (new), `test-dora.mjs` 53 → 69, `test-innstillinger.mjs` 40 → 46.
+- **The app stays in step with main** (`server/appvakt.js`, 2026-11-02, installed by `sync-tua.js --install-hook`, which now also writes a `post-merge` hook because fast-forward merges skip `post-commit`): a commit or merge on main that changes `tua2-sandbox` rebuilds `dist` in the background. The build never holds up the commit and is swapped in only when it succeeded; a failed build keeps the old `dist` and leaves a note the next Claude session reads aloud. Commits in worktrees build nothing. Test: `server/test-appvakt.mjs`.
 
 ## 2026-10-27/28 (conversations as atoms — work piece 33, slices 1–3)
 
