@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.11 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.12 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 var $schema = "http://json-schema.org/draft-07/schema#";
 var $id = "http://json-schema.org/draft-07/schema#";
 var title = "Core schema meta-schema";
