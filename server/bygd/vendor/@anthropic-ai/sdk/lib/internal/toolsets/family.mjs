@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.11 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 /** Dated `tools[]` entry `type` → the family stamped on member blocks. */
 const TOOLSET_TYPE_TO_FAMILY = {
     browser_toolset_20260801: 'browser',

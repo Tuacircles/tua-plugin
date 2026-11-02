@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.11 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { APIResource } from '../../../../core/resource.mjs';
 import { InstallationSettings } from './installation-settings.mjs';
 import { Shares } from './shares.mjs';

@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.11 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import 'node:os';
 import path__default from 'node:path';
@@ -662,10 +662,12 @@ function makeAtom({ content, name, source, project, convo, summary, tags, short,
 // Slå sammen gamle og nye nivåer. Et nytt nivå erstatter det gamle når det er
 // skrevet av noen med minst samme rang, eller når det gamle er utdatert —
 // men et menneskeskrevet nivå overskrives aldri automatisk (V10), bare merkes utdatert.
-function mergeLevels(oldL = {}, newL = {}, version) {
+// En samtales S skrevet av en modell overlever også regelteksten en ny import har med seg (Erik 02.11.2026): `of` står, så den vises som utdatert og fanges av needsLevel til en modell skriver den på nytt.
+function mergeLevels(oldL = {}, newL = {}, version, kind) {
   const out = {};
   for (const L of ['S', 'M']) {
     const o = oldL[L], n = newL[L];
+    if (L === 'S' && kind === 'samtale' && o?.text && n && rankOf(n.by) < rankOf(o.by)) { out[L] = o; continue }
     const replace = n && (!o || n.by === 'menneske' || (o.by !== 'menneske' && (rankOf(n.by) >= rankOf(o.by) || (o.of != null && o.of !== version))));
     if (replace) out[L] = { ...n, of: version };
     else if (o) out[L] = o;
@@ -696,7 +698,7 @@ function upsert(atoms, { key, ...data }) {
   const sameConvo = !fresh.convo || fresh.convo === old.convo;
   const bodySame = old.content === fresh.content && old.name === fresh.name && old.summary === fresh.summary && sameConvo;
   const version = bodySame ? (old.version || 1) : (old.version || 1) + 1;
-  const levels = mergeLevels(old.levels, fresh.levels, version);
+  const levels = mergeLevels(old.levels, fresh.levels, version, data.kind || old.kind);
   const links = fresh.links?.length ? fresh.links : old.links;          // nye lenker erstatter; ingen sendt = behold
   const derivedFrom = fresh.derivedFrom?.length ? fresh.derivedFrom : old.derivedFrom;
   const renders = fresh.renders?.length ? fresh.renders : old.renders;
