@@ -588,6 +588,8 @@ try {
     sak('ank', { kind: 'samtale', project: 'Energima anke', convo: 'Anke', name: 'energima anke', vekt: 30, capturedAt: t(3),
       content: '# energima anke\n\n_Tua · 1 vending · 2026-10-24 · Energima anke_\n\n**Du · 24.10.2026:** kan du vurdere anken?\n\n**Claude · L/M:** # Ny vurdering\n\n**Hovedfunn:** Det sterkeste ankepunktet mangler i utkastet. Tingretten tok ikke stilling til fakturaene, jf. tvl. § 19-6. Dette bør stå først.\n\n' + 'Mer begrunnelse. '.repeat(30),
       levels: { S: { text: 'This session is being continued from a previous conversation that ran out of context.', by: 'regel' } } }),
+    sak('ank-p1', { kind: 'prompt', project: 'Energima anke', convo: 'Anke', name: 'kan du vurdere anken?', capturedAt: t(3) }),
+    sak('ank-p2', { kind: 'prompt', project: 'Energima anke', convo: 'Anke', name: 'og fakturaene?', capturedAt: t(2) }),
     sak('dok', { kind: 'leveranse', project: 'Energima anke', name: 'Ankeerklæring v5', vekt: 6, capturedAt: t(5), levels: { S: { text: 'Ankeerklæring v5 (10 sider, fristavbrytende form). Fem hovedlinjer, jf. § 36.', by: 'Claude' } } }),
     sak('ski', { kind: 'notat', project: 'Skigaarden', name: 'Gjeld', vekt: 8, capturedAt: t(6), content: '# Gjeld\n\n*Laget 28.10.2026 · fra Claude*\n\nUten Danske Bank er gjelden 533 MNOK. Resten er pant i eiendommen.', levels: { S: { text: 'Gjeld', by: 'regel' } } }),
     sak('gml', { kind: 'notat', project: 'Gammelt', name: 'Gammelt notat', vekt: 50, capturedAt: T - 20 * 86400e3 }),
@@ -595,7 +597,7 @@ try {
   ]
   const f = regler.flateRader(alle)
   const side = regler.avisSide(regler.avisRader(f), { now: T })
-  ok('Avis: hovedsaken er mest arbeid siste sju dager — aldri Tua_tua (vekt 99) og aldri eldre enn uka (vekt 50)', side.hoved?.id === 'ank')
+  ok('Avis: hovedsaken er mest arbeid siste 48 t — aldri Tua_tua (vekt 99) og aldri eldre enn uka (vekt 50)', side.hoved?.id === 'ank')
   ok('Avis: kolonnene er prosjektene utenom Tua-bygging og drift, uten hovedsaken; høyst tre saker per prosjekt', side.prosjekter.map((p) => p.vis).join() === 'Skigaarden,Energima anke' && side.prosjekter.every((p) => p.rader.length <= 5) && !side.prosjekter.some((p) => p.rader.some((r) => r.id === 'ank')))
   ok('Avis: lenger — TIDLIGERE har prosjektene med eldre arbeid (sist rørt først, høyst tre saker); denne uka har ingen tak på antall prosjekter', side.tidligere.map((p) => p.vis).join() === 'Gammelt' && side.tidligere[0].rader.length === 1 && side.flere.length === 0
     && regler.avisSide([{ slag: 'dokument', id: 'ny', project: 'Ny', tid: T - 1000, vekt: 1, sak: {} }, ...Array.from({ length: 20 }, (_, i) => ({ slag: 'dokument', id: 'x' + i, project: 'P' + (i % 10), tid: T - 1000 * (i + 1) - 30 * 86400e3, vekt: 0, sak: {} }))], { now: T }).tidligere.length === 10)
@@ -640,6 +642,21 @@ try {
   ok('Funn: neste kilde prøves — frase i siste svar, funn i regel-ingressens «→»-del', regler.funnAv(fraseRad('Z', 'Ok.', 'Sist: hva nå? → Leieavtalen bør reforhandles før nyttår, med kortere binding. · 4 vendinger')).tittel === 'Leieavtalen bør reforhandles før nyttår, med kortere binding')
   const up = regler.avisSide([{ slag: 'samtale', id: 'h', project: 'A', tid: T - 1000, vekt: 10, sak: {} }, { slag: 'samtale', id: 'u1', project: 'empty', tid: T - 2000, vekt: 50, sak: {} }, { slag: 'dokument', id: 'u2', project: 'Uten prosjekt', tid: T - 3000, vekt: 40, sak: {} }, { slag: 'dokument', id: 'b', project: 'B', tid: T - 3000, vekt: 1, sak: {} }], { now: T })
   ok('Avis: Uten prosjekt (også «empty») får ingen egen kolonne', !up.prosjekter.some((p) => p.vis === 'Uten prosjekt') && up.prosjekter.some((p) => p.vis === 'B'))
+  // Erik 02.11: «hverken det mest aktive, siste arbeid, eller det største» — en lang samtale som ikke er rørt på tre dager taper for den du jobber i nå
+  const del = (id, convo, h, o = {}) => sak(id, { kind: 'prompt', project: 'P', convo, name: id, capturedAt: t(h), ...o })
+  const lang = [sak('lang', { kind: 'samtale', project: 'P', convo: 'Lang', name: 'Lang samtale', vekt: 90, capturedAt: t(30) }), ...Array.from({ length: 20 }, (_, i) => del('l' + i, 'Lang', 72 + i, { vekt: 4 }))]
+  const aktiv = [sak('aktiv', { kind: 'samtale', project: 'Q', convo: 'Aktiv', name: 'Aktiv samtale', capturedAt: t(1) }), del('a1', 'Aktiv', 2, { project: 'Q' }), del('a2', 'Aktiv', 3, { project: 'Q' })]
+  const hvs = (l, now = T) => regler.avisSide(regler.avisRader(regler.flateRader(l)), { now }).hoved?.id
+  ok('Hovedsak: mest arbeid siste 48 t slår en lang samtale som er eldre (vekt teller ikke)', hvs([...lang, ...aktiv]) === 'aktiv')
+  ok('Hovedsak: arkivet står stille — 48 timer regnes fra det sist rørte, ikke fra nå', hvs([...lang, ...aktiv], T + 10 * 86400e3) === 'aktiv')
+  const raderA = regler.flateRader([...aktiv, sak('ver2', { kind: 'leveranse', project: 'R', name: 'Leieavtale v2', capturedAt: t(1) }), sak('ver2p', { kind: 'leveranse', project: 'R', name: 'Leieavtale v2', file: 'Leieavtale v2.pdf', capturedAt: t(1) }), sak('ver1', { kind: 'leveranse', project: 'R', name: 'Leieavtale v1', capturedAt: t(2) }), sak('ver0', { kind: 'leveranse', project: 'R', name: 'Leieavtale v0', capturedAt: t(100) })])
+  const rS = raderA.samtaler.find((r) => r.id === 'aktiv'), rD = raderA.dokumenter.find((r) => r.project === 'R')
+  ok('Hovedsak: arbeidet telles — logg + vendinger 1 hver, ny dokumentversjon 2, gammel versjon 0', regler.arbeidSiden(rS, t(48)) === 3 && regler.arbeidSiden(rS, t(2.5)) === 2 && regler.arbeidSiden(rD, t(48)) === 4)
+  const regelRad = { slag: 'samtale', navn: 'Samtalens navn', sak: { content: '# X\n\n**Claude:** Liv-ex er en elektronisk markedsplass i London for handel med vin. Den brukes som prisreferanse av hele bransjen.' } }
+  const hv = regler.hovedVisning(regelRad), hm = regler.hovedVisning({ slag: 'dokument', navn: 'N', sak: { levels: { S: { text: 'Gjelden er 533 MNOK uten Danske Bank. Resten er pant.', by: 'Ollama · gemma3:4b' } } } })
+  ok('Hovedsak: en setning plukket av regelen er aldri tittelen — navnet er tittelen, setningen er ingressen; modellens funn er tittelen', hv.tittel === 'Samtalens navn' && /^Liv-ex er en elektronisk/.test(hv.ingress) && hm.tittel === 'Gjelden er 533 MNOK uten Danske Bank')
+  const nyeDeler = regler.funnAv({ slag: 'samtale', navn: 'X', sak: {}, deler: [{ kind: 'capture', levels: { S: { text: 'Gammelt funn fra første del av samtalen.', by: 'Claude' } } }, { kind: 'capture', levels: { S: { text: 'Nyeste funn fra siste del av samtalen.', by: 'Claude' } } }] })
+  ok('Funn: uten ingress på selve samtalen brukes modellens ingress fra den nyeste delen', nyeDeler.kilde === 'modell' && /^Nyeste funn/.test(nyeDeler.tittel))
   ok('Avis: et klikk til på en sak folder sammen; knappen går til Arbeid (Erik 29.10)', /const klikkRad = \(r\) => \{ const k = radNøkkel\(r\); if \(utfoldet === k\) \{ setUtfoldet\(null\); return \}/.test(src) && src.includes('{ut && a && radKnapper(r, ut)}'))
 }
 
