@@ -65,14 +65,24 @@ cd "$(git rev-parse --show-toplevel)" || exit 0
 if command -v node >/dev/null 2>&1; then
   # Byggvakten (29.10.2026): sier fra her og nå hvis server/*.js er nyere enn bygget eller versjonene spriker
   node "${path.join(path.dirname(SCRIPT), 'byggvakt.js')}" || true
+  # Appvakten (02.11.2026): en commit på main som endrer tua2-sandbox bygger appen i bakgrunnen
+  node "${path.join(path.dirname(SCRIPT), 'appvakt.js')}" || true
   node "${SCRIPT}" 2>/dev/null | tail -1 | sed 's/^/[tua-sync] /'
 else
   echo "[tua-sync] node ikke funnet — kjør manuelt: node ${SCRIPT}" >&2
 fi
 `
-    const p = path.join(hooksDir, 'post-commit')
-    fs.writeFileSync(p, hook); fs.chmodSync(p, 0o755)
-    console.log(`post-commit-hook installert: ${p}`)
+    // En fast-forward-fletting til main kjører ikke post-commit, bare post-merge — og slik kommer det meste inn på main
+    const merge = `#!/bin/sh
+# Tua: etter en fletting — bygg appen i bakgrunnen hvis tua2-sandbox er endret på main. (installert av sync-tua.js)
+cd "$(git rev-parse --show-toplevel)" || exit 0
+command -v node >/dev/null 2>&1 && node "${path.join(path.dirname(SCRIPT), 'appvakt.js')}" || true
+`
+    for (const [navn, innhold] of [['post-commit', hook], ['post-merge', merge]]) {
+      const p = path.join(hooksDir, navn)
+      fs.writeFileSync(p, innhold); fs.chmodSync(p, 0o755)
+      console.log(`${navn}-hook installert: ${p}`)
+    }
   }
 }
 
