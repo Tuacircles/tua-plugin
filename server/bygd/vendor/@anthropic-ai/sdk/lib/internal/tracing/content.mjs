@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.12 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { ATTR_GEN_AI_OUTPUT_MESSAGES, ATTR_GEN_AI_INPUT_MESSAGES, ATTR_GEN_AI_SYSTEM_INSTRUCTIONS, ATTR_GEN_AI_REQUEST_STOP_SEQUENCES, ATTR_ANTHROPIC_TOOL_RESULT_CONTENT, ATTR_ANTHROPIC_CONTENT_TRUNCATED } from './attributes.mjs';
 
 /**

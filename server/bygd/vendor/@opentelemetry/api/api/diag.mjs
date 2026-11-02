@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.12 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { unregisterGlobal, getGlobal, registerGlobal } from '../internal/global-utils.mjs';
 import { DiagComponentLogger } from '../diag/ComponentLogger.mjs';
 import { createLogLevelDiagLogger } from '../diag/internal/logLevelLogger.mjs';

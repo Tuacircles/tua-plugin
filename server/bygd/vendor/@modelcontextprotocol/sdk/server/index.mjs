@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.12 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { Protocol, mergeCapabilities } from '../shared/protocol.mjs';
 import { LoggingLevelSchema, InitializeRequestSchema, InitializedNotificationSchema, SetLevelRequestSchema, LATEST_PROTOCOL_VERSION, EmptyResultSchema, CreateMessageResultWithToolsSchema, CreateMessageResultSchema, ElicitResultSchema, McpError, ErrorCode, ListRootsResultSchema, SUPPORTED_PROTOCOL_VERSIONS, CallToolRequestSchema, CreateTaskResultSchema, CallToolResultSchema } from '../types.mjs';
 import { AjvJsonSchemaValidator } from '../validation/ajv-provider.mjs';

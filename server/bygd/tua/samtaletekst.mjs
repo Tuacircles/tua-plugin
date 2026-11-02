@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.12 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 import path__default from 'node:path';
 import { S_MAX } from './store.mjs';
 
@@ -24,7 +24,7 @@ const kortTittel = (t) => { const s = flat(t); if (!s) return ''; if (s.length <
 const nyttPar = (prompt, at) => ({ prompt: String(prompt || ''), at: at || null, answers: [], svar: '' });   // svar: siste assistent-tekst i paret, uansett lengde (til S)
 // S etter regel for SAMTALER (friksjon 9, bruksdag 1, 24.10.2026): avisen skal fortelle hva som er nytt, og for en samtale er det siste vending —
 // ikke første prompt. «Sist: <siste prompt, kort> → <første setning av svaret> · N vendinger · <første dato>–<siste dato>». Tittelen beholdes.
-// Regelskrevet (by: regel), så ny import erstatter den når samtalen har fått nye vendinger; menneskeskrevet S røres aldri (V10, mergeLevels).
+// Regelskrevet (by: regel), så ny import erstatter den når samtalen har fått nye vendinger; menneskeskrevet S og modellens S røres ikke (V10, mergeLevels).
 const renTekst = (t) => flat(String(t || '').replace(/^#+\s*/gm, '').replace(/[*_`>]/g, ''));
 const datoKort = (t) => (t ? new Date(t).toLocaleDateString('no-NO', { day: 'numeric', month: 'numeric', year: 'numeric' }) : '');
 const førsteSetning = (t, max) => { const m = t.match(/^[\s\S]*?[.!?](?=\s|$)/); return m && m[0].length >= 20 && m[0].length <= max ? m[0] : clip(t, max) };   // alltid bare første setning når den finnes

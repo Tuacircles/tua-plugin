@@ -38,7 +38,8 @@ process.env.TUA_CODE_HOME = CODE_HOME
 process.env.TUA_COWORK_ROOT = path.join(SCRATCH, 'cowork-tom')
 process.env.TUA_CODEX_HOME = path.join(path.dirname(process.env.TUA_FILES_ROOT), 'codex-tom')   // 28.10.2026: aldri Eriks ekte ~/.codex
 
-const { load, save, upsert, mkLevel, tråder, deliveryCounts, logDelivery } = await import('./store.js')
+const { load, save, upsert, mkLevel, isStale, needsLevel, tråder, deliveryCounts, logDelivery } = await import('./store.js')
+const { samtalerGjennomgang } = await import('./gjennomgang.js')
 const { samtaleS, samtaleSFraTranskript, nyttPar, importCode, parseCodeSession } = await import('./import.js')
 const { brukbarTittel } = await import('./lesere.js')
 const { tittelFor } = await import('./innlesing.js')
@@ -86,12 +87,27 @@ fs.writeFileSync(øktfil, [linje('user', P1, 0), linje('assistant', A1, 1), linj
   importCode({ files: [øktfil], source: 'code', minChars: 100 })
   const b = load().find((x) => x.key === `samtale:${SID}`)
   ok('ny import etter nye vendinger: S er siste vending (P3 → A3), 3 vendinger, versjon 2, tittelen beholdt', b.levels.S.text.startsWith('Sist: Skriv et utkast til e-post til styret') && b.levels.S.text.includes('3 vendinger') && b.version === 2 && b.name === a.name && b.levels.S.of === 2, b.levels.S.text)
+  // modellens S → overlever ny import og regel-gjennomgang, merket utdatert; M følger fortsatt samtalen (Erik 02.11.2026)
+  {
+    const atoms0 = load(); const x0 = atoms0.find((x) => x.key === `samtale:${SID}`); const regelS = x0.levels.S
+    x0.levels.S = mkLevel('Modellens ingress om styret.', 'Ollama · gemma3:4b', x0.version); save(atoms0)
+    fs.appendFileSync(øktfil, [linje('user', 'Kan du også ta med fristene fra møtenotatet i utkastet til styret, som egen liste?', 4), linje('assistant', 'Fristene står nå som egen liste.', 5)].join('\n') + '\n')
+    importCode({ files: [øktfil], source: 'code', minChars: 100 })
+    const x1 = load().find((x) => x.key === `samtale:${SID}`)
+    ok('ny import etter nye vendinger: modellens S står, gammel `of`, ny versjon', x1.levels.S.text === 'Modellens ingress om styret.' && x1.levels.S.by === 'Ollama · gemma3:4b' && x1.version === x0.version + 1 && x1.levels.S.of === x0.version, JSON.stringify(x1.levels.S))
+    ok('…og den regnes som utdatert, så en ny gjennomgang fanger den', isStale(x1, 'S') && needsLevel(x1, 'S'))
+    ok('…mens M etter regel følger samtalen, så antall vendinger er riktig', /4 vendinger/.test(x1.levels.M?.text || ''), x1.levels.M?.text)
+    const r = await samtalerGjennomgang({ dryRun: false, skriver: 'regel' })
+    const x2 = load().find((x) => x.key === `samtale:${SID}`)
+    ok('samtale-gjennomgang etter regel: modellens S står', x2.levels.S.text === 'Modellens ingress om styret.' && r.S === 0, JSON.stringify(x2.levels.S))
+    const atoms1 = load(); const x3 = atoms1.find((x) => x.key === `samtale:${SID}`); x3.levels.S = { ...regelS, of: x3.version }; save(atoms1)
+  }
   // menneskeskrevet S → røres ikke av neste import (V10)
   const atoms = load(); const m = atoms.find((x) => x.key === `samtale:${SID}`); m.levels.S = mkLevel('Eriks egen ingress om lagerflyttingen.', 'menneske', m.version); save(atoms)
   fs.appendFileSync(øktfil, [linje('user', 'Og en ting til: legg ved budsjettet som tabell, med alle postene fra møtenotatet.', 6), linje('assistant', 'Tabellen ligger under.', 7)].join('\n') + '\n')
   importCode({ files: [øktfil], source: 'code', minChars: 100 })
   const c = load().find((x) => x.key === `samtale:${SID}`)
-  ok('menneskeskrevet S røres ikke av ny import (V10) — innholdet får ny versjon, S står', c.levels.S.text === 'Eriks egen ingress om lagerflyttingen.' && c.levels.S.by === 'menneske' && c.version === 3)
+  ok('menneskeskrevet S røres ikke av ny import (V10) — innholdet får ny versjon, S står', c.levels.S.text === 'Eriks egen ingress om lagerflyttingen.' && c.levels.S.by === 'menneske' && c.version === m.version + 1)
 }
 
 // ── 3) review.js --samtaler: dry-run viser, ekte kjøring skriver, menneskeskrevet står ─
@@ -598,9 +614,17 @@ try {
   const f = regler.flateRader(alle)
   const side = regler.avisSide(regler.avisRader(f), { now: T })
   ok('Avis: hovedsaken er mest arbeid siste 48 t — aldri Tua_tua (vekt 99) og aldri eldre enn uka (vekt 50)', side.hoved?.id === 'ank')
-  ok('Avis: kolonnene er prosjektene utenom Tua-bygging og drift, uten hovedsaken; høyst tre saker per prosjekt', side.prosjekter.map((p) => p.vis).join() === 'Skigaarden,Energima anke' && side.prosjekter.every((p) => p.rader.length <= 5) && !side.prosjekter.some((p) => p.rader.some((r) => r.id === 'ank')))
-  ok('Avis: lenger — TIDLIGERE har prosjektene med eldre arbeid (sist rørt først, høyst tre saker); denne uka har ingen tak på antall prosjekter', side.tidligere.map((p) => p.vis).join() === 'Gammelt' && side.tidligere[0].rader.length === 1 && side.flere.length === 0
+  ok('Avis: kolonnene er prosjektene utenom Tua-bygging og drift, uten hovedsaken', side.prosjekter.map((p) => p.vis).join() === 'Skigaarden,Energima anke' && !side.prosjekter.some((p) => p.rader.some((r) => r.id === 'ank')))
+  ok('Avis: lenger — TIDLIGERE har prosjektene med eldre arbeid (sist rørt først); denne uka har ingen tak på antall prosjekter', side.tidligere.map((p) => p.vis).join() === 'Gammelt' && side.tidligere[0].rader.length === 1 && side.flere.length === 0
     && regler.avisSide([{ slag: 'dokument', id: 'ny', project: 'Ny', tid: T - 1000, vekt: 1, sak: {} }, ...Array.from({ length: 20 }, (_, i) => ({ slag: 'dokument', id: 'x' + i, project: 'P' + (i % 10), tid: T - 1000 * (i + 1) - 30 * 86400e3, vekt: 0, sak: {} }))], { now: T }).tidligere.length === 10)
+  const mange = (id, tid) => Array.from({ length: 40 }, (_, i) => ({ slag: 'dokument', id: id + i, project: id, tid: tid - i * 1000, vekt: 1, sak: {} }))
+  const langAvis = regler.avisSide([...mange('Nå', T - 1000), ...mange('Før', T - 30 * 86400e3)], { now: T })
+  ok('Avis: langt flere (Erik 02.11) — 25 saker per prosjekt denne uka, 15 under Tidligere, resten bak «+ N til»', langAvis.prosjekter[0].rader.length === 25 && langAvis.prosjekter[0].alle === 39 && langAvis.tidligere[0].rader.length === 15 && langAvis.tidligere[0].alle === 40)
+  const pr = (vis, n) => ({ vis, rader: Array(n).fill({}) })
+  const st = regler.fordelKolonner([pr('A', 20), pr('B', 1), pr('C', 1), pr('D', 1), pr('E', 1)])
+  ok('Avis: kolonnene — et prosjekt legges i den korteste av tre, så et langt prosjekt ikke gir tomrom ved siden av', st.map((l) => l.map((p) => p.vis).join('')).join() === 'A,BD,CE')
+  const stFør = regler.fordelKolonner([pr('A', 20), pr('B', 1), pr('C', 1)]), stEtter = regler.fordelKolonner([pr('A', 20), pr('B', 1), pr('C', 1), pr('D', 5)])
+  ok('Avis: kolonnene — nye prosjekter legges under; det som alt står, flytter seg ikke', stFør.every((l, i) => l.every((p, j) => stEtter[i][j].vis === p.vis)) && regler.fordelKolonner([]).length === 0)
   ok('Avis: «N prosjekter i arbeid denne uka» teller ikke Tua_tua eller eldre prosjekter', side.antallProsjekter === 2)
   ok('Avis: Tua-byggingen i én linje — «Bygging av Tua · 1 samtale, 1 dokument i dag»', regler.byggingTekst(side.bygging) === 'Bygging av Tua · 1 samtale, 1 dokument i dag' && regler.erTuaBygging('Tua_tua') && regler.erTuaBygging('TUA') && !regler.erTuaBygging('Tua Business'))
   const fa = regler.funnAv(side.hoved)

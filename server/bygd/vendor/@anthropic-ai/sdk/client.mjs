@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.12 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { __classPrivateFieldGet, __classPrivateFieldSet } from './internal/tslib.mjs';
 import { validatePositiveInteger, CREDENTIAL_OPTIONS, isAbsoluteURL, isEmptyObj, safeJSON } from './internal/utils/values.mjs';
 import { sleep } from './internal/utils/sleep.mjs';
