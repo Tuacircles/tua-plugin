@@ -107,6 +107,7 @@ export async function samtalerGjennomgang({ atoms = null, dryRun = false, skrive
     const nyttNavn = /^Økt:\s+/.test(a.name) ? a.name.replace(/^Økt:\s+/, '') : a.name
     let S = null, M = null, Mav = 'regel'
     if (oldS?.by === 'menneske') tall.menneske++
+    else if (oldS?.text && oldS.by !== 'regel') { /* modellens ingress: regelteksten erstatter den ikke (samme regel som mergeLevels) */ }
     else if (oldS?.text !== r.S) { S = r.S; endringer.push('S') }
     if (oldM?.by === 'menneske') { if (oldS?.by !== 'menneske') tall.menneske++ }
     else {
