@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.9 — bygd av bygg.mjs 2026-10-29. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { requireSecureTokenEndpoint, WorkloadIdentityError, TOKEN_ENDPOINT, GRANT_TYPE_JWT_BEARER, OAUTH_API_BETA_HEADER, FEDERATION_BETA_HEADER, redactSensitive, parseTokenResponse } from './types.mjs';
 import { nowAsSeconds } from '../../internal/utils/time.mjs';
 import { VERSION } from '../../version.mjs';

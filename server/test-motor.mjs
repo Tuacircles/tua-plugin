@@ -25,7 +25,7 @@ fs.rmSync(ROOT, { recursive: true, force: true }); fs.rmSync(DATA, { recursive: 
 fs.mkdirSync(ROOT, { recursive: true }); fs.mkdirSync(DATA, { recursive: true })
 
 const { load, save, upsert, deliveries, fileOf } = await import('./store.js')
-const { skjerm, lagSkjermer, avskjerm, gyldigFødselsnummer, kjentePersoner, minimer, sjekkTillatt, spor, mottakere, Blokkert, MotorFeil, anslåTokens, standardNivå, standardNivåer, forhåndsvis, oppdiktetPlassholder } = await import('./motor.js')
+const { skjerm, lagSkjermer, avskjerm, gyldigFødselsnummer, kjentePersoner, minimer, sjekkTillatt, spor, mottakere, Blokkert, MotorFeil, anslåTokens, standardNivå, standardNivåer, forhåndsvis, oppdiktetPlassholder, utdragForModell } = await import('./motor.js')
 
 let feil = 0
 const ok = (navn, cond, info = '') => { console.log(`${cond ? '✓' : '✗'} ${navn}${info ? ` — ${info}` : ''}`); if (!cond) feil++ }
@@ -49,6 +49,8 @@ const k = (d, v) => { const s = d.reduce((a, x, i) => a + x * v[i], 0); const r 
 let fnr = null
 for (let i = 100; i < 999 && !fnr; i++) { const d = ('999999' + i).split('').map(Number); const k1 = k(d, V1); if (k1 === 10) continue; const k2 = k([...d, k1], V2); if (k2 === 10) continue; fnr = d.join('') + k1 + k2 }
 // Erik 29.10: gemma kopierte «[Person A]» fra instruksen inn i ingresser der ingen person var skjermet
+ok('utdragForModell: lang samtale leses fra slutten, langt dokument fra toppen, kort tekst uendret', utdragForModell('juli'.repeat(10) + 'SLUTT', 5, { kind: 'samtale' }).endsWith('SLUTT') && !utdragForModell('juli'.repeat(10) + 'SLUTT', 5, { kind: 'samtale' }).includes('juli') && utdragForModell('TOPP' + 'x'.repeat(50), 4, { kind: 'capture' }).startsWith('TOPP\n') && utdragForModell('kort', 10, { kind: 'samtale' }) === 'kort')
+ok('Gjennomgangen sender sakens slag til modellen — ellers leses samtalen fra toppen', fs.readFileSync(new URL('./gjennomgang.js', import.meta.url), 'utf8').includes('version: a.version || 1, kind: a.kind }, prosjekt: a.project'))
 ok('oppdiktetPlassholder: [Person A] som ikke står i kilden er oppdiktet', oppdiktetPlassholder('MVA-refusjonen kan bevares for [Person A]', 'MVA-refusjonen kan bevares') === true)
 ok('oppdiktetPlassholder: plassholder som står i kilden er ekte', oppdiktetPlassholder('[Person A] skal sende', 'Svar: [Person A] skal sende') === false)
 ok('oppdiktetPlassholder: vanlig tekst', oppdiktetPlassholder('Anken bygger på § 36', '') === false)

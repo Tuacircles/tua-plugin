@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.9 — bygd av bygg.mjs 2026-10-29. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 //#region src/metrics/NoopMeter.ts
 /**
 * NoopMeter is a noop implementation of the {@link Meter} interface. It reuses

@@ -62,7 +62,7 @@ export async function gjennomgang({ atoms = null, nivå = 'M', tvang = true, skr
     if (!a || !p.nivåer.length) { ut.hoppet++; på('hoppet', { i, antall: plan.length, id: p.id, name: p.name, grunn: p.hoppet.join(' · ') || 'ingenting å skrive' }); continue }
     på('sak', { i, antall: plan.length, id: a.id, name: a.name, project: a.project, nivåer: p.nivåer })
     let sm
-    try { sm = await skrivNivåer(a.content || '', { tittel: a.name, sak: { id: a.id, name: a.name, version: a.version || 1 }, prosjekt: a.project, klient, skriver: v.m ? v.m.id : 'regel', signal, på: () => {} }) }
+    try { sm = await skrivNivåer(a.content || '', { tittel: a.name, sak: { id: a.id, name: a.name, version: a.version || 1, kind: a.kind }, prosjekt: a.project, klient, skriver: v.m ? v.m.id : 'regel', signal, på: () => {} }) }
     catch (e) { ut.feilet++; på('feil', { i, id: a.id, name: a.name, feil: e.message }); continue }
     if (skriver !== 'auto' && skriver !== 'regel' && sm.av === 'regel') { ut.feilet++; på('feil', { i, id: a.id, name: a.name, feil: sm.grunn || 'modellen svarte ikke — ingenting skrevet (regler ville ha erstattet modellens tekst)' }); continue }
     const nå = isoNå(), ver = a.version || 1

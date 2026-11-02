@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.9 — bygd av bygg.mjs 2026-10-29. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.10 — bygd av bygg.mjs 2026-11-02. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -520,7 +520,7 @@ function regelNivåer(tekst, { tittel = '' } = {}) {
   return { S, M: setningKutt(linjer.join('\n'), 2500) }
 }
 // Erik 29.10.2026: ingressen er et FUNN (avissiden viser den som overskrift og ingress), ikke en beskrivelse av dokumentet.
-const NIVÅ_OPPGAVE = (medM, tegn, kuttet, plassholdere = true) => `Teksten under er et dokument fra brukerens arkiv (${tegn.toLocaleString('no-NO')} tegn${kuttet ? ', bare begynnelsen er med' : ''}). Svar med ett JSON-objekt: ` +
+const NIVÅ_OPPGAVE = (medM, tegn, kuttet, plassholdere = true, samtale = false) => `Teksten under er ${samtale ? 'en samtale' : 'et dokument'} fra brukerens arkiv (${tegn.toLocaleString('no-NO')} tegn${kuttet ? `, bare ${samtale ? 'slutten' : 'begynnelsen'} er med` : ''}). Svar med ett JSON-objekt: ` +
   (medM ? '{"S": "…", "M": "…"}. S = ingress: én til to setninger, høyst 300 tegn, med det viktigste funnet, svaret eller beslutningen i teksten — konkret, med tallene og navnene som bærer det. Begynn med selve funnet, aldri med «Dette dokumentet», «Denne samtalen», «Teksten» eller lignende. M = sammendrag, høyst 2 500 tegn: hovedpunktene, tallene og navnene som står i teksten, i den rekkefølgen de står. '
     : '{"S": "…"}. S = ingress: én til to setninger, høyst 300 tegn, med det viktigste funnet, svaret eller beslutningen i teksten — konkret, med tallene og navnene som bærer det. Begynn med selve funnet, aldri med «Dette dokumentet», «Denne samtalen», «Teksten» eller lignende. ') +
   'På norsk. Ikke finn på noe som ikke står i teksten.' + (plassholdere ? ' Plassholdere i hakeparentes som står i teksten, brukes uendret.' : '');   // Erik 29.10: med «[Person A]» som eksempel fant gemma på plassholdere som ikke fantes
@@ -528,6 +528,8 @@ const NIVÅ_OPPGAVE = (medM, tegn, kuttet, plassholdere = true) => `Teksten unde
 const oppdiktetPlassholder = (t, kilde = '') => [...String(t || '').matchAll(/\[(?:Person [A-ZÆØÅ]{1,2}|(?:E-post|Adresse|Telefon|Beløp|Kontonummer|Fødselsnummer|Org\.nr\.?) \d+)\]/g)].some((m) => !String(kilde).includes(m[0]));   // står den i kilden (arkivert skjermet svar), er den ekte
 const NIVÅ_MAKS_TEGN = 12000;
 const NIVÅ_MAKS_LOKALT = 7000;
+// Erik 02.11: en samtale er nyest nederst — er den for lang, leser modellen slutten (der funnet står), ikke juli-starten. Et dokument leses fra toppen.
+const utdragForModell = (t, maks, sak = null) => (t.length <= maks ? t : sak?.kind === 'samtale' ? `[…]\n\n${t.slice(-maks)}` : `${t.slice(0, maks)}\n\n[…]`);
 // Skriv S (og M når teksten er lang) for én tekst. Returnerer { S, M, av, modell, tokens, utlevert, grunn? } — faller alltid tilbake til regler, aldri feil.
 async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, klient = 'app', skriver: ønsket, signal, på = () => {} } = {}) {
   const t = String(tekst || '');
@@ -544,8 +546,8 @@ async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, klient =
   const sk = lagSkjermer(kjentePersoner(atoms));
   const maks = m.local ? NIVÅ_MAKS_LOKALT : NIVÅ_MAKS_TEGN;   // gemma3:4b har 4 096 tokens kontekst — 12 000 tegn + instruks fylte den, og svaret kom uten JSON
   const kuttet = t.length > maks;
-  const kontekst = `## ${sk.skjerm(tittel || 'Dokument')}\n\n${sk.skjerm(kuttet ? t.slice(0, maks) : t)}${kuttet ? '\n\n[…]' : ''}`;
-  const oppgave = NIVÅ_OPPGAVE(medM, t.length, kuttet, Object.keys(sk.kobling).length > 0);
+  const kontekst = `## ${sk.skjerm(tittel || 'Dokument')}\n\n${sk.skjerm(utdragForModell(t, maks, sak))}`;
+  const oppgave = NIVÅ_OPPGAVE(medM, t.length, kuttet, Object.keys(sk.kobling).length > 0, sak?.kind === 'samtale');
   const sendes = `${SYSTEM}${JSON_KRAV}\n\n${byggMelding(oppgave, kontekst)}`;
   const tokensCa = anslåTokens(sendes, m.id);
   på('skriver', { mottaker: m.id, label: m.label, modell: v.modell, lokalt: !!m.local || !!m.test, tokens: { ca: tokensCa }, medM });
