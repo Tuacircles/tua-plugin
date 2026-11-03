@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.13 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.14 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import os from 'node:os';
 import path__default from 'node:path';
@@ -33,7 +33,7 @@ import { kortTittel, samtaleM, samtaleS, nyttPar } from './samtaletekst.mjs';
 //   node import.js --code|--cowork|--codex|--desktop|--finder|--alt [--project <navn>] [--etter <ÅÅÅÅ-MM-DD>] [--min-tegn <n>] [--dry-run]
 //   node import.js --lenke <https://claude.ai/share/…> [--dry-run]
 //   node import.js <zip|mappe> [--dry-run] [--project <navn>] [--min-tegn <n>] [--etter <ÅÅÅÅ-MM-DD>]
-//   node import.js --innboks [--dry-run] [--project <navn>]   én gjennomgang av Innboks nå — eksporter, lenkefiler og (skive 7) løse dokumenter (PDF, tekst, md, html, csv, docx) → saker
+//   node import.js --innboks [--dry-run] [--project <navn>]   én gjennomgang av Innboks nå — eksporter, lenkefiler og (skive 7) løse dokumenter (PDF, tekst, md, html, csv, docx, xlsx, pptx, eml) → saker
 //
 // M19 (skive 8, V16): PROMPTER SOM EGNE SAKER. Hver substansiell brukermelding (worthKeeping: ≥ 80 tegn, ikke slash-kommando, ikke ren
 // bekreftelse) i Code-, Cowork-, Desktop- og eksport-samtaler blir en sak `kind: prompt` med nøkkel prompt:<økt8>:<sha8> (samme hash i
@@ -1240,7 +1240,7 @@ if (!globalThis.__TUA_BUNDLE && process.argv[1] && path__default.resolve(process
   } else if (args.includes('--alt')) {
     importAll(opts).then((r) => console.log(r.report));
   } else if (args.includes('--innboks')) {
-    // eksporter og lenkefiler som før, så løse dokumenter (skive 7: PDF, tekst, md, html, csv, docx → saker; --project velger prosjekt, standard «Innboks»)
+    // eksporter og lenkefiler som før, så løse dokumenter (skive 7: PDF, tekst, md, html, csv, docx, xlsx, pptx, eml → saker; --project velger prosjekt, standard «Innboks»)
     const d = processInbox(opts);
     processInboxShares(opts).then(async (s) => { const dok = await lesInnInnboks({ prosjekt: opts.project || undefined, dryRun: opts.dryRun, log: opts.log, klient: 'kommandolinje' }); const all = [...d, ...s, ...(dok.tall.filer ? [dok] : [])]; console.log(all.length ? all.map((r) => r.report).join('\n\n---\n\n') : `Ingenting å importere i ${INBOX_DIR}`); });
   } else if (src) {

@@ -1,11 +1,11 @@
-// Tua-plugin 0.5.13 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.14 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FILE_MANAGER, openSpawn } from './platform.mjs';
 import { N3, K3, p } from '../vendor/@modelcontextprotocol/ext-apps/src/server/index.mjs';
 import { load, visibleIn, hasExternalEdits, save, search, vaultClamp, maxLevel, related, linksFor, isStale, fileOf, renderStatus, sources, isVault, fmtTime } from './store.mjs';
-import { skjermerFor, lever } from './motor.mjs';
+import { skjermerFor, erFilSak, lever } from './motor.mjs';
 import { utfordringInfo } from './utfordring.mjs';
 import { samtaleInfo, samtaleLinje } from './samtale.mjs';
 import { delingerFor, lenkerFor } from './deling.mjs';
@@ -175,8 +175,8 @@ function registerApps(server, { client = 'Claude' } = {}) {
       const hits = tr_dF_rst(atoms, search(atoms, query || '', { project, context, limit }));
       const sk = skjermerFor(atoms);
       const items = hits.map(({ atom: a, S, max, snippet, tråd }) => ({
-        id: a.id, name: sk.skjerm(a.name), project: a.project, date: date(a.capturedAt), version: a.version || 1, kind: a.kind || 'capture',
-        S: S.level === 'S' ? sk.skjerm(S.text) : '', snippet: sk.skjerm(snippet || ''), max, tags: (a.tags || []).slice(0, 4),
+        id: a.id, name: sk.skjerm(a.name, { utvidet: erFilSak(a) }), project: a.project, date: date(a.capturedAt), version: a.version || 1, kind: a.kind || 'capture',
+        S: S.level === 'S' ? sk.skjerm(S.text, { utvidet: erFilSak(a) }) : '', snippet: sk.skjerm(snippet || '', { utvidet: erFilSak(a) }), max, tags: (a.tags || []).slice(0, 4),
         ...(tråd ? { thread: { svar: tråd.svar.length, konklusjon: tråd.konklusjon ? tråd.konklusjon.status : '' } } : {}),
         ...(a.kind === 'samtale' ? (() => { const i = samtaleInfo(atoms, a, { base: process.env.TUA_APP_URL || 'http://127.0.0.1:5274/' }); return { samtale: { kilde: i.kilde, tua: i.tua, vendinger: i.vendinger, siste: date(i.siste), modeller: i.modeller, konklusjon: i.konklusjon, adresse: i.adresse, linje: samtaleLinje(i) } } })() : {}),   // skive 1+4 (arb. 33): samtalen fullt ut
       }));

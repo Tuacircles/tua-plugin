@@ -1,10 +1,10 @@
-// Tua-plugin 0.5.13 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.14 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import path__default from 'node:path';
 import crypto__default from 'node:crypto';
 import { kanLese, formatAv, FORMATER, les } from './lesere.mjs';
 import { ensureArchive, FILES_ROOT, INBOX_DIR, noteImport, filesMode, erTuaSak, load, upsert, save, LEVELS, levelOf } from './store.mjs';
-import { skrivNivåer as skrivNiv_er, ord } from './motor.mjs';
+import { lagSkjermer, kjentePersoner, skrivNivåer as skrivNiv_er, ord } from './motor.mjs';
 
 // innlesing.js — fra fil til sak (M16, skive 7 i arbeidsstykke 31). Lese (lesere.js) → sak i lageret med L = hele teksten, S og M skrevet
 // av standardmodellen lokalt (motor.js skrivNivåer: Ollama → regler; Claude bare på forespørsel, og da gjennom motoren med Utlevert).
@@ -14,7 +14,7 @@ import { skrivNivåer as skrivNiv_er, ord } from './motor.mjs';
 //                                                   der den lå: saken får en file-lenke (peker), ingen kopi inn i arkivet (V9: mappa er sannheten).
 //   lesInnInnboks({prosjekt, dryRun})               løse dokumenter i <arkiv>/Innboks/ → saker (standard prosjekt «Innboks» til Erik flytter fila i Finder,
 //                                                   V9); dokumentet flyttes til Innboks/Ferdig som eksportene. Dry-run lister tallene uten å skrive.
-//   innboksDokumenter()                             hva som ligger og venter (PDF, tekst, md, html, csv, docx) — aldri Tuas egne saker i Innboks, aldri lenkefiler.
+//   innboksDokumenter()                             hva som ligger og venter (PDF, tekst, md, html, csv, docx, xlsx, pptx, eml) — aldri Tuas egne saker i Innboks, aldri lenkefiler.
 //
 // Ingenting sendes fra denne fila. Hendelser (på): leser → lest → skriver → ferdig, eller feil — broen (POST /api/les) bærer dem som SSE.
 
@@ -42,6 +42,9 @@ async function lesInn(fil, { navn = null, data = null, prosjekt = STANDARD_PROSJ
   const nøkkel = `fil:${crypto__default.createHash('sha256').update(buf).digest('hex').slice(0, 16)}`;
   const tittel = tittelFor(meta);
   const kilde = `${n} (${meta.label}${meta.sider ? `, ${meta.sider} ${meta.sider === 1 ? 'side' : 'sider'}` : ''})`;
+  // arb. 35 skive 3: hva reglene finner i fila, så appen kan si det per fil. Ingen læring, ingen sending.
+  const funn = (() => { const sk = lagSkjermer(kjentePersoner(load()), { utvidet: true }); sk.skjerm(tittel); sk.skjerm(tekst); return { ...sk.antall } })();
+  const ekstraUt = { funn, ...(meta.merknad ? { merknad: meta.merknad } : {}) };
   på('lest', { navn: n, format: meta.format, label: meta.label, sider: meta.sider, ord: meta.ord, tegn: meta.tegn, verktøy: meta.verktøy, tittel });
   // 1) saken først, med S/M etter regler — så den finnes selv om modellen er treg eller svikter
   const atoms = load();
@@ -50,7 +53,7 @@ async function lesInn(fil, { navn = null, data = null, prosjekt = STANDARD_PROSJ
   const finnes = atoms.find((a) => a.key === nøkkel && a.project.toLowerCase() === proj.toLowerCase());   // samme fil igjen: samtalen den ble til i beholdes (ellers ville ny samtale gitt falsk ny versjon)
   const { atom, status } = upsert(atoms, {
     key: nøkkel, kind: 'capture', content: tekst, name: tittel, project: proj, convo: finnes?.convo || samtale || 'Innlest fra fil', source: kilde, by: 'regel',
-    tags: ['fil', meta.format], short: rS, medium: rM, links: href ? [{ kind: 'file', href, label: n }] : [],
+    tags: ['fil', meta.format, 'se-over'], short: rS, medium: rM, links: href ? [{ kind: 'file', href, label: n }] : [],
   });
   save(atoms);
   // 2) S og M fra standardmodellen lokalt (eller regler når ingen finnes) — merket med hvem som skrev (V10). Samme nøkkel → samme sak, bare nivåene byttes.
@@ -60,10 +63,10 @@ async function lesInn(fil, { navn = null, data = null, prosjekt = STANDARD_PROSJ
     const r2 = upsert(alle, { key: nøkkel, kind: 'capture', content: tekst, name: tittel, project: proj, convo: atom.convo, source: kilde, by: sm.av, tags: atom.tags, short: sm.S, medium: sm.M, links: atom.links });
     if (sm.M && sm.M_av === 'regel' && r2.atom.levels?.M) r2.atom.levels.M.by = 'regel';
     if (r2.status !== 'uendret') save(alle);
-    const ut = sakUt(r2.atom, { status, format: meta.format, label: meta.label, sider: meta.sider, verktøy: meta.verktøy, skriver: { av: sm.av, modell: sm.modell, tokens: sm.tokens, utlevert: sm.utlevert, ...(sm.grunn ? { grunn: sm.grunn } : {}) } });
+    const ut = sakUt(r2.atom, { ...ekstraUt, status, format: meta.format, label: meta.label, sider: meta.sider, verktøy: meta.verktøy, skriver: { av: sm.av, modell: sm.modell, tokens: sm.tokens, utlevert: sm.utlevert, ...(sm.grunn ? { grunn: sm.grunn } : {}) } });
     på('ferdig', ut); return ut
   }
-  const ut = sakUt(atom, { status, format: meta.format, label: meta.label, sider: meta.sider, verktøy: meta.verktøy, skriver: { av: 'regel', modell: null, tokens: null, utlevert: false, ...(sm.grunn ? { grunn: sm.grunn } : {}) } });
+  const ut = sakUt(atom, { ...ekstraUt, status, format: meta.format, label: meta.label, sider: meta.sider, verktøy: meta.verktøy, skriver: { av: 'regel', modell: null, tokens: null, utlevert: false, ...(sm.grunn ? { grunn: sm.grunn } : {}) } });
   på('ferdig', ut); return ut
 }
 
@@ -116,7 +119,7 @@ async function lesInnInnboks({ prosjekt = STANDARD_PROSJEKT, dryRun = false, skr
   if (!dryRun && (tall.lest || tall.feilet)) noteImport('dokumenter', { filer: tall.filer, lest: tall.lest, feilet: tall.feilet, prosjekt: proj });
   const report = [`# Innboks: dokumenter${dryRun ? ' (dry-run, ingenting skrevet)' : ''}`, '',
     `${filer.length} dokument${filer.length === 1 ? '' : 'er'} i ${INBOX_DIR}${dryRun ? '' : ` · ${tall.lest} lest inn som saker i «${proj}» · ${tall.feilet} feilet`} · ${new Date().toLocaleString('no-NO')}`, '',
-    ...(linjer.length ? linjer : ['(ingen dokumenter å lese inn — legg en PDF, .txt, .md, .html, .csv eller .docx i Innboks)']), '',
+    ...(linjer.length ? linjer : ['(ingen dokumenter å lese inn — legg en PDF, .txt, .md, .html, .csv, .docx, .xlsx, .pptx eller .eml i Innboks)']), '',
     dryRun ? 'Kjør igjen uten dry-run for å lese inn. Hver fil leses lokalt, får ingress (S) og sammendrag (M) fra den lokale modellen når den kjører (ellers etter regler), og flyttes til Innboks/Ferdig.' : 'Sakene ligger i prosjektmappa — flytt .md-fila i Finder for å legge saken i et annet prosjekt (V9).'].join('\n');
   på('slutt', { ...tall, prosjekt: proj });
   return { dryRun, prosjekt: proj, filer: ut, tall, report }

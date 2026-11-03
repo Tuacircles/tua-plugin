@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.13 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.14 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
 globalThis.__TUA_BUNDLE = true;
 import { McpServer } from './bygd/vendor/@modelcontextprotocol/sdk/server/mcp.mjs';
 import { StdioServerTransport } from './bygd/vendor/@modelcontextprotocol/sdk/server/stdio.mjs';
@@ -7,7 +7,8 @@ import { settHørerTil as settH_rerTil, følgereAv as f_lgereAv, erArbeid, løsn
 import { ensureArchive, archiveOptions, FILES_ROOT, filesMode, rootLabel, chooseArchive, load, INBOX_DIR, KINDS, LINK_KINDS, upsert, save, WELCOME_KEY, finishOnboarding, SHORT_L, S_MAX, M_MAX, LONG_L, fmtTime, fileOf, search, visibleIn, readVersion, versions, vaultClamp, maxLevel, hasExternalEdits, related, needsLevel, compose, logDelivery, setShare, FILE, onboardingActive, welcomeAtom, linksFor, isVault, sources, staleSources, renderStatus, deliveries, isStale, clampLevel } from './bygd/tua/store.mjs';
 import { DEFAULT_MIN, processInbox, processInboxShares, inboxPending, importShare, importDesktop, importFinder, importAll, historyCounts, importCode, watchInbox, watchDesktop, historyLine } from './bygd/tua/import.mjs';
 import { watchFinder } from './bygd/tua/finder.mjs';
-import { skjermerFor, lever, endepunkt, maksNivå as maksNiv_, leverSamtale, MotorFeil, anslåTokens as ansl_Tokens, ord, del } from './bygd/tua/motor.mjs';
+import { skjermerFor, erFilSak, lever, endepunkt, maksNivå as maksNiv_, leverSamtale, MotorFeil, anslåTokens as ansl_Tokens, ord, del } from './bygd/tua/motor.mjs';
+import { erSettNoensteds } from './bygd/tua/skjermvalg.mjs';
 import { utfordringInfo } from './bygd/tua/utfordring.mjs';
 import { finnSamtale, samtaleInfo, samtaleLinje as samtaleLinje$1 } from './bygd/tua/samtale.mjs';
 import { instruksFor, trådFørst as tr_dF_rst, trådLinje as tr_dLinje, skalVise, sidenSist } from './bygd/tua/dora.mjs';
@@ -61,7 +62,7 @@ const INSTRUCTIONS =
   '(7) SIDEN SIST: første gang du bruker Tua i en samtale, kommer en blokk «Siden sist i Tua» (Spør-tråder, konklusjoner, delinger, filer lest inn i appen) — gjengi den i én kort liste før du svarer, så brukeren ser hva som er gjort i Tua. tua_search viser Spør-tråder og konklusjoner for prosjektet øverst. ' +
   '(8) «DEL MED <navn>»: tua_share deler med en PERSON (kollega) — lager en delingssak (skjermet gjengivelse, logget) og en lenke til mottakersiden (låste rader på nivået, «Be om hele»); S som standard, M/L bare når brukeren sier det. Kall først med forhandsvis=true og still ETT spørsmål («Anna får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi lenka, nedlastingslenka og den kopierbare teksten videre slik de er.';
 
-const server = new McpServer({ name: 'tua', version: '0.5.13' }, { instructions: INSTRUCTIONS });
+const server = new McpServer({ name: 'tua', version: '0.5.14' }, { instructions: INSTRUCTIONS });
 
 // M14: er arkivet ikke valgt, stoppes hvert verktøykall med et spørsmål om sted — via elicitation når klienten støtter det
 // (Code gjør det), ellers som en «oppsett:»-linje modellen skal stille brukeren. Pakket rundt registerTool, så det gjelder
@@ -365,15 +366,15 @@ server.registerTool(
     const projects = new Set(hits.map((h) => h.atom.project)).size;
     const refMark = (a, max) => (context && a.project.toLowerCase() !== context.toLowerCase() ? ` (referert inn${max !== 'L' ? `, nivå ${max}` : ''})` : '');
     const sLabel = (S) => (S.level === 'S' ? 'S' : S.level === 'L' ? 'S (kort atom — alt)' : S.level === 'hvorfor' ? 'S mangler · hvorfor' : 'S mangler · utdrag');
-    const lines = hits.map(({ atom: a, S, max, snippet: s, tråd }, i) =>
-      `${i + 1}. [${a.id}] ${sk.skjerm(a.name)}\n   ${a.project}${refMark(a, max)} · ${sk.skjerm(a.convo || '—')} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
+    const lines = hits.map(({ atom: a, S, max, snippet: s, tråd }, i) => { const sv = { utvidet: erFilSak(a) }; return (   // arb. 35 skive 3: i en fil gjelder de utvidede reglene
+      `${i + 1}. [${a.id}] ${sk.skjerm(a.name, sv)}\n   ${a.project}${refMark(a, max)} · ${sk.skjerm(a.convo || '—')} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
       (tråd ? `\n   ${sk.skjerm(tr_dLinje(tråd))}${tråd.traff.length > 1 ? ` · traff også: ${tråd.traff.filter((id) => id !== a.id).map((id) => `[${id}]`).join(' ')}` : ''}` : '') +
       ((u) => (u ? `\n   ${u.tekst}${u.låst ? ' · låst' : ''}` : ''))(utfordringInfo(atoms, a)) +   // skive C: utfordret av …
       (a.kind === 'samtale' ? `\n   ${samtaleLinje(atoms, a)}` : '') +   // skive 1 (arb. 33): «Samtale i Tua: 4 vendinger, siste 27.10.2026»
-      `\n   ${sLabel(S)}: ${sk.skjerm(S.text)}${staleNote(a, 'S')}` +
-      (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${sk.skjerm(a.summary)}` : '') +
-      (s ? `\n   Treff: ${sk.skjerm(s)}` : '') +
-      `\n   ↗ ${addr(a.id)}`,
+      `\n   ${sLabel(S)}: ${sk.skjerm(S.text, sv)}${staleNote(a, 'S')}` +
+      (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${sk.skjerm(a.summary, sv)}` : '') +
+      (s ? `\n   Treff: ${sk.skjerm(s, sv)}` : '') +
+      `\n   ↗ ${addr(a.id)}`) },
     );
     sk.lær();
     const skjermLinje = sk.treff ? `\n\nSkjermet: ${sk.treff} opplysning${sk.treff === 1 ? '' : 'er'} i treffene (plassholdere som [Person A]) — bruk dem uendret.` : '';
@@ -555,7 +556,7 @@ server.registerTool(
     const m = endepunkt('claude');
     const tillatt = maksNiv_(m);
     const eff = clampLevel(level, tillatt);
-    const { content: kildeTekst, derivedFrom, notes } = compose(atoms, { ids, level: eff, name, intro, context });
+    const { content: kildeTekst, derivedFrom, notes } = compose(atoms, { ids, level: eff, name, intro, context, ikkeSett: (a) => (a.tags || []).includes('se-over') && !erSettNoensteds(a.id, a.version || 1) });
     if (eff !== level) notes.unshift(`${m.label} har Trust Score ${Number(m.trust?.score) || 1}/5 — kildene er lest på ${eff}, ikke ${level} (fail closed, V21)`);
     // skive 4 (arb. 33, V22): samtalen som vendinger — gjennom motoren (leverSamtale: standardvalg eller oppgitte vendinger, Vault utenfor hos ekstern, skjermet, byggMeldinger)
     const sk = skjermerFor(atoms);
@@ -574,7 +575,7 @@ server.registerTool(
     const samtaleBlokk = (navn) => (ls ? `## Samtalen «${navn}»\n_${info.kilde === 'Tua' ? 'ført i Tua' : `fra ${info.kilde}`} · ${samtaleAtom.project} · ${ls.vendinger.length} av ${ls.antall} vendinger${ls.valgtStandard ? ' (standardvalget)' : ' (valgt)'}${ls.utenfor.length ? ` · ${ls.utenfor.length} utenfor` : ''}_\n\n${ls.tekst}` : '');
     const navnS = samtaleAtom ? sk.skjerm(samtaleAtom.name) : '';   // tittelen kan bære navn — skjermet i det Claude får, originalen i leveransen
     const content = [kildeTekst, samtaleBlokk(samtaleAtom?.name)].filter(Boolean).join('\n\n');
-    const skjermet = [sk.skjerm(kildeTekst), samtaleBlokk(navnS)].filter(Boolean).join('\n\n');   // vendingene er alt skjermet med samme kobling (leverSamtale)
+    const skjermet = [sk.skjerm(kildeTekst, { utvidet: ids.some((id) => erFilSak(atoms.find((x) => x.id === id))) }), samtaleBlokk(navnS)].filter(Boolean).join('\n\n');   // vendingene er alt skjermet med samme kobling (leverSamtale)
     sk.lær();
     const tokens = { ca: ansl_Tokens(skjermet, m.id) };
     logDelivery({ tool: 'tua_compose', client: CLIENT, mottaker: m.id, endpoint: m.endpoint, saker: derivedFrom.map(({ id, version, level: l }) => ({ id, version, level: l })), skjermet: { ...sk.antall }, ord: ord(skjermet), tokens, ...(context ? { context } : {}),

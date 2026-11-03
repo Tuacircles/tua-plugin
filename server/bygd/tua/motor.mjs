@@ -1,10 +1,11 @@
-// Tua-plugin 0.5.13 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.14 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LONG_L, load, logDelivery, LEVELS, filesMode, FILES_ROOT, DATA_DIR, readConfig, clampLevel, maxLevel, isVault, levelOf, upsert, save } from './store.mjs';
+import { LONG_L, load, logDelivery, filesMode, FILES_ROOT, DATA_DIR, LEVELS, readConfig, clampLevel, maxLevel, isVault, levelOf, upsert, save } from './store.mjs';
 import { vendingerFor, standardVendinger, erSyntetiskId } from './samtale.mjs';
 import { hasKey, ollamaStatus, readKey } from './keychain.mjs';
+import { alleLagtTil, erSettNoensteds } from './skjermvalg.mjs';
 import { OLLAMA_VERT, OLLAMA_URL } from './ollama.mjs';
 import { løsMottakere as l_sMottakere, delingerFor, nyttToken, lenkerFor, eier, lagreDeling, registrerDeling, skrivMottakere } from './deling.mjs';
 
@@ -106,7 +107,20 @@ const STOPP = new Set(('Tua Circles Claude Code Desktop Cowork Vault Trust Score
   'Gemini Mistral Ollama Anthropic OpenAI Microsoft Keychain Holding AS ASA Business Innboks Finder Spotlight Kartet Forsiden Spør ' +
   'Innstillinger Design Classical Vite React Node Mac iPhone iPad Windows Linux BankID Altinn Entra Okta Skigaarden Skado').split(/\s+/));
 
+// Ordgrense som kjenner æøå: \b ser ikke «Øystein» som et ord og slapp navn som begynner med Æ, Ø eller Å gjennom (rettet 03.11.2026, arb. 35 skive 3).
+const FØR = '(?<![\\p{L}\\p{N}_])', ETTER = '(?![\\p{L}\\p{N}_])';
 const ETTERNAVN = '[A-ZÆØÅ][a-zæøåé]+(?:-[A-ZÆØÅ][a-zæøåé]+)?';
+// Utvidede regler (arb. 35 skive 3): brukes i det appen sender og i filer. De bommer heller på den sikre siden; det de tar feil av, kan Erik fjerne, og svaret får originalene tilbake.
+//   firma         «Nordlys Konsult AS»: ord med stor forbokstav foran en selskapsform
+//   kontekst      «møte med Xenia Fjeldstad», «Kontaktperson: Bo Ek», «Med hilsen Bo Ek»: to til tre ord med stor forbokstav etter et ord som peker på en person
+//   navn + e-post «Xenia Fjeldstad <xenia@nordlys.no>»: det som står foran en e-postadresse i vinkler
+const FIRMA_UNNTAK = new Set('Tua Circles Skigaarden Skado Google Apple Microsoft Anthropic OpenAI Dropbox Mistral Ollama'.split(' '));
+const FIRMA_FORM = new Set('AS ASA ANS DA BA SA KS Ltd Limited LLC Inc GmbH AB Oy ApS'.split(' '));
+const FIRMA_RE = new RegExp(`${FØR}(?:\\p{Lu}[\\p{L}\\p{N}&'’.-]*(?:[ \\t]+og)?[ \\t]+){1,4}(?:${[...FIRMA_FORM].join('|')})${ETTER}`, 'gu');
+const PEKERE = 'med fra til hos for av ved og kontakt møte intervju samtale navn kontaktperson signert ansvarlig saksbehandler pasient klient kunde leder hilsen mvh kopi'.split(' ').map((o) => `[${o[0].toUpperCase()}${o[0]}]${o.slice(1)}`).join('|');
+const KONTEKST_RE = new RegExp(`${FØR}(?:${PEKERE}|v/)[:,]?\\s+(${ETTERNAVN}(?:[ \\t]${ETTERNAVN}){1,2})${ETTER}`, 'gu');
+const NAVN_EPOST_RE = new RegExp(`${FØR}(${ETTERNAVN}(?:[ \\t]${ETTERNAVN}){0,3})[ \\t]*<[^<>\\s]+@[^<>\\s]+>`, 'gu');
+const PLASS_FOR_TYPE = { navn: 'Person', firma: 'Firma', annet: 'Skjermet' };
 const navneKandidat = (s) => s.split(/\s+/).every((w) => !STOPP.has(w)) && s.split(/\s+/).length >= 2;
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -134,10 +148,16 @@ const bokstav = (n) => { let s = ''; n += 1; while (n > 0) { const r = (n - 1) %
 
 // En skjermer holder plassholderne stabile på tvers av flere tekster i SAMME sending (meldingen og konteksten).
 // kobling: plassholder → original (bare her, hos kalleren) · antall: per type · nye: personer oppdaget av fornavn-regelen (lagres i kjent-lista).
-function lagSkjermer(kjente = []) {
-  const kobling = {}, tilPlass = {}, antall = {}, teller = {}, nye = new Set();
-  const kjentRe = kjente.length ? new RegExp(`\\b(?:${[...kjente].sort((a, b) => b.length - a.length).map(escapeRe).join('|')})\\b`, 'g') : null;
-  const fornavnRe = new RegExp(`\\b(${[...FORNAVN].map(escapeRe).join('|')})(\\s${ETTERNAVN}){1,2}\\b`, 'g');
+// Arb. 35 skive 3: `valg` er det Erik har bestemt i arbeidet (skjermvalg.js): `legg` [{tekst, type}] skjermes først av alt, overalt og uansett store og små bokstaver; `fjern` [tekst] skjermes ikke
+// (fødselsnummer kan ikke fjernes). `utvidet` slår på reglene over, for hele skjermeren eller for én tekst (skjerm(t, {utvidet: true})). funn() lister hva som er skjermet: plassholder, type, original, antall.
+function lagSkjermer(kjente = [], { valg = null, utvidet: utvidetAlt = false } = {}) {
+  const kobling = {}, tilPlass = {}, antall = {}, teller = {}, nye = new Set(), funn = {};
+  const normert = (o) => String(o || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const fjernet = new Set((valg?.fjern || []).map(normert));
+  const lagtTil = [...(valg?.legg || [])].filter((l) => l?.tekst).sort((a, b) => b.tekst.length - a.tekst.length)
+    .map((l) => ({ ...l, re: new RegExp(`${FØR}${l.tekst.trim().split(/\s+/).map(escapeRe).join('\\s+')}${ETTER}`, 'giu') }));
+  const kjentRe = kjente.length ? new RegExp(`${FØR}(?:${[...kjente].sort((a, b) => b.length - a.length).map(escapeRe).join('|')})${ETTER}`, 'gu') : null;
+  const fornavnRe = new RegExp(`${FØR}(${[...FORNAVN].map(escapeRe).join('|')})(\\s${ETTERNAVN}){1,2}${ETTER}`, 'gu');
   const plassFor = (type, plass, original) => {
     const key = type + '\u0000' + original.replace(/\s+/g, ' ');
     if (tilPlass[key]) return tilPlass[key]
@@ -146,16 +166,19 @@ function lagSkjermer(kjente = []) {
     tilPlass[key] = p; kobling[p] = original;
     return p
   };
-  function skjerm(tekst) {
+  function skjerm(tekst, { utvidet = utvidetAlt } = {}) {
     const t = String(tekst || '');
     const treff = [];
     // nøkkel: hva plassholderen står for (for «Kari» alene: hele «Kari Nordmann», så begge får [Person A])
     const legg = (type, plass, start, end, prio, nøkkel) => {
       const original = t.slice(start, end).replace(/\s+$/, ''); end = start + original.length;
       if (!original) return
+      if (type !== 'fødselsnummer' && fjernet.has(normert(nøkkel || original))) return   // Erik har tatt dette bort i arbeidet
       if (treff.some((x) => start < x.end && end > x.start)) return   // tidligere regel vinner
       treff.push({ type, plass, start, end, original: nøkkel || original, prio });
     };
+    const personer = new Set();
+    for (const l of lagtTil) for (const m of t.matchAll(l.re)) { legg(l.type, PLASS_FOR_TYPE[l.type] || 'Skjermet', m.index, m.index + m[0].length, -1, l.tekst); if (l.type === 'navn') personer.add(l.tekst); }
     REGLER.forEach((r, prio) => {
       for (const m of t.matchAll(r.re)) {
         if (r.ok && !r.ok(m)) continue
@@ -164,26 +187,36 @@ function lagSkjermer(kjente = []) {
       }
     });
     // Navn: kjent-lista først (hele navn), så fornavn-regelen. Deretter samme persons fornavn/etternavn alene → samme plassholder.
-    const personer = new Set();
-    if (kjentRe) for (const m of t.matchAll(kjentRe)) { legg('navn', 'Person', m.index, m.index + m[0].length, 10); personer.add(m[0]); }
-    for (const m of t.matchAll(fornavnRe)) { if (!navneKandidat(m[0])) continue; legg('navn', 'Person', m.index, m.index + m[0].length, 11); personer.add(m[0]); if (!kjente.includes(m[0])) nye.add(m[0]); }
+    if (utvidet) for (const m of t.matchAll(FIRMA_RE)) { if (m[0].split(/\s+/).some((w) => FIRMA_UNNTAK.has(w))) continue; legg('firma', 'Firma', m.index, m.index + m[0].length, 9); }
+    const person = (m, navn, start, prio, lær = false) => { if (fjernet.has(normert(navn))) return; legg('navn', 'Person', start, start + navn.length, prio); personer.add(navn); if (lær && !kjente.includes(navn)) nye.add(navn); };
+    if (kjentRe) for (const m of t.matchAll(kjentRe)) person(m, m[0], m.index, 10);
+    for (const m of t.matchAll(fornavnRe)) { if (navneKandidat(m[0])) person(m, m[0], m.index, 11, true); }
+    if (utvidet) {
+      for (const m of t.matchAll(KONTEKST_RE)) if (navneKandidat(m[1])) person(m, m[1], m.index + m[0].length - m[1].length, 11);
+      for (const m of t.matchAll(NAVN_EPOST_RE)) if (m[1].split(/\s+/).every((w) => !STOPP.has(w))) person(m, m[1], m.index, 11);
+    }
     for (const navn of personer) {
       const deler = navn.split(/\s+/);
+      // hele navnet først, også der regelen ikke så det: ellers fikk «Bølgeberg Rørhandel» to plassholdere etter hverandre, én per ord
+      if (deler.length > 1) for (const m of t.matchAll(new RegExp(`${FØR}${deler.map(escapeRe).join('\\s+')}${ETTER}`, 'gu'))) legg('navn', 'Person', m.index, m.index + m[0].length, 12, navn);
       for (const del of deler) {
         if (del.length < 4 && !FORNAVN.has(del)) continue
-        for (const m of t.matchAll(new RegExp(`\\b${escapeRe(del)}\\b`, 'g'))) legg('navn', 'Person', m.index, m.index + del.length, 12, navn);
+        for (const m of t.matchAll(new RegExp(`${FØR}${escapeRe(del)}${ETTER}`, 'gu'))) legg('navn', 'Person', m.index, m.index + del.length, 12, navn);
       }
     }
     treff.sort((a, b) => a.start - b.start);
     let ut = '', pos = 0;
     for (const x of treff) {
       antall[x.type] = (antall[x.type] || 0) + 1;
-      ut += t.slice(pos, x.start) + plassFor(x.type, x.plass, x.original);
+      const p = plassFor(x.type, x.plass, x.original);
+      funn[p] = funn[p] || { plass: p, type: x.type, original: x.original, antall: 0 };
+      funn[p].antall++;
+      ut += t.slice(pos, x.start) + p;
       pos = x.end;
     }
     return ut + t.slice(pos)
   }
-  return { skjerm, kobling, antall, nye, get treff() { return Object.values(antall).reduce((a, b) => a + b, 0) } }
+  return { skjerm, kobling, antall, nye, funn: () => Object.values(funn), get treff() { return Object.values(antall).reduce((a, b) => a + b, 0) } }
 }
 // Svaret kommer tilbake med plassholderne — de byttes tilbake lokalt før svaret vises og lagres.
 function avskjerm(tekst, kobling = {}) {
@@ -256,7 +289,7 @@ function sjekkTillatt(mottaker, kilder) {
 }
 
 const SYSTEM = 'Du svarer på norsk, kort og presist. Teksten under «Kontekst» er hentet fra brukerens eget arkiv (Tua) og kan inneholde ' +
-  'plassholdere som [Person A], [E-post 1] eller [Adresse 1]. Det er skjermede opplysninger: bruk plassholderne uendret i svaret, ' +
+  'plassholdere som [Person A], [Firma 1], [E-post 1] eller [Adresse 1]. Det er skjermede opplysninger: bruk plassholderne uendret i svaret, ' +
   'og ikke gjett hva de står for.';
 const byggMelding = (melding, kontekst) => (kontekst ? `${melding.trim()}\n\n---\n\nKontekst\n\n${kontekst}` : melding.trim());
 // Skive 1 (arb. 33, V22): `messages` som EKTE samtale. Vendingene (alt skjermet) vekselvis user/assistant — to like roller etter hverandre slås sammen —
@@ -417,6 +450,11 @@ async function sendTest({ system, melding, kontekst, oppgave, messages }, { onDe
     const ut = 'Utkast til konklusjon (test-mottakeren, ingenting sendt ut av maskinen): svarene er enige om hovedsaken, uenige i formuleringen, og ett av dem har et tilleggspunkt. Rett teksten og lås den når den stemmer.';
     await strøm(ut, onDel); return testSvar(ut, inn, 'test')
   }
+  if (oppgave === 'skjermforslag') {   // arb. 35 skive 3: fast, tolkbart forslag — to ord med stor forbokstav som står i teksten, pluss ett som ikke gjør det (motoren skal kaste det)
+    const funnet = [...new Set([...String(kontekst).matchAll(/\b[A-ZÆØÅ][a-zæøå]+ [A-ZÆØÅ][a-zæøå]+\b/g)].map((m) => m[0]))];
+    const ut = JSON.stringify({ navn: [...funnet.slice(0, 5), 'Oppdiktet Navnesen'], firma: ['Finnes Ikke AS'] });
+    await strøm(ut, onDel, signal); return testSvar(ut, inn, 'test')
+  }
   if (oppgave === 'nivåer') {   // skive 7: fast, tolkbar S/M for en innlest fil — første linje i konteksten (etter overskriften) som ingress, teksten flatet som sammendrag
     const flat = String(kontekst).replace(/^## .*\n+/, '').replace(/\s+/g, ' ').trim();
     const ut = JSON.stringify({ S: `Test-ingress: ${flat.slice(0, 200)}`, M: `Test-sammendrag (ingenting sendt ut av maskinen): ${flat.slice(0, 1200)}` });
@@ -525,7 +563,7 @@ const NIVÅ_OPPGAVE = (medM, tegn, kuttet, plassholdere = true, samtale = false)
     : '{"S": "…"}. S = ingress: én til to setninger, høyst 300 tegn, med det viktigste funnet, svaret eller beslutningen i teksten — konkret, med tallene og navnene som bærer det. Begynn med selve funnet, aldri med «Dette dokumentet», «Denne samtalen», «Teksten» eller lignende. ') +
   'På norsk. Ikke finn på noe som ikke står i teksten.' + (plassholdere ? ' Plassholdere i hakeparentes som står i teksten, brukes uendret.' : '');   // Erik 29.10: med «[Person A]» som eksempel fant gemma på plassholdere som ikke fantes
 // En plassholder som står igjen etter avskjerm() fantes ikke i det som ble sendt — modellen fant den på (gemma kopierte eksempelet «[Person A]»).
-const oppdiktetPlassholder = (t, kilde = '') => [...String(t || '').matchAll(/\[(?:Person [A-ZÆØÅ]{1,2}|(?:E-post|Adresse|Telefon|Beløp|Kontonummer|Fødselsnummer|Org\.nr\.?) \d+)\]/g)].some((m) => !String(kilde).includes(m[0]));   // står den i kilden (arkivert skjermet svar), er den ekte
+const oppdiktetPlassholder = (t, kilde = '') => [...String(t || '').matchAll(/\[(?:Person [A-ZÆØÅ]{1,2}|(?:E-post|Adresse|Telefon|Beløp|Kontonummer|Fødselsnummer|Org\.nr\.?|Firma|Skjermet) \d+)\]/g)].some((m) => !String(kilde).includes(m[0]));   // står den i kilden (arkivert skjermet svar), er den ekte
 const NIVÅ_MAKS_TEGN = 12000;
 const NIVÅ_MAKS_LOKALT = 7000;
 // Erik 02.11: en samtale er nyest nederst — er den for lang, leser modellen slutten (der funnet står), ikke juli-starten. Et dokument leses fra toppen.
@@ -543,7 +581,7 @@ async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, klient =
     const kilder = [{ id: sak?.id || null, name: tittel || sak?.name || 'fila', version: sak?.version || 1, level: 'L', vault: false }];
     try { sjekkTillatt(m, kilder); } catch (e) { if (e instanceof Blokkert) return { ...regel, av: 'regel', modell: null, tokens: null, utlevert: false, grunn: `${m.label} fikk ikke lese fila: ${e.message}` }; throw e }
   }
-  const sk = lagSkjermer(kjentePersoner(atoms));
+  const sk = lagSkjermer(kjentePersoner(atoms), { utvidet: true });
   const maks = m.local ? NIVÅ_MAKS_LOKALT : NIVÅ_MAKS_TEGN;   // gemma3:4b har 4 096 tokens kontekst — 12 000 tegn + instruks fylte den, og svaret kom uten JSON
   const kuttet = t.length > maks;
   const kontekst = `## ${sk.skjerm(tittel || 'Dokument')}\n\n${sk.skjerm(utdragForModell(t, maks, sak))}`;
@@ -571,6 +609,16 @@ async function skrivNivåer(tekst, { tittel = '', sak = null, prosjekt, klient =
   if (!S) return { ...regel, av: 'regel', modell: r.modell, tokens, utlevert, grunn: `${m.label} ga ingen ingress — S og M er skrevet etter regler.` }
   return { S, M: M || (medM ? regel.M : ''), av, M_av: M ? av : medM ? 'regel' : null, modell: r.modell, tokens, utlevert, skjermet: { ...sk.antall } }
 }
+
+// ── 3b) Se over det skjermede (arbeidsstykke 35 skive 3, Erik 03.11.2026) ────────────────────────────────────────────────
+// «Første gang en ny fil skal til en skymodell, må det skjermede ses over. Til lokal modell trengs det ikke. Vault-reglene står urørt.» Regelen bor her, ikke i appen:
+//   arbeidsNøkler / arbeidsSkjermer   arbeidet en sending hører til, og skjermeren med Eriks valg og de utvidede reglene. Alt motoren sender fra appen går gjennom den.
+//   stoppUtenGjennomsyn               kaster GjennomsynKreves når en fil (tagg `fil`) ikke er sett over i denne versjonen i dette arbeidet, og minst én mottaker ikke er lokal. Testmottakeren regnes som sky.
+//   gjennomsyn()                      det dialogen viser: filen med plassholdere, lista per type, og valgene. Med `valg` regnes det på utkastet uten å lagre noe. Ingenting sendes.
+//   bekreftGjennomsyn()               Erik har sett: valgene lagres for arbeidet, versjonen merkes som sett, personnavn han la til lærer kjent-lista.
+//   skjermForslag()                   lokal modell leser det reglene har skjermet og foreslår navn og firma de ikke fanget. Bare en lokal modell; ellers `tilgjengelig: false` med hva som mangler.
+//                                     Et forslag må stå ordrett i teksten, ellers kastes det. Forslag er forslag: ingenting skjermes før Erik har godkjent det (de havner da i `legg`).
+const erFilSak = (a) => (a?.tags || []).includes('fil');
 // Friksjon 15: «før du sender, ser du hva som sendes». Samme trinn som spor() fram til sendingen — minimer → sjekkTillatt per mottaker → skjerm → tokens —
 // men ingenting sendes, lagres eller logges, og kjent-personer-lista lærer ingenting. Svaret har samme form som hendelsen `skjermet` i spor(), pluss
 // `blokkert` {feil, detaljer, mottaker} når fail closed ville stoppet sendingen (da er `tekst` likevel med, så linja kan vise hva som ville gått).
@@ -623,9 +671,9 @@ function endepunkt(id = 'claude') {
 }
 // Ett skjermings-oppsett for et helt verktøysvar: samme person får samme plassholder i tittel, ingress og tekst. Lista vokser av bruk (som spor()).
 function skjermerFor(atoms) {
-  const sk = lagSkjermer(kjentePersoner(atoms));
+  const sk = lagSkjermer(kjentePersoner(atoms), { valg: { legg: alleLagtTil() } });   // arb. 35 skive 3: det Erik har lagt til i et arbeid, gjelder også i Claude-døra; fjerninger gjør det ikke (ikke vet døra hvilket arbeid den er i)
   // treff er en getter på skjermeren — den må defineres på nytt her (en spredning ville fryst den til 0)
-  return { skjerm: (t) => sk.skjerm(t), kobling: sk.kobling, antall: sk.antall, nye: sk.nye, get treff() { return sk.treff }, lær: () => { if (sk.nye.size) kjentePersoner([], { lær: [...sk.nye] }); } }
+  return { skjerm: (t, valg) => sk.skjerm(t, valg), kobling: sk.kobling, antall: sk.antall, nye: sk.nye, get treff() { return sk.treff }, lær: () => { if (sk.nye.size) kjentePersoner([], { lær: [...sk.nye] }); } }
 }
 // lever(): én sak til Claude på et nivå. Returnerer { nivå (det som faktisk gis), ønsket, maks, linje (hvorfor klippet, '' når ikke), felt (navn, samtale,
 // S, hvorfor — skjermet), tekst (skjermet), got (levelOf-svaret), antall, treff, tokens, ord, logget }. `versjon` er en tidligere versjon av saken
@@ -644,12 +692,18 @@ function lever(atoms, sak, { nivå = 'L', mottaker = 'claude', tool = 'tua_get',
       ? `«${sak.name}» er Vault-merket: ${m.label} får bare S (V15, fail closed). Hele innholdet finnes bare i Tua-appen på denne maskinen.`
       : `${m.label} har Trust Score ${Number(m.trust?.score) || 1}/5 — nivå ${maks} krever minst ${NIVÅ_KREVER_TRUST[maks]} (fail closed, V21). Du får S.`;
   }
+  // arb. 35 skive 3: en fil som er lest inn etter 03.11 og ikke er sett over, får bare S hos en skymodell, som Vault: Claude skal kunne svare på ingressen, resten venter på Erik
+  if (eff !== 'S' && !m.local && (sak.tags || []).includes('se-over') && !erSettNoensteds(sak.id, sak.version || 1)) {
+    eff = 'S';
+    linje = `«${sak.name}» er en fil som ikke er sett over ennå: ${m.label} får bare S. Be brukeren se over det skjermede i Tua-appen («Se over det skjermede» i samtalen), så får du resten.`;
+  }
   const got = levelOf(kilde, eff);
   const egen = !sk;
   sk = sk || skjermerFor(atoms);
   const S = levelOf(kilde, 'S');
-  const felt = { navn: sk.skjerm(kilde.name || sak.name), samtale: sk.skjerm(kilde.convo || ''), S: S.level === 'S' ? sk.skjerm(S.text) : '', hvorfor: kilde.summary && kilde.summary !== S.text ? sk.skjerm(kilde.summary) : '' };
-  const tekst = sk.skjerm(got.text);
+  const sv = { utvidet: erFilSak(sak) };   // i en fil gjelder de utvidede reglene også i Claude-døra: samme skjerming som Erik så da han så over
+  const felt = { navn: sk.skjerm(kilde.name || sak.name, sv), samtale: sk.skjerm(kilde.convo || '', sv), S: S.level === 'S' ? sk.skjerm(S.text, sv) : '', hvorfor: kilde.summary && kilde.summary !== S.text ? sk.skjerm(kilde.summary, sv) : '' };
+  const tekst = sk.skjerm(got.text, sv);
   if (egen) sk.lær();
   const alt = `${felt.navn}\n${felt.samtale}\n${felt.S}\n${felt.hvorfor}\n${tekst}`;
   const tokens = { ca: anslåTokens(alt, m.id) };
@@ -762,4 +816,4 @@ function del(atoms, { ids = [], til, nivå = 'S', prosjekt, klient = 'Claude', c
 }
 const fmtTid = (d) => d.toLocaleString('no-NO', { dateStyle: 'short', timeStyle: 'short' });
 
-export { MotorFeil, anslåTokens, del, endepunkt, lever, leverSamtale, maksNivå, ord, skjermerFor, skrivNivåer };
+export { MotorFeil, anslåTokens, del, endepunkt, erFilSak, kjentePersoner, lagSkjermer, lever, leverSamtale, maksNivå, ord, skjermerFor, skrivNivåer };

@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.13: kortets klientbibliotek (@modelcontextprotocol/ext-apps 1.7.5 med sdk og zod) i 3 tekstdeler;
+// Tua-plugin 0.5.14: kortets klientbibliotek (@modelcontextprotocol/ext-apps 1.7.5 med sdk og zod) i 3 tekstdeler;
 // apps.js setter dem sammen i rekkefølge før de inlines i kort.html. Bygd av bygg.mjs, ikke minifisert. IKKE REDIGER.
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
