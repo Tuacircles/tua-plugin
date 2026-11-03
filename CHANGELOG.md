@@ -2,6 +2,12 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.13 — 2026-11-03 (the work room — work piece 35, slice 1)
+
+- **One click opens the case.** A click on an atom anywhere in the app's Find view goes straight into one work room; the fold-out in the newspaper is gone. A conversation opens on what it ended with, with the whole conversation folded below, its documents and sources in a column on the right (a tab under 1100 px), and «Vil du teste dette?» with model buttons. A press opens Utfordre with the model chosen and the send line visible; nothing is sent until the send button is pressed. A document opens the same room with the conversation it came from beside it. Levels, versions, sharing, tidy-up and «Om saken» are behind one menu. Esc and «‹ Avis» return to the same search, filters and scroll position.
+- Bridge (app server): `GET /api/rom?id=` (the atom, its neighbours, the conversation, its documents and sources, without `/api/atoms`); `samtale.romKoblinger` uses the same link as the newspaper row. MCP tools unchanged.
+- Tests: `server/test-rom.mjs` (new, 37 checks); `test-forside.mjs` updated for the removed fold-out.
+
 ## Unreleased — 2026-10-28 (conversations first — work piece 33, V22)
 
 - **Conversations are first-class in the Claude door.** A conversation atom (led in Tua, or captured from Code/Cowork/Desktop — also one continued in Tua) shows up in `tua_search`, `tua_card` and `tua_get` as a conversation: «Samtale i Tua: 4 vendinger · siste 28.10.2026 · gemma3, Claude · konklusjon låst · fortsett i Tua: …#samtale/<id>». `tua_get` on it returns the transcript at S/M/L. **`tua_compose` can take a conversation**: `samtale` (atom id, key, an atom inside it, or a session id) plus optional `vendinger` (turn ids; default is Tua's standard selection — everything after the last locked conclusion, within Claude's budget) — the turns are delivered through the engine as `**user:**`/`**assistant:**` blocks, Vault-tagged turns kept out with one line (fail closed), shielded, and logged with `vendinger` and `samtale` on the Utlevert line. `ids` is optional when `samtale` is given. «Siden sist i Tua» (card, `tua_search`, the SessionStart hook) gains «Samtaler i Tua: N, siste «…»».

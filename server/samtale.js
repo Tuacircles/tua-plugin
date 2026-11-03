@@ -64,6 +64,42 @@ export function samtaleFor(atoms, sak, dybde = 0) {
   return atoms.find((a) => erTuaSamtale(a) && same(a.project, sak.project) && navnAv(a) === (sak.convo || '')) || null   // gammel Tua-tråd: samtalenavnet
 }
 
+// ── Arbeidsrommet (arbeidsstykke 35 skive 1, 03.11.2026): hvilke dokumenter og kilder som hører til en samtale eller en sak ──────────
+// Samme kobling som raden i avisen (regler.flateRader, fraRad): et dokument hører til samtalen når det har samme prosjekt og samtalenavn, eller når bygget_av/derivedFrom peker
+// på samtalen eller en av delene i den. Kildene er det delene ble bygget av, utenfor samtalen. Utfordringer og andre samtaler står aldri i lista.
+const DELER = new Set(['samtale', 'prompt', 'svar', 'konklusjon'])
+const erDel = (a) => !!a && (DELER.has(a.kind) || (a.tags || []).some((t) => ['svar', 'prompt', 'forskjeller'].includes(String(t).toLowerCase())) || /^(svar|prompt|okt|forskjeller|konklusjon):/.test(String(a.key || '')))
+const erUtf = (a) => !!a && (a.utfordring != null || (a.tags || []).some((t) => ['utfordring', 'ny-versjon'].includes(String(t).toLowerCase())))
+const pekerAv = (a) => [...(a?.derivedFrom || []), ...(a?.bygget_av || [])].map((x) => (typeof x === 'string' ? x : x?.id)).filter(Boolean)
+export function romKoblinger(atoms, id) {
+  const byId = new Map((atoms || []).map((a) => [a.id, a]))
+  const direkte = finnSamtale(atoms, id)
+  const sak = byId.get(String(id).trim()) || direkte
+  if (!sak) return null
+  const iSamme = (a, navn, prosjekt) => !!navn && same(a.project, prosjekt) && (a.convo || '') === navn
+  // samtalen: saken selv, delen av en samtale — eller for et dokument: samme samtalenavn, ellers samtalen til det dokumentet er bygget av
+  const avDel = (x) => samtaleFor(atoms, x) || atoms.find((a) => a.kind === 'samtale' && iSamme({ project: x.project, convo: x.convo || '' }, navnAv(a), a.project)) || null   // fangede samtaler: delene peker ikke, de deler samtalenavn
+  let samtale = erDel(sak) ? direkte || avDel(sak) : null
+  if (!erDel(sak)) {
+    samtale = atoms.find((a) => a.kind === 'samtale' && a.id !== sak.id && iSamme({ project: sak.project, convo: sak.convo || '' }, navnAv(a), a.project)) || null
+    if (!samtale) for (const p of pekerAv(sak)) { const x = byId.get(p); if (x && erDel(x)) { samtale = avDel(x); if (samtale) break } }
+  }
+  const navn = samtale ? navnAv(samtale) : sak.convo || ''
+  const prosjekt = samtale?.project || sak.project
+  const deler = atoms.filter((a) => erDel(a) && !erUtf(a) && (a.id === samtale?.id || iSamme(a, navn, prosjekt) || (samtale && pekerAv(a).includes(samtale.id))))
+  const delIder = new Set(deler.map((a) => a.id))
+  const erDok = (a) => !!a && !erDel(a) && !erUtf(a)
+  const nyestFørst = (x, y) => (y.capturedAt || 0) - (x.capturedAt || 0)
+  const dokumenter = atoms.filter((a) => a.id !== sak.id && erDok(a) && (iSamme(a, navn, prosjekt) || pekerAv(a).some((p) => delIder.has(p)))).sort(nyestFørst)
+  const dokIder = new Set(dokumenter.map((a) => a.id))
+  const kildeIder = new Set(erDel(sak) ? deler.flatMap(pekerAv) : pekerAv(sak))
+  const kilder = [...kildeIder].map((p) => byId.get(p)).filter((a) => a && a.id !== sak.id && !delIder.has(a.id) && !dokIder.has(a.id) && a.kind !== 'samtale' && !erUtf(a) && a.kind !== 'prompt').sort(nyestFørst)
+  // naboene Sak.jsx slår opp i: delene, kildene, svarene saken ga, arbeidet den kan høre til og det som henger på den
+  const naboIder = new Set([sak.id, ...delIder, ...pekerAv(sak), ...(sak.ga || []).map((g) => g.id), ...kildeIder, sak.hørerTilForslag, sak.hørerTil].filter(Boolean))
+  const naboer = atoms.filter((a) => naboIder.has(a.id) || a.hørerTil === sak.id)
+  return { sak, slag: samtale && erDel(sak) ? 'samtale' : 'sak', samtale, fra: samtale ? null : sak.convo || null, dokumenter, kilder, naboer }
+}
+
 // ── vendingene ───────────────────────────────────────────────────────────────
 const erForskjeller = (a) => a?.kind === 'svar' && (a.tags || []).some((t) => String(t).toLowerCase() === 'forskjeller')
 const erSvarSak = (a) => !!a && !erForskjeller(a) && (a.kind === 'svar' || (a.kind === 'capture' && (a.tags || []).includes('svar')))

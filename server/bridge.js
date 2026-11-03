@@ -141,7 +141,7 @@ import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } fro
 import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, settStandard as ollamaStandard, lokale as ollamaLokale } from './ollama.js'   // friksjon 12: modellene i Ollama
 import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer, del, trekkDeling, beOmHele, mottakersideFor, standardFor, forhåndsvisUtfordring, utfordre, utfordringerAv, settInnvending, nyVersjon, låsUtfordring } from './motor.js'
 import { utfordringKart, utfordringInfo, samtaleDokumenter, erUtfordring } from './utfordring.js'   // skive C (arb. 34): «Utfordret av …» på sakene, dokumentene en samtale skrev
-import { finnSamtale, vendingerFor, erTuaSamtale, nySamtaleId, samtaleNøkkel, antallVendinger, sistI, gamleTråder, gjørOmTråd } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak — GET /api/samtale, POST /api/samtale/ny   // M20a/M20b: motoren — eneste vei ut til en modell
+import { romKoblinger, finnSamtale, vendingerFor, erTuaSamtale, nySamtaleId, samtaleNøkkel, antallVendinger, sistI, gamleTråder, gjørOmTråd } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak — GET /api/samtale, POST /api/samtale/ny   // M20a/M20b: motoren — eneste vei ut til en modell
 import { lesInn, lesInnInnboks, innboksDokumenter, ferdigAntall, FORMATER, STANDARD_PROSJEKT, lagreTekst, lagUtdrag, LIM_INN_GRENSE } from './innlesing.js'   // M16 (skive 7): fil → sak med S/M/L, Innboks · skive 3 (arb. 33 §6): lim inn → kilde, utdrag
 import { finnSak } from './store.js'   // skive 3 (arb. 33 §8): lenker som ikke finnes — GET /api/finn?id=
 import { inboxPending, inboxShareFiles } from './import.js'
@@ -156,6 +156,17 @@ import { gjennomgang, planFor, NIVÅER_GJENNOMGANG, samtalerGjennomgang, traader
 import { følgereAv, erArbeid, delAv, løpFor, arbeider, åpneArbeider, settHørerTil, løsne, avvisForslag, harForslag, gjørTilArbeid, vurderPakke, vurderingsprompt, settVurderingsprompt, VURDERING_STANDARD } from './arbeid.js'   // friksjon 20: arbeidet som samler
 ensureArchive()                                             // M14: første kjøring — lag arkivet om det ikke finnes
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE)
+// Formen en sak har i appen (/api/atoms og /api/rom): lenker, ord per nivå, klasse, vekt, ulest, arbeid … — samme for begge, så Sak.jsx ikke vet hvor saken kom fra.
+function lagAtomUt(all) {
+  const { av: trådAv, per: trådPer } = trådSamlet(all), sendinger = deliveryCounts(), utlev = deliveryInfo(), bruk = brukInfo(), now = Date.now(), fraUlest = ulestFra(now)
+  const utf = utfordringKart(all)   // skive C: «Utfordret av ChatGPT 28.10 · 3 innvendinger · 2 tatt inn» per sak (C4/C5)
+  const følgere = følgereAv(all), arbeidTall = new Map(arbeider(all).map((r) => [r.id, r]))   // friksjon 20: hvem som er arbeid, og tallene («3 samtaler, 2 tråder»)
+  return (a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0, mtime: mtimeAv(fileOf(a)),   // mtime (runde 2a): visningen Mapper sorterer som Finder — nyeste fil øverst
+          klasse: klasseAv(a), vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), tråd: a.kind === 'konklusjon' || a.kind === 'svar' ? trådPer.get(trådAv.get(a.id)) || null : null, now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }), tråden: a.kind === 'prompt' ? trådPer.get(a.id) || null : null,
+          ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }),   // friksjon 16: nyere enn siste «sett alt» (ellers sju dager) og ikke åpnet/sett/lest siden den ble skrevet
+          // friksjon 20: hører_til (arbeidet saken henger på), del_av («Del av: <arbeid> · samtale 7 av 12»), arbeid (saken er et arbeid) med tall, hører_til_forslag bare når det venter på svar
+          hører_til: a.hørerTil || null, del_av: delAv(all, a, følgere), arbeid: erArbeid(a, følgere), ...(arbeidTall.has(a.id) ? { arbeid_tall: (({ samtaler, tråder, filer, saker, sist, åpen }) => ({ samtaler, tråder, filer, saker, sist, åpen }))(arbeidTall.get(a.id)) } : {}), ...(harForslag(a) ? { hører_til_forslag: a.hørerTilForslag } : {}), ...(utf.has(a.id) ? { utfordret: utf.get(a.id) } : {}), ...(erUtfordring(a) ? { er_utfordring: true } : {}) })
+}
 const sakSvar = (a) => ({ ...a, links: linksFor(a), file: fileOf(a), status: statusOf(a), klasse: klasseAv(a) })   // runde 3c: én form på saken tilbake fra rydde-rutene
 // M15: Trust Score per connector — én JSON-fil (trust-scores.json), leses ved hvert kall så rettelser virker uten omstart; nå i motor.js.
 const countMd = (dir, depth = 2) => {   // hvor mange atomer (.md) ligger i en mappe — for «hva ville skjedd» ved bytte av arkivsted
@@ -533,14 +544,8 @@ http
         // utlevert = antall sendinger saken har vært med i (forsidens hovedsak = mest arbeidet med siste døgn). Bare tellinger.
         // Runde 2d (03-avisen §2–§4): klasse (arbeid · spor · drift · tråd), vekt og sist_rørt per sak; `tråden` samlet på prompt-saken ({svar, forskjeller, konklusjon, åpen, …}).
         // `tråd` er fortsatt prompt-id (streng) på alle sakene i en tråd — appen (regler.slåSammenTråder) leser den slik; det samlede objektet har eget navn så ingenting brekker.
-        const { av: trådAv, per: trådPer } = trådSamlet(all), sendinger = deliveryCounts(), utlev = deliveryInfo(), bruk = brukInfo(), now = Date.now(), fraUlest = ulestFra(now)
-        const utf = utfordringKart(all)   // skive C: «Utfordret av ChatGPT 28.10 · 3 innvendinger · 2 tatt inn» per sak (C4/C5)
-        const følgere = følgereAv(all), arbeidTall = new Map(arbeider(all).map((r) => [r.id, r]))   // friksjon 20: hvem som er arbeid, og tallene («3 samtaler, 2 tråder»)
-        const atoms = all.slice(offset, offset + limit).map((a) => ({ ...a, links: linksFor(a), file: fileOf(a), ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a), tråd: trådAv.get(a.id) || null, utlevert: sendinger.get(a.id) || 0, mtime: mtimeAv(fileOf(a)),   // mtime (runde 2a): visningen Mapper sorterer som Finder — nyeste fil øverst
-          klasse: klasseAv(a), vekt: vekt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id), tråd: a.kind === 'konklusjon' || a.kind === 'svar' ? trådPer.get(trådAv.get(a.id)) || null : null, now }), sist_rørt: sistRørt(a, { utlevering: utlev.get(a.id), bruk: bruk.get(a.id) }), tråden: a.kind === 'prompt' ? trådPer.get(a.id) || null : null,
-          ulest: ulestAv(a, { bruk: bruk.get(a.id), fra: fraUlest }),   // friksjon 16: nyere enn siste «sett alt» (ellers sju dager) og ikke åpnet/sett/lest siden den ble skrevet
-          // friksjon 20: hører_til (arbeidet saken henger på), del_av («Del av: <arbeid> · samtale 7 av 12»), arbeid (saken er et arbeid) med tall, hører_til_forslag bare når det venter på svar
-          hører_til: a.hørerTil || null, del_av: delAv(all, a, følgere), arbeid: erArbeid(a, følgere), ...(arbeidTall.has(a.id) ? { arbeid_tall: (({ samtaler, tråder, filer, saker, sist, åpen }) => ({ samtaler, tråder, filer, saker, sist, åpen }))(arbeidTall.get(a.id)) } : {}), ...(harForslag(a) ? { hører_til_forslag: a.hørerTilForslag } : {}), ...(utf.has(a.id) ? { utfordret: utf.get(a.id) } : {}), ...(erUtfordring(a) ? { er_utfordring: true } : {}) }))
+        const atomUt = lagAtomUt(all)
+        const atoms = all.slice(offset, offset + limit).map(atomUt)
         ATOMS_MINNE = { nøkkel: nøkkelAtoms, tid: Date.now(), tekst: JSON.stringify({ atoms, total: all.length, offset, file: ARKIV(), klasser: tellKlasser(all), uleste: atoms.filter((a) => a.ulest && a.klasse === 'arbeid').length, sett_alt: settAltSist() || null }), etag: null, gz: null }
         return jsonTekst(res, 200, ATOMS_MINNE.tekst, {}, ATOMS_MINNE)
       }
@@ -804,6 +809,20 @@ http
       //   POST /api/samtale/ny {prosjekt, hørerTil?} → { id, key, prosjekt, hørerTil }  reserverer en id; samtale-saken lagres ved første POST /api/spor med samtale: id
       //   POST /api/spor og /api/spor/forhandsvis tar `vendinger: [{id, rolle}]` og `samtale`; forhåndsvis gir `meldinger` (hele messages slik modellen får dem), `budsjett` per mottaker.
       //   Hendelsene skjermet/ferdig/slutt i /api/spor har `samtale` (samtale-sakens id) og skjermet har `meldinger`, `vendinger` og `budsjett`.
+      // ── Arbeidsstykke 35 skive 1 (03.11.2026): GET /api/rom?id=<samtale eller sak> — det arbeidsrommet trenger og ikke mer (ikke /api/atoms: 28 MB på Eriks arkiv).
+      //    { id, slag: samtale|sak, sak: saken slik /api/atoms gir den, atoms: saken og naboene Sak.jsx slår opp i (samtalens deler, bygget_av, ga, forslag, følgere),
+      //      samtale: { id|null, navn, kilde, S, antall } | null, dokumenter: [rad], kilder: [rad] }. Koblingen er samtale.romKoblinger (samme som regler.flateRader bruker for raden).
+      if (req.method === 'GET' && url.pathname === '/api/rom') {
+        const id = String(url.searchParams.get('id') || '').trim()
+        if (!id) return json(res, 400, { error: 'id kreves — en samtale eller en sak' })
+        const alle = load()
+        const k = romKoblinger(alle, id)
+        if (!k) return json(res, 404, { error: `fant ikke ${id}` })
+        const atomUt = lagAtomUt(alle)
+        const rad = (a) => ({ id: a.id, name: a.name, project: a.project, kind: a.kind || 'capture', kilde: a.source || '', tid: a.capturedAt || 0, key: a.key || '', file: fileOf(a), links: (a.links || []).filter((l) => l?.kind === 'file'), renders: a.renders || [], ord: Object.fromEntries(LEVELS.map((l) => [l, ord(levelOf(a, l).text)])), tegn: Object.fromEntries(LEVELS.map((l) => [l, levelOf(a, l).text.trim().length])), max: 'L', vault: isVault(a), status: statusOf(a) })
+        const s = k.samtale
+        return json(res, 200, { id: k.sak.id, slag: k.slag, sak: atomUt(k.sak), atoms: k.naboer.map(atomUt), samtale: s ? { id: s.id, navn: s.name, prosjekt: s.project, kilde: s.source || '', S: levelOf(s, 'S').text, antall: antallVendinger(vendingerFor(alle, s)) } : k.fra ? { id: null, navn: k.fra } : null, dokumenter: k.dokumenter.map(rad), kilder: k.kilder.map(rad) })
+      }
       if (req.method === 'GET' && url.pathname === '/api/samtale') {
         const id = String(url.searchParams.get('id') || '').trim()
         if (!id) return json(res, 400, { error: 'id kreves — samtale-sakens id, en reservert id fra /api/samtale/ny, eller en sak i samtalen' })
