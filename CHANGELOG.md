@@ -2,6 +2,16 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.14 — 2026-11-04 (start work with files, screened — work piece 35, slice 3)
+
+- **Drop many files.** Several files or a folder on "+ Nytt arbeid"; a project is suggested and nothing has to be chosen first. A file that fails does not stop the rest, and the error stands on its own row.
+- **New local readers.** `.xlsx`, `.pptx` and `.eml`, with no new packages. Hidden sheets and slides are read and marked, speaker notes are included, e-mail attachments are named but not read.
+- **Review before the first send to a cloud model.** The file with placeholders and a list per type; add and remove; choices apply for the rest of the work. The engine stops the send until it is confirmed (`GjennomsynKreves`), also in Utfordre. Not required for a local model. Vault rules are unchanged.
+- **Local suggestions.** The local model suggests names and companies the rules missed. Suggestions are not screened until approved, and anything not found verbatim in the text is dropped. Without Ollama everything works on rules, and the app says what is missing.
+- **Wider rules for what the app sends and for files.** Company names with a legal form, names after words such as "møte med", names before an e-mail address. Names starting with Æ, Ø or Å are now found.
+- **Claude door.** A file read in from now on and not yet reviewed gives S only, with a line saying why, like Vault. New: `[Firma 1]` and `[Skjermet 1]` placeholders.
+- **Fixed.** A new conversation lost its sources and chosen model after the first send. `test-skjerming.mjs` is new.
+
 ## App only — 2026-11-03 (easier navigation — work piece 35, slice 2; no plugin release)
 
 - **One top line in the newspaper and in work.** Tua, one switch between Avis and Arbeid with the active one marked, "+ Nytt arbeid" and settings, in the same place in both. "Arbeid" goes to where you were, else the last used conversation, else the newest. "+ Nytt arbeid" starts a new conversation for now, in the project you stand in or without a project, without asking.

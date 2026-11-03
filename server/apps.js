@@ -23,7 +23,7 @@ import {
   load, save, search, visibleIn, fmtTime, related, levelOf, maxLevel, isStale,
   linksFor, fileOf, sources, renderStatus, isVault, vaultClamp, hasExternalEdits,
 } from './store.js'
-import { lever, skjermerFor } from './motor.js'                                   // runde 3a: kortet gjennom motoren
+import { lever, skjermerFor, erFilSak } from './motor.js'                                   // runde 3a: kortet gjennom motoren
 import { utfordringInfo } from './utfordring.js'   // skive C (arb. 34): «Utfordret av …» i kortet
 import { samtaleInfo, samtaleLinje } from './samtale.js'   // skive 1+4 (arb. 33): samtaler som samtaler i kortet («4 vendinger · siste 27.10 · gemma3 · konklusjon låst», lenke til #samtale/<id>)
 import { delingerFor, lenkerFor } from './deling.js'                               // runde 3b: delingen (lenke, mottakere, trukket) på en delingssak
@@ -176,8 +176,8 @@ export function registerApps(server, { client = 'Claude' } = {}) {
       const hits = trådFørst(atoms, search(atoms, query || '', { project, context, limit }))
       const sk = skjermerFor(atoms)
       const items = hits.map(({ atom: a, S, max, snippet, tråd }) => ({
-        id: a.id, name: sk.skjerm(a.name), project: a.project, date: date(a.capturedAt), version: a.version || 1, kind: a.kind || 'capture',
-        S: S.level === 'S' ? sk.skjerm(S.text) : '', snippet: sk.skjerm(snippet || ''), max, tags: (a.tags || []).slice(0, 4),
+        id: a.id, name: sk.skjerm(a.name, { utvidet: erFilSak(a) }), project: a.project, date: date(a.capturedAt), version: a.version || 1, kind: a.kind || 'capture',
+        S: S.level === 'S' ? sk.skjerm(S.text, { utvidet: erFilSak(a) }) : '', snippet: sk.skjerm(snippet || '', { utvidet: erFilSak(a) }), max, tags: (a.tags || []).slice(0, 4),
         ...(tråd ? { thread: { svar: tråd.svar.length, konklusjon: tråd.konklusjon ? tråd.konklusjon.status : '' } } : {}),
         ...(a.kind === 'samtale' ? (() => { const i = samtaleInfo(atoms, a, { base: process.env.TUA_APP_URL || 'http://127.0.0.1:5274/' }); return { samtale: { kilde: i.kilde, tua: i.tua, vendinger: i.vendinger, siste: date(i.siste), modeller: i.modeller, konklusjon: i.konklusjon, adresse: i.adresse, linje: samtaleLinje(i) } } })() : {}),   // skive 1+4 (arb. 33): samtalen fullt ut
       }))

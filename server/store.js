@@ -426,7 +426,7 @@ export function tråder(atoms) {
   return { av, per }
 }
 // Sett sammen en leveranse av atomer lest på ett nivå. Vault-atomer går alltid inn som S.
-export function compose(atoms, { ids, level = 'M', name, intro, context }) {
+export function compose(atoms, { ids, level = 'M', name, intro, context, ikkeSett = () => false }) {
   const parts = [], derivedFrom = [], notes = []
   for (const id of ids) {
     const a = atoms.find((x) => x.id === id)
@@ -434,6 +434,7 @@ export function compose(atoms, { ids, level = 'M', name, intro, context }) {
     if (context && !visibleIn(a, context)) { notes.push(`${a.name}: ikke synlig for ${context}`); continue }
     let eff = clampLevel(level, maxLevel(a, context))
     if (isVault(a) && eff !== 'S') { eff = 'S'; notes.push(`«${a.name}» er Vault-merket — tatt med bare som S`) }
+    if (ikkeSett(a) && eff !== 'S') { eff = 'S'; notes.push(`«${a.name}» er en fil som ikke er sett over ennå — tatt med bare som S. Be brukeren se over det skjermede i Tua-appen.`) }   // arb. 35 skive 3
     const got = levelOf(a, eff)
     derivedFrom.push({ id: a.id, version: a.version || 1, level: eff })
     parts.push(`## ${a.name}\n_${a.project} · ${a.convo || '—'} · v${a.version || 1} · lest på nivå ${eff}${got.fallback ? ` (${got.level})` : ''}_\n\n${got.text.trim()}`)

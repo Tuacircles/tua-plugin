@@ -146,7 +146,7 @@ let mdId
   mdId = sak.id
   ok('lesInn: hendelser leser → lest → ferdig (ingen «skriver» med regler)', h.join(' ') === 'leser lest ferdig', h.join(' '))
   const a = load().find((x) => x.id === sak.id)
-  ok('sak: kind capture, L = hele teksten, tittel fra overskriften, prosjekt, tagger fil+markdown, kilde = filnavn (format)', a?.kind === 'capture' && a.content === fs.readFileSync(F.md, 'utf8').replace(/[ \t]+\n/g, '\n').trim() && a.name === 'Plan for lageret' && a.project === 'Testprosjekt' && a.tags.join() === 'fil,markdown' && a.source === 'Plan for lageret.md (Markdown)' && a.convo === 'Test', JSON.stringify([a?.name, a?.source, a?.tags]))
+  ok('sak: kind capture, L = hele teksten, tittel fra overskriften, prosjekt, tagger fil+markdown, kilde = filnavn (format)', a?.kind === 'capture' && a.content === fs.readFileSync(F.md, 'utf8').replace(/[ \t]+\n/g, '\n').trim() && a.name === 'Plan for lageret' && a.project === 'Testprosjekt' && a.tags.join() === 'fil,markdown,se-over' && a.source === 'Plan for lageret.md (Markdown)' && a.convo === 'Test', JSON.stringify([a?.name, a?.source, a?.tags]))
   ok('sak: S og M merket «regel» (V10), S_versjon 1, nøkkel fil:<sha>', a.levels.S.by === 'regel' && a.levels.M.by === 'regel' && a.levels.S.of === 1 && /^fil:[0-9a-f]{16}$/.test(a.key) && sak.S_av === 'regel' && sak.M_av === 'regel', JSON.stringify(a.levels?.S))
   ok('sak: peker til originalfila (file-lenke), ingen kopi i arkivet', a.links?.[0]?.kind === 'file' && a.links[0].href === F.md && a.links[0].label === 'Plan for lageret.md' && !fs.existsSync(path.join(ROOT, 'Testprosjekt', 'Plan for lageret.md')) === false && fs.readdirSync(path.join(ROOT, 'Testprosjekt')).length === 1, JSON.stringify(a.links))
   ok('sak: fila i arkivet har S_av og M_av i frontmatter og hele teksten under L', (() => { const t = fs.readFileSync(fileOf(a), 'utf8'); return t.includes('S_av: "regel"') && t.includes('M_av: "regel"') && t.includes('## Del 12') })())
@@ -161,6 +161,70 @@ let mdId
   const oa = load().find((x) => x.id === opp.id)
   ok('opplasting (data, ingen sti) → sak uten file-lenke, tittel fra filnavnet', !oa.links?.length && oa.name === 'Opplastet notat' && oa.content.startsWith('Et notat som kom'), JSON.stringify(oa.links))
   ok('ingen Utlevert for noe av dette (lokalt og regler)', UTLEVERT().length === 0)
+}
+
+// ── 4b) xlsx, pptx og eml (arbeidsstykke 35 skive 3) ────────────────────────
+{
+  const CT = '<Types/>'
+  const xlsx = lagZip({ '[Content_Types].xml': CT,
+    'docProps/core.xml': '<cp:coreProperties xmlns:dc="d"><dc:title>Budsjett for Nordlys</dc:title></cp:coreProperties>',
+    'xl/workbook.xml': '<workbook xmlns:r="r"><sheets><sheet name="Lønn &amp; ansatte" sheetId="1" r:id="rId1"/><sheet name="Skjult ark" sheetId="2" state="hidden" r:id="rId2"/><sheet name="Tomt" sheetId="3" r:id="rId3"/></sheets></workbook>',
+    'xl/_rels/workbook.xml.rels': '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Target="/xl/worksheets/sheet2.xml"/><Relationship Id="rId3" Target="worksheets/sheet3.xml"/></Relationships>',
+    'xl/sharedStrings.xml': '<sst><si><t>Navn</t></si><si><t>Lønn</t></si><si><r><t>Xenia </t></r><r><t>Fjeldstad</t></r><rPh><t>fonetisk</t></rPh></si><si><t>Født</t></si></sst>',
+    'xl/styles.xml': '<styleSheet><numFmts><numFmt numFmtId="170" formatCode="dd\\.mm\\.yyyy"/></numFmts><cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="14"/><xf numFmtId="170"/></cellXfs></styleSheet>',
+    'xl/worksheets/sheet1.xml': '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>3</v></c></row><row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><f>1+1</f><v>650000</v></c><c r="C2" s="2"><v>31048</v></c></row><row r="3"><c r="A3" t="inlineStr"><is><t>Inline &amp; tekst</t></is></c><c r="D3" t="b"><v>1</v></c></row></sheetData></worksheet>',
+    'xl/worksheets/sheet2.xml': '<worksheet><sheetData><row r="1"><c r="A1" t="str"><v>Hemmelig kolonne</v></c></row></sheetData></worksheet>',
+    'xl/worksheets/sheet3.xml': '<worksheet><sheetData/></worksheet>' }, true)
+  const rx = await les(null, { navn: 'budsjett.xlsx', data: xlsx })
+  ok('xlsx: arkene med navn, delte strenger (rPh ute), formel gir lagret verdi, inline og sann/usann', rx.tekst.includes('## Ark: Lønn & ansatte') && rx.tekst.includes('Xenia Fjeldstad | 650000') && !rx.tekst.includes('fonetisk') && rx.tekst.includes('Inline & tekst |  |  | sann'), rx.tekst)
+  ok('xlsx: dato etter stil (åååå-mm-dd), skjult ark lest og merket, tomt ark ute', rx.tekst.includes('1985-01-01') && rx.tekst.includes('## Ark: Skjult ark (skjult)') && rx.tekst.includes('Hemmelig kolonne') && !rx.tekst.includes('Tomt') && /skjult/.test(rx.meta.merknad), rx.meta.merknad)
+  ok('xlsx: meta (format, label, ark, rader, tittel fra docProps)', rx.meta.format === 'xlsx' && rx.meta.label === 'Excel (xlsx)' && rx.meta.ark === 2 && rx.meta.rader === 4 && rx.meta.tittel === 'Budsjett for Nordlys', JSON.stringify(rx.meta))
+  const pptx = lagZip({ '[Content_Types].xml': CT,
+    'ppt/presentation.xml': '<p:presentation xmlns:r="r"><p:sldIdLst><p:sldId id="1" r:id="rId3"/><p:sldId id="2" r:id="rId2"/></p:sldIdLst></p:presentation>',
+    'ppt/_rels/presentation.xml.rels': '<Relationships><Relationship Id="rId2" Target="slides/slide1.xml"/><Relationship Id="rId3" Target="slides/slide2.xml"/></Relationships>',
+    'ppt/slides/slide2.xml': '<p:sld><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Plan for Q1</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:txBody><a:p><a:r><a:t>Første </a:t></a:r><a:r><a:t>punkt &amp; mer</a:t></a:r></a:p><a:p><a:r><a:t>Andre punkt</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:nvPr><p:ph type="sldNum"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:fld><a:t>7</a:t></a:fld></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>',
+    'ppt/slides/_rels/slide2.xml.rels': '<Relationships><Relationship Id="rId1" Target="../notesSlides/notesSlide1.xml"/></Relationships>',
+    'ppt/notesSlides/notesSlide1.xml': '<p:notes><p:sp><p:nvPr><p:ph type="body"/></p:nvPr><p:txBody><a:p><a:r><a:t>Husk å nevne Xenia Fjeldstad.</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvPr><p:ph type="sldNum"/></p:nvPr><p:txBody><a:p><a:t>1</a:t></a:p></p:txBody></p:sp></p:notes>',
+    'ppt/slides/slide1.xml': '<p:sld show="0"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Skjult lysbilde med tall</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>' }, true)
+  const rp = await les(null, { navn: 'plan.pptx', data: pptx })
+  ok('pptx: rekkefølgen fra presentasjonen, ikke filnavnet, tittel som overskrift', rp.tekst.indexOf('## Lysbilde 1: Plan for Q1') === 0 && rp.tekst.indexOf('## Lysbilde 2') > 0, rp.tekst)
+  ok('pptx: tekst samlet per avsnitt, lysbildenummer ute, talernotat med', rp.tekst.includes('Første punkt & mer\nAndre punkt') && !/\n7\n/.test(rp.tekst) && rp.tekst.includes('Notat: Husk å nevne Xenia Fjeldstad.') && rp.meta.notater === 1, rp.tekst)
+  ok('pptx: skjult lysbilde lest og merket, sider og tittel i meta', rp.tekst.includes('## Lysbilde 2 (skjult)') && rp.tekst.includes('Skjult lysbilde med tall') && rp.meta.sider === 2 && /skjult/.test(rp.meta.merknad) && rp.meta.tittel === 'Plan for Q1', JSON.stringify(rp.meta))
+  const kropp = (t) => Buffer.from(t, 'utf8').toString('base64')
+  const eml = Buffer.from([
+    'From: =?utf-8?Q?Xenia_Fj=C3=A6ldstad?= <xenia@nordlys.no>', 'To: Bo Ek <bo@firma.no>,', ' Kari Nordmann <kari@firma.no>', 'Cc: ola@firma.no', 'Date: Mon, 2 Nov 2026 10:00:00 +0100',
+    'Subject: =?iso-8859-1?Q?M=F8te_om_l=F8nn?=', 'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary="ytre"', '',
+    '--ytre', 'Content-Type: multipart/alternative; boundary=indre', '',
+    '--indre', 'Content-Type: text/plain; charset=iso-8859-1', 'Content-Transfer-Encoding: quoted-printable', '', 'Hei, l=F8nna er avtalt.=', ' Mvh Xenia', '',
+    '--indre', 'Content-Type: text/html; charset=utf-8', '', '<p>HTML-utgaven skal ikke med</p>', '--indre--', '',
+    '--ytre', 'Content-Type: application/pdf; name="kontrakt.pdf"', 'Content-Disposition: attachment; filename="kontrakt.pdf"', 'Content-Transfer-Encoding: base64', '', kropp('%PDF-hemmelig-vedlegg'), '',
+    '--ytre', 'Content-Type: application/octet-stream', "Content-Disposition: attachment; filename*=UTF-8''l%C3%B8nn.xlsx", '', 'xx', '--ytre--', ''].join('\r\n'), 'latin1')
+  const re = await les(null, { navn: 'mote.eml', data: eml })
+  ok('eml: emne og hode dekodet (Q, Latin-1, foldet linje), emnet er tittelen', re.meta.tittel === 'Møte om lønn' && re.tekst.startsWith('# Møte om lønn') && re.tekst.includes('Fra: Xenia Fjældstad <xenia@nordlys.no>') && re.tekst.includes('Til: Bo Ek <bo@firma.no>, Kari Nordmann <kari@firma.no>') && re.tekst.includes('Kopi: ola@firma.no'), re.tekst)
+  ok('eml: ren tekst foran HTML, quoted-printable med myk linjeskift og Latin-1', re.tekst.includes('Hei, lønna er avtalt. Mvh Xenia') && !re.tekst.includes('HTML-utgaven'), re.tekst)
+  ok('eml: vedlegg leses ikke, men står med navn i teksten og som merknad (også RFC 2231-navn)', !re.tekst.includes('hemmelig-vedlegg') && re.tekst.includes('Vedlegg (ikke lest): kontrakt.pdf, lønn.xlsx') && re.meta.vedlegg === 2 && /kontrakt\.pdf/.test(re.meta.merknad), re.meta.merknad)
+  const html = await les(null, { navn: 'b.eml', data: Buffer.from('Subject: Bare HTML\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n' + kropp('<p>Hei <b>på</b> deg</p>')) })
+  ok('eml: bare HTML → tekst, base64', html.tekst.includes('Hei på deg') && !html.tekst.includes('<p>'), html.tekst)
+  const videre = await les(null, { navn: 'v.eml', data: Buffer.from('Subject: Fwd\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nSe under\r\n--b\r\nContent-Type: message/rfc822\r\n\r\nFrom: A B <a@b.no>\r\nSubject: Indre\r\n\r\nIndre tekst\r\n--b--\r\n') })
+  ok('eml: videresendt e-post tas med', videre.tekst.includes('Videresendt e-post:') && videre.tekst.includes('Fra: A B <a@b.no>') && videre.tekst.includes('Indre tekst'), videre.tekst)
+  const kode = async (navn, data) => { try { await les(null, { navn, data }); return null } catch (e) { return e } }
+  const e1 = await kode('tull.xlsx', Buffer.from('dette er ikke en zip'))
+  ok('feil per fil: en ødelagt .xlsx gir LeseFeil, ikke krasj', e1 instanceof LeseFeil && e1.kode === 'format', e1?.message)
+  const e2 = await kode('tom.xlsx', lagZip({ 'xl/workbook.xml': '<workbook><sheets/></workbook>' }))
+  ok('feil per fil: .xlsx uten tekst sier det', e2 instanceof LeseFeil && e2.kode === 'tom', e2?.message)
+  const e3 = await kode('feil.pptx', lagZip({ 'word/document.xml': '<x/>' }))
+  ok('feil per fil: en docx med feil endelse sier hva som mangler', e3 instanceof LeseFeil && /PowerPoint/.test(e3.message), e3?.message)
+  const låst = Buffer.alloc(600); låst.writeUInt32LE(0xe011cfd0, 0); låst.writeUInt32LE(0xe11ab1a1, 4)
+  const e4 = await kode('låst.xlsx', låst)
+  ok('feil per fil: passordlåst Office-fil sier det med vanlige ord', e4?.kode === 'passord' && /passord/.test(e4.message), e4?.message)
+  const e5 = await kode('tull.eml', Buffer.from('bare noe tekst uten hode'))
+  ok('feil per fil: en .eml uten e-posthode sier det', e5?.kode === 'format' && /e-post/.test(e5.message), e5?.message)
+  ok('kanLese: de nye endelsene, og formatAv', kanLese('a.XLSX') && kanLese('b.pptx') && kanLese('c.eml') && formatAv('c.eml') === 'eml')
+  const sak = await lesInn(null, { navn: 'mote.eml', data: eml, prosjekt: 'Testprosjekt' })
+  ok('lesInn(.eml): sak med tittel fra emnet, kilden sier e-post, merknaden følger med ut', sak.name === 'Møte om lønn' && /E-post/.test(sak.source) && /vedlegg/.test(sak.merknad || ''), JSON.stringify([sak.name, sak.source, sak.merknad]))
+  const a = load().find((x) => x.id === sak.id)
+  ok('lesInn(.eml): taggene fil, eml og se-over (filen skal ses over før første sending til en skymodell)', ['fil', 'eml', 'se-over'].every((t) => a.tags.includes(t)), a.tags.join(','))
+  const atoms = load(); for (const id of [sak.id]) { const i = atoms.findIndex((x) => x.id === id); if (i >= 0) atoms.splice(i, 1) } ; save(atoms)
 }
 
 // ── 5) test-skriveren (modell uten å sende noe) ────────────────────────────

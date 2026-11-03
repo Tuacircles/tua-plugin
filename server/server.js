@@ -37,7 +37,8 @@ import {
   importDesktop, importFinder, importShare, importAll, watchDesktop, historyCounts, historyLine,                           // M17: historikk-fangst uten eksport
 } from './import.js'   // M14: «ta med historikken» + Innboks
 import { watchFinder } from './finder.js'
-import { lever, del, skjermerFor, endepunkt, maksNivå, anslåTokens, ord, leverSamtale, MotorFeil } from './motor.js'   // runde 3a: Claude-døra gjennom motoren (lese → klippe → skjerme → logge) · skive 4 (arb. 33): en samtale gjennom motoren
+import { lever, del, skjermerFor, endepunkt, maksNivå, anslåTokens, ord, leverSamtale, MotorFeil, erFilSak } from './motor.js'
+import { erSettNoensteds } from './skjermvalg.js'   // arb. 35 skive 3: en fil som ikke er sett over, får bare S i Claude-døra   // runde 3a: Claude-døra gjennom motoren (lese → klippe → skjerme → logge) · skive 4 (arb. 33): en samtale gjennom motoren
 import { utfordringInfo } from './utfordring.js'   // skive C (arb. 34): «Utfordret av ChatGPT 28.10 · 3 innvendinger · 2 tatt inn» i tua_get og tua_search
 import { finnSamtale, samtaleInfo, samtaleLinje as samtaleLinjeAv } from './samtale.js'   // skive 1+4 (arb. 33): samtaler vises som samtaler («4 vendinger · siste 27.10 · gemma3, Claude · konklusjon låst · fortsett i Tua: …#samtale/<id>»), tua_compose kan ta en samtale
 import { sidenSist, skalVise, trådFørst, trådLinje, instruksFor } from './dora.js'              // runde 3a: Tua → Claude (Siden sist, tråder øverst, instruksen)
@@ -372,15 +373,15 @@ server.registerTool(
     const projects = new Set(hits.map((h) => h.atom.project)).size
     const refMark = (a, max) => (context && a.project.toLowerCase() !== context.toLowerCase() ? ` (referert inn${max !== 'L' ? `, nivå ${max}` : ''})` : '')
     const sLabel = (S) => (S.level === 'S' ? 'S' : S.level === 'L' ? 'S (kort atom — alt)' : S.level === 'hvorfor' ? 'S mangler · hvorfor' : 'S mangler · utdrag')
-    const lines = hits.map(({ atom: a, S, max, snippet: s, tråd }, i) =>
-      `${i + 1}. [${a.id}] ${sk.skjerm(a.name)}\n   ${a.project}${refMark(a, max)} · ${sk.skjerm(a.convo || '—')} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
+    const lines = hits.map(({ atom: a, S, max, snippet: s, tråd }, i) => { const sv = { utvidet: erFilSak(a) }; return (   // arb. 35 skive 3: i en fil gjelder de utvidede reglene
+      `${i + 1}. [${a.id}] ${sk.skjerm(a.name, sv)}\n   ${a.project}${refMark(a, max)} · ${sk.skjerm(a.convo || '—')} · ${a.source} · ${fmtTime(a.capturedAt)} · v${a.version || 1}${a.fanget ? ' · fanget' : ''}` +
       (tråd ? `\n   ${sk.skjerm(trådLinje(tråd))}${tråd.traff.length > 1 ? ` · traff også: ${tråd.traff.filter((id) => id !== a.id).map((id) => `[${id}]`).join(' ')}` : ''}` : '') +
       ((u) => (u ? `\n   ${u.tekst}${u.låst ? ' · låst' : ''}` : ''))(utfordringInfo(atoms, a)) +   // skive C: utfordret av …
       (a.kind === 'samtale' ? `\n   ${samtaleLinje(atoms, a)}` : '') +   // skive 1 (arb. 33): «Samtale i Tua: 4 vendinger, siste 27.10.2026»
-      `\n   ${sLabel(S)}: ${sk.skjerm(S.text)}${staleNote(a, 'S')}` +
-      (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${sk.skjerm(a.summary)}` : '') +
-      (s ? `\n   Treff: ${sk.skjerm(s)}` : '') +
-      `\n   ↗ ${addr(a.id)}`,
+      `\n   ${sLabel(S)}: ${sk.skjerm(S.text, sv)}${staleNote(a, 'S')}` +
+      (a.summary && a.summary !== S.text ? `\n   Hvorfor: ${sk.skjerm(a.summary, sv)}` : '') +
+      (s ? `\n   Treff: ${sk.skjerm(s, sv)}` : '') +
+      `\n   ↗ ${addr(a.id)}`) },
     )
     sk.lær()
     const skjermLinje = sk.treff ? `\n\nSkjermet: ${sk.treff} opplysning${sk.treff === 1 ? '' : 'er'} i treffene (plassholdere som [Person A]) — bruk dem uendret.` : ''
@@ -563,7 +564,7 @@ server.registerTool(
     const m = endepunkt('claude')
     const tillatt = maksNivå(m)
     const eff = clampLevel(level, tillatt)
-    const { content: kildeTekst, derivedFrom, notes } = compose(atoms, { ids, level: eff, name, intro, context })
+    const { content: kildeTekst, derivedFrom, notes } = compose(atoms, { ids, level: eff, name, intro, context, ikkeSett: (a) => (a.tags || []).includes('se-over') && !erSettNoensteds(a.id, a.version || 1) })
     if (eff !== level) notes.unshift(`${m.label} har Trust Score ${Number(m.trust?.score) || 1}/5 — kildene er lest på ${eff}, ikke ${level} (fail closed, V21)`)
     // skive 4 (arb. 33, V22): samtalen som vendinger — gjennom motoren (leverSamtale: standardvalg eller oppgitte vendinger, Vault utenfor hos ekstern, skjermet, byggMeldinger)
     const sk = skjermerFor(atoms)
@@ -582,7 +583,7 @@ server.registerTool(
     const samtaleBlokk = (navn) => (ls ? `## Samtalen «${navn}»\n_${info.kilde === 'Tua' ? 'ført i Tua' : `fra ${info.kilde}`} · ${samtaleAtom.project} · ${ls.vendinger.length} av ${ls.antall} vendinger${ls.valgtStandard ? ' (standardvalget)' : ' (valgt)'}${ls.utenfor.length ? ` · ${ls.utenfor.length} utenfor` : ''}_\n\n${ls.tekst}` : '')
     const navnS = samtaleAtom ? sk.skjerm(samtaleAtom.name) : ''   // tittelen kan bære navn — skjermet i det Claude får, originalen i leveransen
     const content = [kildeTekst, samtaleBlokk(samtaleAtom?.name)].filter(Boolean).join('\n\n')
-    const skjermet = [sk.skjerm(kildeTekst), samtaleBlokk(navnS)].filter(Boolean).join('\n\n')   // vendingene er alt skjermet med samme kobling (leverSamtale)
+    const skjermet = [sk.skjerm(kildeTekst, { utvidet: ids.some((id) => erFilSak(atoms.find((x) => x.id === id))) }), samtaleBlokk(navnS)].filter(Boolean).join('\n\n')   // vendingene er alt skjermet med samme kobling (leverSamtale)
     sk.lær()
     const tokens = { ca: anslåTokens(skjermet, m.id) }
     logDelivery({ tool: 'tua_compose', client: CLIENT, mottaker: m.id, endpoint: m.endpoint, saker: derivedFrom.map(({ id, version, level: l }) => ({ id, version, level: l })), skjermet: { ...sk.antall }, ord: ord(skjermet), tokens, ...(context ? { context } : {}),

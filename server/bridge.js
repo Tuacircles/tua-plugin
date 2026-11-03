@@ -139,6 +139,7 @@ import { watchInbox, watchDesktop, importAlt, IMPORT_STEG, historyCounts, countP
 import { watchFinder } from './finder.js'                   // M17: dokumenter med AI-opphav, ved referanse
 import { PROVIDERS, isProvider, keyStatus, setKey, deleteKey, ollamaStatus } from './keychain.js'   // M15: BYOK — nøkler i Keychain, aldri her
 import { modeller as ollamaModeller, hent as ollamaHent, fjern as ollamaFjern, settStandard as ollamaStandard, lokale as ollamaLokale } from './ollama.js'   // friksjon 12: modellene i Ollama
+import { gjennomsyn, bekreftGjennomsyn, skjermForslag } from './motor.js'   // arb. 35 skive 3: se over det skjermede
 import { spor, mottakere, trustScores, Blokkert, MotorFeil, ord, forskjeller, konklusjon, rettKonklusjon, svarFor, forhåndsvis, standardNivåer, del, trekkDeling, beOmHele, mottakersideFor, standardFor, forhåndsvisUtfordring, utfordre, utfordringerAv, settInnvending, nyVersjon, låsUtfordring } from './motor.js'
 import { utfordringKart, utfordringInfo, samtaleDokumenter, erUtfordring } from './utfordring.js'   // skive C (arb. 34): «Utfordret av …» på sakene, dokumentene en samtale skrev
 import { romKoblinger, finnSamtale, vendingerFor, erTuaSamtale, nySamtaleId, samtaleNøkkel, antallVendinger, sistI, gamleTråder, gjørOmTråd } from './samtale.js'   // skive 1 (arb. 33, V22): samtalen som sak — GET /api/samtale, POST /api/samtale/ny   // M20a/M20b: motoren — eneste vei ut til en modell
@@ -898,8 +899,36 @@ http
           const blokkert = e instanceof Blokkert
           const stoppet = !blokkert && ctl.signal.aborted
           console.error(`[tua-bro] spor → ${mottakerIds.join('+')} ${blokkert ? 'BLOKKERT' : stoppet ? 'STOPPET før svar' : 'FEIL'}: ${e.message}`)
-          hendelse(blokkert ? 'blokkert' : 'feil', { feil: stoppet ? 'Stoppet før noe svar kom — ingenting er lagret som svar.' : e.message, ...(stoppet ? { avbrutt: true } : {}), ...(blokkert ? { detaljer: e.detaljer, ...(e.mottaker ? { mottaker: e.mottaker } : {}) } : {}) })
+          hendelse(blokkert ? 'blokkert' : 'feil', { feil: stoppet ? 'Stoppet før noe svar kom — ingenting er lagret som svar.' : e.message, ...(stoppet ? { avbrutt: true } : {}), ...(blokkert ? { detaljer: e.detaljer, ...(e.mottaker ? { mottaker: e.mottaker } : {}), ...(e.kreves ? { gjennomsyn: { kreves: e.kreves, nøkler: e.nøkler } } : {}) } : {}) })
         } finally { if (kjøring) kjøringer.delete(kjøring) }
+        return res.end()
+      }
+      // ── Arbeidsstykke 35 skive 3 (03.11.2026): se over det skjermede. Ingenting her sender noe ut av maskinen; forslagene lages bare av en lokal modell. ──
+      //   POST /api/skjerming/gjennomsyn {saker: [id], nøkler: [arbeid], valg?} → { filer: [{id, name, version, tekst (skjermet), S, M, sett, forslag}], funn: [{plass, type, original, antall}], antall, valg, nøkler, arkivSynkes, mangler }
+      //        Med `valg` regnes det på utkastet uten å lagre. Originalene står i svaret: dette går bare til appen på denne maskinen.
+      //   POST /api/skjerming/bekreft {saker: [{id, version}], nøkler, valg} → { sett, valg, nøkler }  Først nå regnes filene som sett over i arbeidet, og valgene gjelder videre
+      //   POST /api/skjerming/forslag {sak, nøkler, påNytt?} → SSE: forslag-start {deler, modell} · forslag-del {del, av} · ferdig {tilgjengelig, navn, firma, modell, dekket, feilet} | {tilgjengelig: false, grunn, mangler} · feil
+      if (req.method === 'POST' && url.pathname === '/api/skjerming/gjennomsyn') {
+        const b = await readBody(req)
+        if (!Array.isArray(b.saker) || !b.saker.length) return json(res, 400, { error: 'saker kreves' })
+        try { return json(res, 200, gjennomsyn({ saker: b.saker.map(String), nøkler: Array.isArray(b.nøkler) ? b.nøkler : [], valg: b.valg || null })) }
+        catch (e) { return json(res, e instanceof MotorFeil ? 400 : 500, { error: e.message }) }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/skjerming/bekreft') {
+        const b = await readBody(req)
+        if (!Array.isArray(b.saker) || !b.saker.length) return json(res, 400, { error: 'saker kreves' })
+        try { const r = bekreftGjennomsyn({ saker: b.saker, nøkler: Array.isArray(b.nøkler) ? b.nøkler : [], valg: b.valg || {} }); console.error(`[tua-bro] skjerming sett over: ${r.sett.length} filer · ${r.valg.legg.length} lagt til · ${r.valg.fjern.length} fjernet`); return json(res, 200, r) }
+        catch (e) { return json(res, e instanceof MotorFeil ? 400 : 500, { error: e.message }) }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/skjerming/forslag') {
+        const b = await readBody(req)
+        if (!b.sak) return json(res, 400, { error: 'sak kreves' })
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors })
+        res.flushHeaders?.()
+        const hendelse = (ev, d) => { if (!res.writableEnded) res.write(`event: ${ev}\ndata: ${JSON.stringify(d)}\n\n`) }
+        const ctl = new AbortController(); req.on('close', () => { if (!res.writableFinished) ctl.abort() })
+        try { hendelse('ferdig', await skjermForslag({ sak: String(b.sak), nøkler: Array.isArray(b.nøkler) ? b.nøkler.map(String) : [], påNytt: !!b.påNytt, signal: ctl.signal, på: hendelse })) }
+        catch (e) { hendelse('feil', { feil: e.message }) }
         return res.end()
       }
       if (req.method === 'POST' && url.pathname === '/api/spor/stopp') {   // friksjon 8: «Stopp» — avbryter kallet mot mottakeren; det som kom, lagres som avbrutt svar (motoren)
@@ -976,7 +1005,7 @@ http
         } catch (e) {
           const blokkert = e instanceof Blokkert
           console.error(`[tua-bro] utfordre ${blokkert ? 'BLOKKERT' : 'FEIL'}: ${e.message}`)
-          hendelse(blokkert ? 'blokkert' : 'feil', { feil: e.message, ...(blokkert ? { detaljer: e.detaljer } : {}) })
+          hendelse(blokkert ? 'blokkert' : 'feil', { feil: e.message, ...(blokkert ? { detaljer: e.detaljer, ...(e.kreves ? { gjennomsyn: { kreves: e.kreves, nøkler: e.nøkler } } : {}) } : {}) })
         }
         return res.end()
       }
