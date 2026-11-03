@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.12: kortets klientbibliotek (@modelcontextprotocol/ext-apps 1.7.5 med sdk og zod) i 3 tekstdeler;
+// Tua-plugin 0.5.13: kortets klientbibliotek (@modelcontextprotocol/ext-apps 1.7.5 med sdk og zod) i 3 tekstdeler;
 // apps.js setter dem sammen i rekkefølge før de inlines i kort.html. Bygd av bygg.mjs, ikke minifisert. IKKE REDIGER.
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -16,7 +16,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// node_modules/zod/v4/core/core.js
+// ../../../../tua-plugin/node_modules/zod/v4/core/core.js
 // @__NO_SIDE_EFFECTS__
 function $constructor(name, initializer3, params) {
   function init(inst, def) {
@@ -67,7 +67,7 @@ function config(newConfig) {
 }
 var NEVER, $brand, $ZodAsyncError, globalConfig;
 var init_core = __esm({
-  "node_modules/zod/v4/core/core.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/core/core.js"() {
     NEVER = Object.freeze({
       status: "aborted"
     });
@@ -81,7 +81,7 @@ var init_core = __esm({
   }
 });
 
-// node_modules/zod/v4/core/util.js
+// ../../../../tua-plugin/node_modules/zod/v4/core/util.js
 var util_exports = {};
 __export(util_exports, {
   BIGINT_FORMAT_RANGES: () => BIGINT_FORMAT_RANGES,
@@ -528,7 +528,7 @@ function cleanEnum(obj) {
 }
 var captureStackTrace, allowsEval, getParsedType, propertyKeyTypes, primitiveTypes, NUMBER_FORMAT_RANGES, BIGINT_FORMAT_RANGES, Class;
 var init_util = __esm({
-  "node_modules/zod/v4/core/util.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/core/util.js"() {
     captureStackTrace = Error.captureStackTrace ? Error.captureStackTrace : (..._args) => {
     };
     allowsEval = cached(() => {
@@ -607,7 +607,7 @@ var init_util = __esm({
   }
 });
 
-// node_modules/zod/v4/core/errors.js
+// ../../../../tua-plugin/node_modules/zod/v4/core/errors.js
 function flattenError(error40, mapper = (issue2) => issue2.message) {
   const fieldErrors = {};
   const formErrors = [];
@@ -731,7 +731,7 @@ function prettifyError(error40) {
 }
 var initializer, $ZodError, $ZodRealError;
 var init_errors = __esm({
-  "node_modules/zod/v4/core/errors.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/core/errors.js"() {
     init_core();
     init_util();
     initializer = (inst, def) => {
@@ -761,10 +761,10 @@ var init_errors = __esm({
   }
 });
 
-// node_modules/zod/v4/core/parse.js
+// ../../../../tua-plugin/node_modules/zod/v4/core/parse.js
 var _parse, parse, _parseAsync, parseAsync, _safeParse, safeParse, _safeParseAsync, safeParseAsync;
 var init_parse = __esm({
-  "node_modules/zod/v4/core/parse.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/core/parse.js"() {
     init_core();
     init_errors();
     init_util();
@@ -821,7 +821,7 @@ var init_parse = __esm({
   }
 });
 
-// node_modules/zod/v4/core/regexes.js
+// ../../../../tua-plugin/node_modules/zod/v4/core/regexes.js
 var regexes_exports = {};
 __export(regexes_exports, {
   _emoji: () => _emoji,
@@ -889,7 +889,7 @@ function datetime(args) {
 }
 var cuid, cuid2, ulid, xid, ksuid, nanoid, duration, extendedDuration, guid, uuid, uuid4, uuid6, uuid7, email, html5Email, rfc5322Email, unicodeEmail, browserEmail, _emoji, ipv4, ipv6, cidrv4, cidrv6, base64, base64url, hostname, domain, e164, dateSource, date, string, bigint, integer, number, boolean, _null, _undefined, lowercase, uppercase;
 var init_regexes = __esm({
-  "node_modules/zod/v4/core/regexes.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/core/regexes.js"() {
     cuid = /^[cC][^\s-]{8,}$/;
     cuid2 = /^[0-9a-z]+$/;
     ulid = /^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$/;
@@ -939,7 +939,7 @@ var init_regexes = __esm({
   }
 });
 
-// node_modules/zod/v4/core/checks.js
+// ../../../../tua-plugin/node_modules/zod/v4/core/checks.js
 function handleCheckPropertyResult(result, payload, property) {
   if (result.issues.length) {
     payload.issues.push(...prefixIssues(property, result.issues));
@@ -947,7 +947,7 @@ function handleCheckPropertyResult(result, payload, property) {
 }
 var $ZodCheck, numericOriginMap, $ZodCheckLessThan, $ZodCheckGreaterThan, $ZodCheckMultipleOf, $ZodCheckNumberFormat, $ZodCheckBigIntFormat, $ZodCheckMaxSize, $ZodCheckMinSize, $ZodCheckSizeEquals, $ZodCheckMaxLength, $ZodCheckMinLength, $ZodCheckLengthEquals, $ZodCheckStringFormat, $ZodCheckRegex, $ZodCheckLowerCase, $ZodCheckUpperCase, $ZodCheckIncludes, $ZodCheckStartsWith, $ZodCheckEndsWith, $ZodCheckProperty, $ZodCheckMimeType, $ZodCheckOverwrite;
 var init_checks = __esm({
-  "node_modules/zod/v4/core/checks.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/core/checks.js"() {
     init_core();
     init_regexes();
     init_util();
@@ -1485,10 +1485,10 @@ var init_checks = __esm({
   }
 });
 
-// node_modules/zod/v4/core/doc.js
+// ../../../../tua-plugin/node_modules/zod/v4/core/doc.js
 var Doc;
 var init_doc = __esm({
-  "node_modules/zod/v4/core/doc.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/core/doc.js"() {
     Doc = class {
       constructor(args = []) {
         this.content = [];
@@ -1526,10 +1526,10 @@ var init_doc = __esm({
   }
 });
 
-// node_modules/zod/v4/core/versions.js
+// ../../../../tua-plugin/node_modules/zod/v4/core/versions.js
 var version;
 var init_versions = __esm({
-  "node_modules/zod/v4/core/versions.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/core/versions.js"() {
     version = {
       major: 4,
       minor: 0,
@@ -1538,7 +1538,7 @@ var init_versions = __esm({
   }
 });
 
-// node_modules/zod/v4/core/schemas.js
+// ../../../../tua-plugin/node_modules/zod/v4/core/schemas.js
 function isValidBase64(data) {
   if (data === "")
     return true;
@@ -1771,7 +1771,7 @@ function handleRefineResult(result, payload, input, inst) {
 }
 var $ZodType, $ZodString, $ZodStringFormat, $ZodGUID, $ZodUUID, $ZodEmail, $ZodURL, $ZodEmoji, $ZodNanoID, $ZodCUID, $ZodCUID2, $ZodULID, $ZodXID, $ZodKSUID, $ZodISODateTime, $ZodISODate, $ZodISOTime, $ZodISODuration, $ZodIPv4, $ZodIPv6, $ZodCIDRv4, $ZodCIDRv6, $ZodBase64, $ZodBase64URL, $ZodE164, $ZodJWT, $ZodCustomStringFormat, $ZodNumber, $ZodNumberFormat, $ZodBoolean, $ZodBigInt, $ZodBigIntFormat, $ZodSymbol, $ZodUndefined, $ZodNull, $ZodAny, $ZodUnknown, $ZodNever, $ZodVoid, $ZodDate, $ZodArray, $ZodObject, $ZodUnion, $ZodDiscriminatedUnion, $ZodIntersection, $ZodTuple, $ZodRecord, $ZodMap, $ZodSet, $ZodEnum, $ZodLiteral, $ZodFile, $ZodTransform, $ZodOptional, $ZodNullable, $ZodDefault, $ZodPrefault, $ZodNonOptional, $ZodSuccess, $ZodCatch, $ZodNaN, $ZodPipe, $ZodReadonly, $ZodTemplateLiteral, $ZodPromise, $ZodLazy, $ZodCustom;
 var init_schemas = __esm({
-  "node_modules/zod/v4/core/schemas.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/core/schemas.js"() {
     init_checks();
     init_core();
     init_doc();
@@ -3178,7 +3178,7 @@ var init_schemas = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/ar.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/ar.js
 function ar_default() {
   return {
     localeError: error()
@@ -3186,7 +3186,7 @@ function ar_default() {
 }
 var error;
 var init_ar = __esm({
-  "node_modules/zod/v4/locales/ar.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/ar.js"() {
     init_util();
     error = () => {
       const Sizable = {
@@ -3301,7 +3301,7 @@ var init_ar = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/az.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/az.js
 function az_default() {
   return {
     localeError: error2()
@@ -3309,7 +3309,7 @@ function az_default() {
 }
 var error2;
 var init_az = __esm({
-  "node_modules/zod/v4/locales/az.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/az.js"() {
     init_util();
     error2 = () => {
       const Sizable = {
@@ -3423,7 +3423,7 @@ var init_az = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/be.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/be.js
 function getBelarusianPlural(count, one, few, many) {
   const absCount = Math.abs(count);
   const lastDigit = absCount % 10;
@@ -3446,7 +3446,7 @@ function be_default() {
 }
 var error3;
 var init_be = __esm({
-  "node_modules/zod/v4/locales/be.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/be.js"() {
     init_util();
     error3 = () => {
       const Sizable = {
@@ -3594,7 +3594,7 @@ var init_be = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/ca.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/ca.js
 function ca_default() {
   return {
     localeError: error4()
@@ -3602,7 +3602,7 @@ function ca_default() {
 }
 var error4;
 var init_ca = __esm({
-  "node_modules/zod/v4/locales/ca.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/ca.js"() {
     init_util();
     error4 = () => {
       const Sizable = {
@@ -3718,7 +3718,7 @@ var init_ca = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/cs.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/cs.js
 function cs_default() {
   return {
     localeError: error5()
@@ -3726,7 +3726,7 @@ function cs_default() {
 }
 var error5;
 var init_cs = __esm({
-  "node_modules/zod/v4/locales/cs.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/cs.js"() {
     init_util();
     error5 = () => {
       const Sizable = {
@@ -3860,7 +3860,7 @@ var init_cs = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/de.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/de.js
 function de_default() {
   return {
     localeError: error6()
@@ -3868,7 +3868,7 @@ function de_default() {
 }
 var error6;
 var init_de = __esm({
-  "node_modules/zod/v4/locales/de.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/de.js"() {
     init_util();
     error6 = () => {
       const Sizable = {
@@ -3983,7 +3983,7 @@ var init_de = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/en.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/en.js
 function en_default() {
   return {
     localeError: error7()
@@ -3991,7 +3991,7 @@ function en_default() {
 }
 var parsedType, error7;
 var init_en = __esm({
-  "node_modules/zod/v4/locales/en.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/en.js"() {
     init_util();
     parsedType = (data) => {
       const t2 = typeof data;
@@ -4107,7 +4107,7 @@ var init_en = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/eo.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/eo.js
 function eo_default() {
   return {
     localeError: error8()
@@ -4115,7 +4115,7 @@ function eo_default() {
 }
 var parsedType2, error8;
 var init_eo = __esm({
-  "node_modules/zod/v4/locales/eo.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/eo.js"() {
     init_util();
     parsedType2 = (data) => {
       const t2 = typeof data;
@@ -4230,7 +4230,7 @@ var init_eo = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/es.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/es.js
 function es_default() {
   return {
     localeError: error9()
@@ -4238,7 +4238,7 @@ function es_default() {
 }
 var error9;
 var init_es = __esm({
-  "node_modules/zod/v4/locales/es.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/es.js"() {
     init_util();
     error9 = () => {
       const Sizable = {
@@ -4353,7 +4353,7 @@ var init_es = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/fa.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/fa.js
 function fa_default() {
   return {
     localeError: error10()
@@ -4361,7 +4361,7 @@ function fa_default() {
 }
 var error10;
 var init_fa = __esm({
-  "node_modules/zod/v4/locales/fa.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/fa.js"() {
     init_util();
     error10 = () => {
       const Sizable = {
@@ -4482,7 +4482,7 @@ var init_fa = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/fi.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/fi.js
 function fi_default() {
   return {
     localeError: error11()
@@ -4490,7 +4490,7 @@ function fi_default() {
 }
 var error11;
 var init_fi = __esm({
-  "node_modules/zod/v4/locales/fi.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/fi.js"() {
     init_util();
     error11 = () => {
       const Sizable = {
@@ -4611,7 +4611,7 @@ var init_fi = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/fr.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/fr.js
 function fr_default() {
   return {
     localeError: error12()
@@ -4619,7 +4619,7 @@ function fr_default() {
 }
 var error12;
 var init_fr = __esm({
-  "node_modules/zod/v4/locales/fr.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/fr.js"() {
     init_util();
     error12 = () => {
       const Sizable = {
@@ -4734,7 +4734,7 @@ var init_fr = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/fr-CA.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/fr-CA.js
 function fr_CA_default() {
   return {
     localeError: error13()
@@ -4742,7 +4742,7 @@ function fr_CA_default() {
 }
 var error13;
 var init_fr_CA = __esm({
-  "node_modules/zod/v4/locales/fr-CA.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/fr-CA.js"() {
     init_util();
     error13 = () => {
       const Sizable = {
@@ -4858,7 +4858,7 @@ var init_fr_CA = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/he.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/he.js
 function he_default() {
   return {
     localeError: error14()
@@ -4866,7 +4866,7 @@ function he_default() {
 }
 var error14;
 var init_he = __esm({
-  "node_modules/zod/v4/locales/he.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/he.js"() {
     init_util();
     error14 = () => {
       const Sizable = {
@@ -4981,7 +4981,7 @@ var init_he = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/hu.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/hu.js
 function hu_default() {
   return {
     localeError: error15()
@@ -4989,7 +4989,7 @@ function hu_default() {
 }
 var error15;
 var init_hu = __esm({
-  "node_modules/zod/v4/locales/hu.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/hu.js"() {
     init_util();
     error15 = () => {
       const Sizable = {
@@ -5104,7 +5104,7 @@ var init_hu = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/id.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/id.js
 function id_default() {
   return {
     localeError: error16()
@@ -5112,7 +5112,7 @@ function id_default() {
 }
 var error16;
 var init_id = __esm({
-  "node_modules/zod/v4/locales/id.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/id.js"() {
     init_util();
     error16 = () => {
       const Sizable = {
@@ -5227,7 +5227,7 @@ var init_id = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/it.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/it.js
 function it_default() {
   return {
     localeError: error17()
@@ -5235,7 +5235,7 @@ function it_default() {
 }
 var error17;
 var init_it = __esm({
-  "node_modules/zod/v4/locales/it.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/it.js"() {
     init_util();
     error17 = () => {
       const Sizable = {
@@ -5350,7 +5350,7 @@ var init_it = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/ja.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/ja.js
 function ja_default() {
   return {
     localeError: error18()
@@ -5358,7 +5358,7 @@ function ja_default() {
 }
 var error18;
 var init_ja = __esm({
-  "node_modules/zod/v4/locales/ja.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/ja.js"() {
     init_util();
     error18 = () => {
       const Sizable = {
@@ -5472,7 +5472,7 @@ var init_ja = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/kh.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/kh.js
 function kh_default() {
   return {
     localeError: error19()
@@ -5480,7 +5480,7 @@ function kh_default() {
 }
 var error19;
 var init_kh = __esm({
-  "node_modules/zod/v4/locales/kh.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/kh.js"() {
     init_util();
     error19 = () => {
       const Sizable = {
@@ -5596,7 +5596,7 @@ var init_kh = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/ko.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/ko.js
 function ko_default() {
   return {
     localeError: error20()
@@ -5604,7 +5604,7 @@ function ko_default() {
 }
 var error20;
 var init_ko = __esm({
-  "node_modules/zod/v4/locales/ko.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/ko.js"() {
     init_util();
     error20 = () => {
       const Sizable = {
@@ -5724,7 +5724,7 @@ var init_ko = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/mk.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/mk.js
 function mk_default() {
   return {
     localeError: error21()
@@ -5732,7 +5732,7 @@ function mk_default() {
 }
 var error21;
 var init_mk = __esm({
-  "node_modules/zod/v4/locales/mk.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/mk.js"() {
     init_util();
     error21 = () => {
       const Sizable = {
@@ -5848,7 +5848,7 @@ var init_mk = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/ms.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/ms.js
 function ms_default() {
   return {
     localeError: error22()
@@ -5856,7 +5856,7 @@ function ms_default() {
 }
 var error22;
 var init_ms = __esm({
-  "node_modules/zod/v4/locales/ms.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/ms.js"() {
     init_util();
     error22 = () => {
       const Sizable = {
@@ -5971,7 +5971,7 @@ var init_ms = __esm({
   }
 });
 
-// node_modules/zod/v4/locales/nl.js
+// ../../../../tua-plugin/node_modules/zod/v4/locales/nl.js
 function nl_default() {
   return {
     localeError: error23()
@@ -5979,7 +5979,7 @@ function nl_default() {
 }
 var error23;
 var init_nl = __esm({
-  "node_modules/zod/v4/locales/nl.js"() {
+  "../../../../tua-plugin/node_modules/zod/v4/locales/nl.js"() {
     init_util();
     error23 = () => {
       const Sizable = {
@@ -6043,29 +6043,3 @@ var init_nl = __esm({
       };
       return (issue2) => {
         switch (issue2.code) {
-          case "invalid_type":
-            return `Ongeldige invoer: verwacht ${issue2.expected}, ontving ${parsedType4(issue2.input)}`;
-          case "invalid_value":
-            if (issue2.values.length === 1)
-              return `Ongeldige invoer: verwacht ${stringifyPrimitive(issue2.values[0])}`;
-            return `Ongeldige optie: verwacht \xE9\xE9n van ${joinValues(issue2.values, "|")}`;
-          case "too_big": {
-            const adj = issue2.inclusive ? "<=" : "<";
-            const sizing = getSizing(issue2.origin);
-            if (sizing)
-              return `Te lang: verwacht dat ${issue2.origin ?? "waarde"} ${adj}${issue2.maximum.toString()} ${sizing.unit ?? "elementen"} bevat`;
-            return `Te lang: verwacht dat ${issue2.origin ?? "waarde"} ${adj}${issue2.maximum.toString()} is`;
-          }
-          case "too_small": {
-            const adj = issue2.inclusive ? ">=" : ">";
-            const sizing = getSizing(issue2.origin);
-            if (sizing) {
-              return `Te kort: verwacht dat ${issue2.origin} ${adj}${issue2.minimum.toString()} ${sizing.unit} bevat`;
-            }
-            return `Te kort: verwacht dat ${issue2.origin} ${adj}${issue2.minimum.toString()} is`;
-          }
-          case "invalid_format": {
-            const _issue = issue2;
-            if (_issue.format === "starts_with") {
-              return `Ongeldige tekst: moet met "${_issue.prefix}" beginnen`;
-            }
