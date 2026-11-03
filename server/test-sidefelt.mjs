@@ -32,6 +32,43 @@ let feil = 0
 const ok = (navn, cond, info = '') => { console.log(`${cond ? '✓' : '✗'} ${navn}${info ? ` — ${String(info).replace(/\s+/g, ' ').slice(0, 200)}` : ''}`); if (!cond) feil++ }
 const vent = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// ── 0) arbeidsstykke 35 skive 2: det ryddede sidefeltet, byttet Avis | Arbeid og «Nytt arbeid» ────────────────
+{
+  const rd = (id, sist = 1) => ({ id, navn: id, sist })
+  const tre = [
+    { navn: 'A', sist: 9, antall: 5, flere: 0, samtaler: [rd('a1', 9), rd('a2', 8)], arbeider: [{ id: 'w1', navn: 'Leie', sist: 7, antall: 2, flere: 0, samtaler: [rd('w1s1', 7), { ...rd('w1s2', 6), kjøringer: [{ id: 'k1' }, { id: 'k2' }] }] }, { id: 'w2', navn: 'Annet', sist: 5, antall: 1, flere: 0, samtaler: [rd('w2s1', 5)] }] },
+    { navn: 'B', sist: 4, antall: 1, flere: 0, samtaler: [rd('b1', 4)], arbeider: [] },
+    { navn: 'C', sist: 3, antall: 1, flere: 0, samtaler: [rd('c1', 3)], arbeider: [] },
+  ]
+  const f = regler.sidefeltFlate(tre, [rd('a1'), rd('b1'), rd('w2s1')], { prosjektNå: 'A', aktivId: 'a1' })
+  ok('sidefeltFlate: prosjektet du står i først, de andre foldet for seg', f.her.navn === 'A' && f.andre.map((p) => p.navn).join() === 'B,C')
+  ok('sidefeltFlate: et arbeid er lukket til du er inne i det', f.her.arbeider.every((w) => w.åpen === false))
+  ok('sidefeltFlate: Sist brukt gjentar ikke det som alt vises over; det i et lukket arbeid står igjen', f.sist.map((s) => s.id).join() === 'b1,w2s1')
+  ok('sidefeltFlate: arbeidet åpnes av adressen, av en samtale i det og av en kjøring i det', regler.sidefeltFlate(tre, [], { prosjektNå: 'A', aktivArbeid: 'w1' }).her.arbeider[0].åpen === true && regler.sidefeltFlate(tre, [], { prosjektNå: 'A', aktivId: 'w1s1' }).her.arbeider[0].åpen === true && regler.sidefeltFlate(tre, [], { prosjektNå: 'A', aktivId: 'k2' }).her.arbeider[0].åpen === true && regler.sidefeltFlate(tre, [], { prosjektNå: 'A', aktivId: 'k2' }).her.arbeider[1].åpen === false)
+  ok('sidefeltFlate: samtalene i et åpent arbeid gjentas ikke i Sist brukt', regler.sidefeltFlate(tre, [rd('w1s1')], { prosjektNå: 'A', aktivArbeid: 'w1' }).sist.length === 0)
+  ok('sidefeltFlate: uten prosjekt er alle prosjektene foldet og Sist brukt står urørt', (() => { const u = regler.sidefeltFlate(tre, [rd('a1')], {}); return u.her === null && u.andre.length === 3 && u.sist.length === 1 })())
+  ok('sidefeltFlate: tomt gir tomt', (() => { const u = regler.sidefeltFlate(null, null); return u.her === null && !u.sist.length && !u.andre.length })())
+  ok('arbeidMål: dit du var i Arbeid (samtale eller dokument) går først', regler.arbeidMål({ adresse: '/#les/x1', sist: ['a1'], tre }) === '/#les/x1' && regler.arbeidMål({ adresse: '/#samtale/t_ny', tre }) === '/#samtale/t_ny')
+  ok('arbeidMål: en adresse i avisen teller ikke', regler.arbeidMål({ adresse: '/', sist: ['b1'], tre }) === regler.samtaleAdresse('b1'))
+  ok('arbeidMål: siste brukte som finnes, også inne i et arbeid; en borte id hoppes over', regler.arbeidMål({ sist: ['borte', 'w1s1'], tre }) === regler.samtaleAdresse('w1s1'))
+  ok('arbeidMål: ingen sist brukt → den nyeste samtalen; tomt arkiv → null (da startes noe nytt)', regler.arbeidMål({ tre }) === regler.samtaleAdresse('a1') && regler.arbeidMål({ tre: [] }) === null && regler.arbeidMål() === null)
+
+  const src = (f) => fs.readFileSync(path.join(HERE, '..', '..', 'tua2-sandbox', 'src', f), 'utf8')
+  const kode = (f) => src(f).split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')
+  const topp = kode('components/Topplinje.jsx'), forside = kode('pages/Forside.jsx'), arbeid = kode('pages/Arbeid.jsx'), felt = kode('pages/Sidefelt.jsx'), start = kode('arbeid-start.js')
+  ok('Topplinje: byttet Avis | Arbeid med aria-current, + Nytt arbeid og Innstillinger, én komponent', topp.includes("fane('avis', 'Avis'") && topp.includes("fane('arbeid', 'Arbeid'") && topp.includes("aria-current={aktiv === hvem ? 'page'") && topp.includes('+ Nytt arbeid') && topp.includes('/innstillinger'))
+  ok('Avis og Arbeid bruker samme topplinje, med hver sin aktive tilstand', forside.includes('<Topplinje aktiv="avis"') && arbeid.includes('<Topplinje aktiv="arbeid"'))
+  ok('Avisen har ikke egen lenke til Innstillinger eller eget ordmerke ved siden av topplinja', !forside.includes('fs-innst') && !forside.includes('fs-merke'))
+  ok('«Nytt arbeid» fører foreløpig til en ny samtale, uten å spørre om prosjekt', /nyttArbeid = \(prosjekt = ''\) => nySamtale\(\{ prosjekt: prosjekt \|\| UTEN_PROSJEKT \}\)/.test(start) && forside.includes('nyttArbeid(prosjekt)') && arbeid.includes('nyttArbeid(prosjektNå)'))
+  ok('«Arbeid» sender ingenting: bare /api/sidefelt leses før det navigeres', /export async function tilArbeidSist[\s\S]*?\n\}/.exec(start)?.[0].match(/api\(/g)?.length === 1 && /api\('\/api\/sidefelt'\)/.test(start))
+  ok('Tilbake bor i topplinja: ingen «‹ Avis» eller «‹ Finn» som egen knapp i rommet eller sidefeltet', !['pages/Samtale.jsx', 'pages/Sak.jsx', 'pages/Arbeid.jsx', 'pages/Sidefelt.jsx'].some((f) => /‹ (Avis|Finn)/.test(kode(f))))
+  ok('Brukerordet er Avis: «Finn» står ikke i teksten om å gå tilbake', !/(til|i) Finn\b/.test(arbeid))
+  ok('Sidefeltet: ingen «+ Ny samtale» nederst, en samtale kan fortsatt legges i et åpent arbeid', !felt.includes('+ Ny samtale') && !felt.includes('sb-bunn') && felt.includes('onNyIArbeid') && felt.includes('+ samtale') && arbeid.includes('onNyIArbeid'))
+  ok('Sidefeltet: reglene kommer fra sidefeltFlate, prosjektene foldes med aria-expanded', felt.includes('sidefeltFlate(tre, sist') && felt.includes('aria-expanded={åpen}'))
+  ok('Brukerordet er samtale: «økt» står ikke i topplinja eller sidefeltet', !/\bøkt/i.test(topp) && !/\bøkt/i.test(felt))
+  ok('☰ bor i topplinja også i bredder der sidefeltet er skuff (600–899), ikke bare under 600', arbeid.includes('venstre={<button type="button" className="ab-skuff-knapp"') && !/\{smal && <button[^\n]*ab-skuff-knapp/.test(arbeid))
+}
+
 // ── 1) mottakere(): usikker til Ollama har svart eller ventetida er gått ──────────────────────────────────────────
 {
   process.env.TUA_OLLAMA_VENT = '600000'   // ti minutter: prosessen er ung → usikker

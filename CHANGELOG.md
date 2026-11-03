@@ -2,6 +2,13 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## App only — 2026-11-03 (easier navigation — work piece 35, slice 2; no plugin release)
+
+- **One top line in the newspaper and in work.** Tua, one switch between Avis and Arbeid with the active one marked, "+ Nytt arbeid" and settings, in the same place in both. "Arbeid" goes to where you were, else the last used conversation, else the newest. "+ Nytt arbeid" starts a new conversation for now, in the project you stand in or without a project, without asking.
+- **A tidier sidebar.** The project you stand in first, then recently used without repeats, then the other projects as one folded row each. A work item is one line until you are in it. The back button and the "+ Ny samtale" button at the bottom are gone; "+ samtale" sits on the open work item. The ☰ button now also shows between 600 and 899 px.
+- Button count on the same conversation: 81 → 38 (1280 and 390). The newspaper goes up by two (84 → 86).
+- Tests: `test-sidefelt.mjs` has 22 new checks (`sidefeltFlate`, `arbeidMål`, the top line). Bridge and MCP tools unchanged.
+
 ## 0.5.13 — 2026-11-03 (the work room — work piece 35, slice 1)
 
 - **One click opens the case.** A click on an atom anywhere in the app's Find view goes straight into one work room; the fold-out in the newspaper is gone. A conversation opens on what it ended with, with the whole conversation folded below, its documents and sources in a column on the right (a tab under 1100 px), and «Vil du teste dette?» with model buttons. A press opens Utfordre with the model chosen and the send line visible; nothing is sent until the send button is pressed. A document opens the same room with the conversation it came from beside it. Levels, versions, sharing, tidy-up and «Om saken» are behind one menu. Esc and «‹ Avis» return to the same search, filters and scroll position.
