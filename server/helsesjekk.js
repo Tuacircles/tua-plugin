@@ -179,7 +179,11 @@ function r5(atoms) {
   return bad.length ? [R, `${bad.length} nye atomer siste døgn er Tua-prat: ${bad.slice(0, 3).map((a) => `«${clip(a.name, 40)}» (${a.project})`).join(', ')}`] : [G, 'regelen grønn, ingen Tua-prat lagret siste døgn']
 }
 function r6() {
-  const r = run('test-tools.mjs', {}, 180000)
+  // 10.11.2026: R6 var rød 1.11, 7.11 og 9.11 uten at noe var galt — Macen sovnet midt i kjøringen (pmset: «Maintenance Sleep» sekunder etter
+  // DarkWake, på batteri), og MCP-kallet i test-tools løp ut på tid da den våknet (kjøringer på 600–7200 s mot normalt 5–15 s). To vern:
+  // launchd starter nå jobben under `caffeinate -i` (se installLaunchd), og en test som tok mye lenger enn fristen sin (= klokka hoppet) kjøres én gang til.
+  let t0 = Date.now(), r = run('test-tools.mjs', {}, 180000)
+  if (r.status !== 0 && Date.now() - t0 > 240000) { t0 = Date.now(); r = run('test-tools.mjs', {}, 180000) }
   if (r.status !== 0) return [R, `test-tools.mjs feilet: ${clip((r.stdout || '').split('\n').filter((l) => /✘|Error/.test(l)).join(' ') || r.stderr, 140)}`]
   return /ressurs ui:\/\/tua\/kort finnes/.test(r.stdout) ? [G, 'alle verktøy kjørte, ressursen ui://tua/kort finnes'] : [R, 'test-tools.mjs grønn, men ressursen ui://tua/kort ble ikke bekreftet']
 }
@@ -350,7 +354,7 @@ function installLaunchd() {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>${LABEL}</string>
-  <key>ProgramArguments</key><array><string>${process.execPath}</string><string>${path.join(HERE, 'helsesjekk.js')}</string></array>
+  <key>ProgramArguments</key><array><string>/usr/bin/caffeinate</string><string>-i</string><string>${process.execPath}</string><string>${path.join(HERE, 'helsesjekk.js')}</string></array>
   <key>WorkingDirectory</key><string>${PLUGIN}</string>
   <key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>
   <key>RunAtLoad</key><false/>

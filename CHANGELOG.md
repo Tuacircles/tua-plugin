@@ -4,6 +4,7 @@ All notable changes to the Tua plugin. Versions follow `version` in `.claude-plu
 
 ## 0.5.14 — 2026-11-04 (start work with files, screened — work piece 35, slice 3)
 
+- **Health check no longer goes red when the Mac falls asleep mid-run** (R6 on 1, 7 and 9 Nov: the machine entered maintenance sleep seconds after waking the job, and the MCP call in `test-tools` timed out on wake). The launchd job now starts under `caffeinate -i`, and a test that took far longer than its own timeout is run once more. Reinstall with `node server/helsesjekk.js --install-launchd`.
 - **Drop many files.** Several files or a folder on "+ Nytt arbeid"; a project is suggested and nothing has to be chosen first. A file that fails does not stop the rest, and the error stands on its own row.
 - **New local readers.** `.xlsx`, `.pptx` and `.eml`, with no new packages. Hidden sheets and slides are read and marked, speaker notes are included, e-mail attachments are named but not read.
 - **Review before the first send to a cloud model.** The file with placeholders and a list per type; add and remove; choices apply for the rest of the work. The engine stops the send until it is confirmed (`GjennomsynKreves`), also in Utfordre. Not required for a local model. Vault rules are unchanged.
