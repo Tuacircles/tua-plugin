@@ -1,6 +1,6 @@
 # Privacy Policy — Tua plugin for Claude
 
-*Tua Circles Holding AS · Oslo, Norway · Last updated 19 October 2026 · Contact: tech@tuacircles.com*
+*Tuacircles Holding AS · org. no. 924 496 770 · Hemsedal, Norway · Last updated 11 November 2026 · Contact: tech@tuacircles.com*
 
 This policy covers the **Tua plugin** (MCP server, skills and hooks) distributed through Anthropic's directory and from <https://github.com/tuacircles/tua-plugin>. The Tua apps and website have their own policy at <https://tuacircles.com/privacy-policy>.
 

@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.14 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.15 — bygd av bygg.mjs 2026-11-11. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,7 +103,7 @@ const FORNAVN = new Set((
 ).split(/\s+/).filter(Boolean));
 
 // Stoppliste: ord som gjør at en kandidat IKKE er en person (firma, produkt, Tuas egne ord). Sjekkes mot hvert ord i kandidaten.
-const STOPP = new Set(('Tua Circles Claude Code Desktop Cowork Vault Trust Score Drive Google Apple Dropbox OneDrive Copilot ChatGPT ' +
+const STOPP = new Set(('Tua Circles Tuacircles Claude Code Desktop Cowork Vault Trust Score Drive Google Apple Dropbox OneDrive Copilot ChatGPT ' +
   'Gemini Mistral Ollama Anthropic OpenAI Microsoft Keychain Holding AS ASA Business Innboks Finder Spotlight Kartet Forsiden Spør ' +
   'Innstillinger Design Classical Vite React Node Mac iPhone iPad Windows Linux BankID Altinn Entra Okta Skigaarden Skado').split(/\s+/));
 
@@ -114,7 +114,7 @@ const ETTERNAVN = '[A-ZÆØÅ][a-zæøåé]+(?:-[A-ZÆØÅ][a-zæøåé]+)?';
 //   firma         «Nordlys Konsult AS»: ord med stor forbokstav foran en selskapsform
 //   kontekst      «møte med Xenia Fjeldstad», «Kontaktperson: Bo Ek», «Med hilsen Bo Ek»: to til tre ord med stor forbokstav etter et ord som peker på en person
 //   navn + e-post «Xenia Fjeldstad <xenia@nordlys.no>»: det som står foran en e-postadresse i vinkler
-const FIRMA_UNNTAK = new Set('Tua Circles Skigaarden Skado Google Apple Microsoft Anthropic OpenAI Dropbox Mistral Ollama'.split(' '));
+const FIRMA_UNNTAK = new Set('Tua Circles Tuacircles Skigaarden Skado Google Apple Microsoft Anthropic OpenAI Dropbox Mistral Ollama'.split(' '));
 const FIRMA_FORM = new Set('AS ASA ANS DA BA SA KS Ltd Limited LLC Inc GmbH AB Oy ApS'.split(' '));
 const FIRMA_RE = new RegExp(`${FØR}(?:\\p{Lu}[\\p{L}\\p{N}&'’.-]*(?:[ \\t]+og)?[ \\t]+){1,4}(?:${[...FIRMA_FORM].join('|')})${ETTER}`, 'gu');
 const PEKERE = 'med fra til hos for av ved og kontakt møte intervju samtale navn kontaktperson signert ansvarlig saksbehandler pasient klient kunde leder hilsen mvh kopi'.split(' ').map((o) => `[${o[0].toUpperCase()}${o[0]}]${o.slice(1)}`).join('|');

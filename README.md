@@ -80,7 +80,7 @@ This section exists so that nothing Tua does is a surprise. It is the complete l
 
 *Also published as [PRIVACY.md](PRIVACY.md) in this repository and at <https://tuacircles.com/privacy-policy>. Last updated 19 October 2026.*
 
-**Who we are.** Tua Circles Holding AS, Oslo, Norway (org. no. in the Norwegian Register of Business Enterprises). Contact: <tech@tuacircles.com>.
+**Who we are.** Tuacircles Holding AS, Skigarden 11, 3560 Hemsedal, Norway (org. no. 924 496 770 in the Norwegian Register of Business Enterprises, founded 2019). Contact: <tech@tuacircles.com>.
 
 **Data collection.** The Tua plugin collects no data for us. It runs entirely on your computer. We receive nothing when you install, run or remove it — no usage statistics, no crash reports, no identifiers.
 

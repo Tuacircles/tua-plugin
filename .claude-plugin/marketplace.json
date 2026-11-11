@@ -1,7 +1,7 @@
 {
   "name": "tua-lokal",
   "description": "Tua fra denne mappa (lokal markedsplass for utvikling og egen bruk)",
-  "owner": { "name": "Tua Circles Holding AS" },
+  "owner": { "name": "Tuacircles Holding AS" },
   "plugins": [
     {
       "name": "tua",

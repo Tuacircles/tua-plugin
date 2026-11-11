@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.14 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.15 — bygd av bygg.mjs 2026-11-11. IKKE REDIGER: kilden er server/*.js og node_modules.
 /**
  * Creates a Tool with a provided JSON schema that can be passed
  * to the `.toolRunner()` method. The schema is used to automatically validate

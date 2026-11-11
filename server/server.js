@@ -69,7 +69,7 @@ const INSTRUCTIONS =
   '(7) SIDEN SIST: første gang du bruker Tua i en samtale, kommer en blokk «Siden sist i Tua» (Spør-tråder, konklusjoner, delinger, filer lest inn i appen) — gjengi den i én kort liste før du svarer, så brukeren ser hva som er gjort i Tua. tua_search viser Spør-tråder og konklusjoner for prosjektet øverst. ' +
   '(8) «DEL MED <navn>»: tua_share deler med en PERSON (kollega) — lager en delingssak (skjermet gjengivelse, logget) og en lenke til mottakersiden (låste rader på nivået, «Be om hele»); S som standard, M/L bare når brukeren sier det. Kall først med forhandsvis=true og still ETT spørsmål («Anna får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi lenka, nedlastingslenka og den kopierbare teksten videre slik de er.'
 
-const server = new McpServer({ name: 'tua', version: '0.5.14' }, { instructions: INSTRUCTIONS })
+const server = new McpServer({ name: 'tua', version: '0.5.15' }, { instructions: INSTRUCTIONS })
 
 // M14: er arkivet ikke valgt, stoppes hvert verktøykall med et spørsmål om sted — via elicitation når klienten støtter det
 // (Code gjør det), ellers som en «oppsett:»-linje modellen skal stille brukeren. Pakket rundt registerTool, så det gjelder

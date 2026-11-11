@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.14 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.15 — bygd av bygg.mjs 2026-11-11. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { safeParseAsync as safeParseAsync$1, safeParse as safeParse$1 } from '../../../zod/v4/core/parse.mjs';
 import { object } from '../../../zod/v4/mini/schemas.mjs';
 import { objectType } from '../../../zod/v3/types.mjs';

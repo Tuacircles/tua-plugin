@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.14 — bygd av bygg.mjs 2026-11-03. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.15 — bygd av bygg.mjs 2026-11-11. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { requireBase64 } from '../@stablelib/base64/lib/base64.mjs';
 import { requireSha256 } from '../fast-sha256/sha256.mjs';
 import { requireTiming_safe_equal } from './timing_safe_equal.mjs';

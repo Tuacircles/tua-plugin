@@ -2,6 +2,11 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.15 — 2026-11-11 (company details match the business register)
+
+- **Legal name and address corrected to the Norwegian Register of Business Enterprises:** Tuacircles Holding AS, org. no. 924 496 770, Skigarden 11, 3560 Hemsedal (founded 2019). Changed in `plugin.json` and `marketplace.json` (author/owner), `package.json`, README, PRIVACY and the privacy page. The product and brand are still "Tua" / "Tua Circles". No functional change.
+- The screening rules treat "Tuacircles" like "Tua Circles": the company's own name is not replaced with a placeholder.
+
 ## 0.5.14 — 2026-11-04 (start work with files, screened — work piece 35, slice 3)
 
 - **Health check no longer goes red when the Mac falls asleep mid-run** (R6 on 1, 7 and 9 Nov: the machine entered maintenance sleep seconds after waking the job, and the MCP call in `test-tools` timed out on wake). The launchd job now starts under `caffeinate -i`, and a test that took far longer than its own timeout is run once more. Reinstall with `node server/helsesjekk.js --install-launchd`.

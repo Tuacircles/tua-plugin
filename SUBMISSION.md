@@ -22,7 +22,7 @@ Then **Validate**. Expected findings and what they mean:
 | **Dependencies install from a lockfile** | *Policy hold* (reviewer reads it) | `package.json` + `package-lock.json` in the root: Claude Code installs `@modelcontextprotocol/sdk`, `@modelcontextprotocol/ext-apps` and `zod` on install. This hold is by design and cannot be avoided without bundling ~1 MB of SDK code into the repo (which would be held anyway as a file over 256 KiB). |
 | **Scripts the validator couldn't follow** | Should **not** appear when the plugin is at the repository root | Appears only for sub-folder plugins that run `node` files. If it appears anyway, it is a hold, not a block. |
 | README / LICENSE | ✔ | `README.md` (≫ 40 words), `LICENSE` (AGPL-3.0-only), `license` in `plugin.json`. |
-| Name | ✔ `tua` | Distinctive product name, lowercase, no reserved words. `displayName` "Tua", `author.name` "Tua Circles Holding AS". If the portal reports "Name may be confused with an existing listing", answer that Tua is the registered product of Tua Circles Holding AS (tuacircles.com, live since 2024). |
+| Name | ✔ `tua` | Distinctive product name, lowercase, no reserved words. `displayName` "Tua", `author.name` "Tuacircles Holding AS". If the portal reports "Name may be confused with an existing listing", answer that Tua is the registered product of Tua Circles Holding AS (tuacircles.com, live since 2024). |
 | OS files | ✔ | `.gitignore` excludes `.DS_Store`, `Thumbs.db`, `desktop.ini`; check with `git ls-files \| grep -i ds_store` before pushing. |
 | Symlinks | ✔ none | `server/` and `skills/tua` are real files since 0.4.0. |
 | Launchers (`npx`, `uvx`) | ✔ none | Server and hooks run `node ${CLAUDE_PLUGIN_ROOT}/…` with plain arguments. |
@@ -62,7 +62,7 @@ The portal picks up every push to `main` on its own (about every 6 hours). What 
 
 ## Listing details step
 
-Read from `plugin.json` and the README. Check: name **Tua**, description (from `plugin.json`), author **Tua Circles Holding AS**, homepage/repository links, license **AGPL-3.0-only**, keywords. The listing description is the README; the English intro is written for that.
+Read from `plugin.json` and the README. Check: name **Tua**, description (from `plugin.json`), author **Tuacircles Holding AS**, homepage/repository links, license **AGPL-3.0-only**, keywords. The listing description is the README; the English intro is written for that.
 
 Listing materials, if the portal asks for them separately:
 
@@ -71,7 +71,7 @@ Listing materials, if the portal asks for them separately:
 | Documentation URL | `https://github.com/tuacircles/tua-plugin#readme` |
 | Privacy policy URL | `https://tuacircles.com/plugin-privacy` once `docs/privacy-policy.html` is published there; until then `https://github.com/tuacircles/tua-plugin/blob/main/PRIVACY.md` |
 | Support contact | `tech@tuacircles.com` |
-| Company | Tua Circles Holding AS, Oslo, Norway · `https://tuacircles.com` |
+| Company | Tuacircles Holding AS (org. no. 924 496 770), Skigarden 11, 3560 Hemsedal, Norway · `https://tuacircles.com` |
 | Primary contact for review updates | Erik Teigen, `tech@tuacircles.com` |
 | Icon | the PNG in the repository root — 512 × 512, 71 KB, the Tua app icon (favicon of tuacircles.com, upscaled from 257 px; replace with the designer's original for a sharper result) |
 | Categories | Productivity · Notes & knowledge management · Developer tools |
