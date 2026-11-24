@@ -201,9 +201,24 @@ function r7() {
   if (usesBuild && newestBuilt < newestSrc) return [R, `bygget er eldre enn server/*.js — kjør node bygg.mjs`]
   return [G, `plugin ${version} i cache og repo${usesBuild ? ', bygget er nyere enn kildene' : ''}`]
 }
+// 24.11.2026: R8 var rød 23. og 24.11 uten at noe var galt — appen skrev bokføringslinjer (queue-operation, artifact-ledger) i en gammel
+// øktfil, så fila så «brukt» ut selv om ingen hadde skrevet noe og ingen hook skulle kjøre. Code regnes som brukt bare når øktfila har en
+// brukertur (type «user») med tidsstempel i døgnet. Bare slutten av fila leses.
+function harBrukerTur(file) {
+  try {
+    const st = fs.statSync(file), len = Math.min(st.size, 400000), buf = Buffer.alloc(len), fd = fs.openSync(file, 'r')
+    try { fs.readSync(fd, buf, 0, len, st.size - len) } finally { fs.closeSync(fd) }
+    for (const line of buf.toString('utf8').split('\n')) {
+      if (!line.includes('"type":"user"')) continue
+      const m = line.match(/"timestamp":"([^"]+)"/)
+      if (m && Date.parse(m[1]) >= SINCE) return true
+    }
+  } catch {}
+  return false
+}
 function r8() {
   let codeUsed = false
-  try { for (const p of fs.readdirSync(path.join(HOME, '.claude', 'projects'))) { const d = path.join(HOME, '.claude', 'projects', p); for (const f of fs.readdirSync(d)) if (f.endsWith('.jsonl') && mtime(path.join(d, f)) >= SINCE) codeUsed = true } } catch {}
+  try { for (const p of fs.readdirSync(path.join(HOME, '.claude', 'projects'))) { const d = path.join(HOME, '.claude', 'projects', p); for (const f of fs.readdirSync(d)) if (f.endsWith('.jsonl') && mtime(path.join(d, f)) >= SINCE && harBrukerTur(path.join(d, f))) codeUsed = true } } catch {}
   const hooksAt = mtime(path.join(FILES_ROOT, '.tua', 'hooks.jsonl'))
   const st = readJson(path.join(FILES_ROOT, '.tua', 'import-state.json'), {})
   const deskRunning = mtime(path.join(HOME, 'Library', 'Logs', 'Claude', 'mcp-server-tua.log')) >= NOW - 3600000

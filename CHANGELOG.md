@@ -2,6 +2,13 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.16 — 2026-11-24 (the card's "open" buttons work everywhere)
+
+- **The card's buttons into the Tua app did nothing in Claude Desktop.** "Kartet", "Fortsett i Tua", "Mottakersiden" and "Som fil" pointed at `http://127.0.0.1:5274`, and Claude Desktop only lets `https` links out of an MCP App (`open-link non-https blocked` in its log), so a click had no effect and no error. Everything that opens something outside the card now goes through the server's `tua_open`, which opens it locally (`open`, `explorer.exe`, `xdg-open`). `tua_open` has two new fixed targets, `deling` and `delingsfil`, and `kart` opens the same address the card shows (a conversation opens in Arbeid).
+- **No dead buttons when the Tua app is not on the machine.** The plugin from GitHub does not include the app, so "Kartet" could never work there. The card now asks the server whether the app answers (`app` in the card data, a loopback check remembered for 20 seconds) and shows "Åpne i Tua" and the links into the app only when it does. Buttons whose target is missing ("Åpne i Claude" without a Desktop project, "Code" without a repository) are hidden instead of greyed out, and the footer shows the atom id rather than an address that leads nowhere.
+- Buttons acknowledge the click ("Åpnet ✓"), the file manager button is named after the platform (Finder, Utforsker, filbehandleren), and `tua_open` explains itself when the app is not running.
+- Health check: R8 no longer goes red because the Claude app wrote bookkeeping lines to an old session file (23 and 24 Nov). Claude Code counts as used only when a session file has a user turn in the last day.
+
 ## 0.5.15 — 2026-11-11 (company details match the business register)
 
 - **Legal name and address corrected to the Norwegian Register of Business Enterprises:** Tuacircles Holding AS, org. no. 924 496 770, Skigarden 11, 3560 Hemsedal (founded 2019). Changed in `plugin.json` and `marketplace.json` (author/owner), `package.json`, README, PRIVACY and the privacy page. The product and brand are still "Tua" / "Tua Circles". No functional change.

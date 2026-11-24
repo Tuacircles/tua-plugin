@@ -10,6 +10,7 @@
 // installeres fra package-lock.json i rota (Claude Code gjør det selv ved installasjon). Katalogen (claude.ai/directory)
 // leser rett fra GitHub-repoet — pakkene her er for manuell deling og Desktop.
 
+import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -29,7 +30,12 @@ if (process.argv.includes('--sjekk')) { execFileSync('claude', ['plugin', 'valid
 fs.rmSync(DIST, { recursive: true, force: true })
 // 1) plugin-mappa, ren kopi
 const P = path.join(DIST, 'tua-plugin')
-copy(HERE, P)
+// 0.5.16: nyere Node (24) nekter å kopiere en mappe inn i en undermappe av seg selv, så kopien tas via en midlertidig mappe
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'tua-pakk-'))
+copy(HERE, path.join(TMP, 'tua-plugin'))
+fs.mkdirSync(DIST, { recursive: true })
+fs.cpSync(path.join(TMP, 'tua-plugin'), P, { recursive: true })
+fs.rmSync(TMP, { recursive: true, force: true })
 console.log(`${rel(P)}/ (${size(P)})`)
 execFileSync('claude', ['plugin', 'validate', P], { stdio: 'inherit' })
 zip(P, path.join(DIST, 'tua-plugin.zip'))

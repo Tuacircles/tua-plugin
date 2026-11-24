@@ -38,6 +38,22 @@ const atom = firstId ? await client.callTool({ name: 'tua_card', arguments: { id
 ok(atom?.structuredContent?.mode === 'atom' && atom.structuredContent.atom.level, `atom-kort ${firstId}: nivå ${atom?.structuredContent?.atom?.level}, ${atom?.structuredContent?.atom?.text?.length} tegn`)
 const opened = firstId ? await client.callTool({ name: 'tua_open', arguments: { id: firstId, target: 'finder' } }) : null
 ok(opened?.structuredContent?.ok, `tua_open finder (dryrun): ${opened?.structuredContent?.ran?.join(' ')}`)
+// 0.5.16: «Åpne i Tua» går via serveren (Desktop blokkerer http-lenker fra kortet) og åpner kortets egen adresse
+const kart = firstId ? await client.callTool({ name: 'tua_open', arguments: { id: firstId, target: 'kart' } }) : null
+ok(kart?.structuredContent?.ok && /#atom\//.test(kart.structuredContent.ran.join(' ')), `tua_open kart (dryrun): ${kart?.structuredContent?.ran?.join(' ')}`)
+ok(atom?.structuredContent?.atom?.app === true && typeof atom.structuredContent.atom.fm === 'string', `kortet vet at Tua-appen svarer (app=${atom?.structuredContent?.atom?.app}) og hva filbehandleren heter (${atom?.structuredContent?.atom?.fm})`)
+const ingenDeling = firstId ? await client.callTool({ name: 'tua_open', arguments: { id: firstId, target: 'deling' } }) : null
+ok(ingenDeling?.isError && /ingen deling/.test(ingenDeling.content[0].text), `tua_open deling på en sak uten deling gir feil i klartekst: ${ingenDeling?.content?.[0]?.text}`)
+// uten Tua-appen (pluginen fra GitHub): kortet får app=false, og tua_open kart svarer med en forklaring, ikke en død side
+{
+  const t2 = new StdioClientTransport({ command: process.execPath, args: [path.join(HERE, '..', 'server.js')], cwd: path.join(HERE, '..'), env: { ...process.env, TUA_OPEN_DRYRUN: '1', TUA_APP_NEDE: '1', TUA_CLIENT: 'test' } })
+  const c2 = new Client({ name: 'tua-apps-test-2', version: '0.0.1' }); await c2.connect(t2)
+  const a2 = firstId ? await c2.callTool({ name: 'tua_card', arguments: { id: firstId } }) : null
+  ok(a2?.structuredContent?.atom?.app === false, `uten Tua-appen: kortet får app=false og skjuler «Åpne i Tua»`)
+  const k2 = firstId ? await c2.callTool({ name: 'tua_open', arguments: { id: firstId, target: 'kart' } }) : null
+  ok(k2?.isError && /kjører ikke/.test(k2.content[0].text), `uten Tua-appen: tua_open kart forklarer seg: ${k2?.content?.[0]?.text}`)
+  await c2.close()
+}
 
 if (out) {
   fs.mkdirSync(out, { recursive: true })
@@ -82,7 +98,7 @@ window.addEventListener('message', async (ev) => {
     else result = FIX.list
     send({ id: m.id, result }); return
   }
-  if (m.method === 'ui/open-link') { log('→ ui/open-link ' + m.params.url); send({ id: m.id, result: {} }); return }
+  if (m.method === 'ui/open-link') { const https = /^https:/.test(m.params.url); log('→ ui/open-link ' + m.params.url + (https ? '' : ' — BLOKKERT (ikke https), som i Claude Desktop')); send({ id: m.id, result: https ? {} : { isError: true } }); return }
   if (m.method === 'ui/update-model-context') { log('→ modellkontekst: ' + (m.params.content?.[0]?.text || '')); send({ id: m.id, result: {} }); return }
   if (m.id != null && m.method) { send({ id: m.id, result: {} }); log('← ' + m.method + ' (tomt svar)') }
 })

@@ -51,10 +51,23 @@ export function kortHtml() {
   return htmlCache
 }
 
+// 0.5.16: svarer Tua-appen (broen)? Kortet viser bare «Kartet», «Fortsett i Tua» og delingslenkene når den gjør det — pluginen fra GitHub
+// har ikke appen med, og da var knappene døde. Loopback svarer eller nekter med en gang; svaret huskes i 20 s.
+const APP_BASE = () => process.env.TUA_APP_URL || 'http://127.0.0.1:5274/'
+let appSett = { at: 0, oppe: false }
+export async function appOppe() {
+  if (DRYRUN) return process.env.TUA_APP_NEDE ? false : true
+  if (Date.now() - appSett.at < 20000) return appSett.oppe
+  let oppe = false
+  try { await fetch(APP_BASE(), { method: 'HEAD', signal: AbortSignal.timeout(400) }); oppe = true } catch {}
+  appSett = { at: Date.now(), oppe }
+  return oppe
+}
+
 // ── kortets datamodell (kompakt; sendes også til modellen i Code)
 const date = (ts) => fmtTime(ts).replace(/,.*$/, '')
 const first = (ls, k) => ls.find((l) => l.kind === k)
-function atomCard(atoms, cur, level, context, { client = 'Claude' } = {}) {
+function atomCard(atoms, cur, level, context, { client = 'Claude', app = true } = {}) {
   const max = vaultClamp(cur, maxLevel(cur, context))
   // runde 3a: samme vei som tua_get — klippe (fail closed → S + linje), skjerme, logge (bare når mer enn S gis, som før)
   const lv = lever(atoms, cur, { nivå: level, tool: 'tua_card', klient: client, context, logg: level !== 'S' })
@@ -87,6 +100,7 @@ function atomCard(atoms, cur, level, context, { client = 'Claude' } = {}) {
     renders: renderStatus(cur).map((r) => ({ format: r.format, path: r.url || r.path, ok: r.exists && !r.changed })),
     related: relItems,
     address: samtale ? samtale.adresse : process.env.TUA_APP_URL ? `${process.env.TUA_APP_URL}#atom/${cur.id}` : `http://127.0.0.1:5274/#atom/${cur.id}`,   // en samtale åpnes i Arbeid (#samtale/<id>)
+    fm: FILE_MANAGER, app,   // 0.5.16: Tua-appen svarer — uten den skjuler kortet «Kartet» og lenkene inn i appen
     claudeProject: first(ls, 'claude-project')?.href || '',
     file: fileOf(cur) || '',
     repo: first(ls, 'repo')?.href || '',
@@ -124,15 +138,23 @@ async function openTarget(a, target) {
     if (!cp) throw new Error('Claude: Desktop-prosjektet er ikke satt for dette prosjektet')
     return run('url', cp.href)
   }
-  if (target === 'kart') {
-    // Kartet serveres av broen (npm run kart). Svarer den ikke, si det i stedet for å åpne en tom side.
-    const base = process.env.TUA_APP_URL || 'http://127.0.0.1:5274/'
-    if (!DRYRUN) {
-      try { await fetch(base, { method: 'HEAD', signal: AbortSignal.timeout(1500) }) } catch { throw new Error('Kartet kjører ikke — start det med «cd tua-plugin && npm run kart», så prøv igjen') }
+  if (target === 'kart' || target === 'deling' || target === 'delingsfil') {
+    // Tua-appen serveres av broen. Svarer den ikke, si det i stedet for å åpne en tom side.
+    const base = APP_BASE()
+    appSett.at = 0
+    if (!(await appOppe())) throw new Error('Tua-appen kjører ikke på denne maskinen, så det er ingenting å åpne. Atomet finner du med «Vis i ' + FILE_MANAGER + '».')
+    if (target === 'kart') {
+      // en samtale åpnes i Arbeid (#samtale/<id>), alt annet som atom — samme adresse som kortet viser
+      const adr = a.kind === 'samtale' ? samtaleInfo(load(), a, { base }).adresse : `${base}#atom/${a.id}`
+      return run('url', adr)
     }
-    return run('url', `${base}#atom/${a.id}`)
+    const d = (a.tags || []).includes('deling') ? delingerFor(a.id).filter((x) => x.sak === a.id)[0] : null
+    if (!d) throw new Error('Saken har ingen deling')
+    if (d.trukket) throw new Error('Delingen er trukket tilbake — lenka virker ikke lenger')
+    const l = lenkerFor(d.token, base)
+    return run('url', target === 'deling' ? l.http : l.html)
   }
-  throw new Error(`ukjent target «${target}» — kortet åpner bare finder, code, claude og kart`)
+  throw new Error(`ukjent target «${target}» — kortet åpner bare finder, code, claude, kart, deling og delingsfil`)
 }
 
 export function registerApps(server, { client = 'Claude' } = {}) {
@@ -169,7 +191,7 @@ export function registerApps(server, { client = 'Claude' } = {}) {
         if (!cur) return { content: [{ type: 'text', text: `Fant ikke atom ${id}.` }], structuredContent: { mode: 'error', error: `Fant ikke atom ${id}.` } }
         if (context && !visibleIn(cur, context)) return { content: [{ type: 'text', text: `Atom ${id} er ikke synlig for ${context}.` }], structuredContent: { mode: 'error', error: `Ikke synlig for ${context}.` } }
         if (hasExternalEdits(atoms)) save(atoms)                      // V15: fest ny versjon ved ekstern redigering
-        const a = atomCard(atoms, cur, level, context, { client })
+        const a = atomCard(atoms, cur, level, context, { client, app: await appOppe() })
         return { content: [{ type: 'text', text: quiet ? `${a.level} av ${a.id} vist i kortet.` : atomText(a) }], structuredContent: { mode: 'atom', atom: a } }
       }
       // runde 3a: tråder fra Spør øverst, treffene skjermet (S er fri, ingen Utlevert-linje), «Siden sist i Tua» ved første kall, instruksen når prosjektet har Desktop-uuid
@@ -185,7 +207,7 @@ export function registerApps(server, { client = 'Claude' } = {}) {
       const siden = skalVise(prosjekt) ? sidenSist(atoms, { prosjekt }) : null
       const sidenSc = siden ? { prosjekt: siden.prosjekt, dager: siden.dager, lagret: siden.lagret, linjer: [...siden.linjer.map((l) => ({ slag: l.slag, id: l.id, tekst: sk.skjerm(l.tekst) })), ...(siden.samtaler ? [{ slag: 'samtale', id: siden.samtaler.siste.id, tekst: sk.skjerm(siden.samtaler.tekst), adresse: siden.samtaler.siste.adresse }] : [])] } : null   // skive 4: «Samtaler i Tua: N, siste «…»»
       const instruks = instruksFor(prosjekt)
-      const sc = { mode: 'list', query: query || '', project: project || '', total: hits.total, items, ...(sidenSc ? { sidenSist: sidenSc } : {}), ...(instruks ? { instruks: instruks.tekst, instruksProsjekt: instruks.prosjekt } : {}) }
+      const sc = { mode: 'list', query: query || '', project: project || '', total: hits.total, app: await appOppe(), items, ...(sidenSc ? { sidenSist: sidenSc } : {}), ...(instruks ? { instruks: instruks.tekst, instruksProsjekt: instruks.prosjekt } : {}) }
       const txt = (items.length
         ? `${hits.total} treff${query ? ` på «${query}»` : ''}${project ? ` i ${project}` : ''} (viser ${items.length}${hits.tråder ? `, ${hits.tråder} tråder fra Spør øverst` : ''}):\n` +
           items.map((i) => `- [${i.id}] ${i.name} — ${i.project} · ${i.date}${i.thread ? ` · tråd: ${i.thread.svar} svar${i.thread.konklusjon ? `, konklusjon ${i.thread.konklusjon}` : ''}` : ''}${i.samtale ? `\n  ${i.samtale.linje}` : ''}${i.S ? `\n  ${i.S}` : ''}`).join('\n')
@@ -203,10 +225,10 @@ export function registerApps(server, { client = 'Claude' } = {}) {
     {
       title: 'Åpne atom i Finder, Code, Claude eller kartet (fra kortet)',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      description: 'Brukes av Tua-kortet. Åpner atomets fil i Finder, repoet i Claude Code, Desktop-prosjektet i Claude, eller atomet i kartet (krever at broen kjører). Fast liste, ingen andre mål (V13).',
+      description: 'Brukes av Tua-kortet. Åpner atomets fil i Finder, repoet i Claude Code, Desktop-prosjektet i Claude, atomet i Tua-appen eller mottakersiden for en deling (krever at Tua-appen kjører). Fast liste, ingen andre mål (V13).',
       inputSchema: {
         id: z.string().describe('Atom-id'),
-        target: z.enum(['finder', 'code', 'claude', 'kart']).describe('Hva som skal åpnes'),
+        target: z.enum(['finder', 'code', 'claude', 'kart', 'deling', 'delingsfil']).describe('Hva som skal åpnes'),
       },
       _meta: { ui: { resourceUri: KORT_URI, visibility: ['app'] } },
     },

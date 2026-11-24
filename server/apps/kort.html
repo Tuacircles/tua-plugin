@@ -139,18 +139,21 @@ const call = async (args) => {
   catch (e) { root.append(el('p', { class: 'err' }, 'Tua svarte ikke: ' + (e?.message || e))) }
   finally { busy = false }
 }
-// «Åpne i …»: bare verter som sier de kan åpne lenker (hostCapabilities.openLinks) får openLink; alle andre (bl.a. Code-appen)
-// går via serverens tua_open, som åpner lokalt med `open`. Feil fra serveren (f.eks. «kartet kjører ikke») vises i kortet.
-const open = async (target, atom) => {
+// «Åpne i …»: alt går via serverens tua_open, som åpner lokalt (open / explorer / xdg-open). 0.5.16: vertens openLink brukes ikke
+// lenger — Claude Desktop slipper bare https-lenker gjennom («open-link non-https blocked»), så «Kartet» og lenkene inn i Tua-appen
+// (http://127.0.0.1) gjorde ingenting, uten feilmelding. Knappen kvitterer selv, og feil fra serveren vises i kortet.
+const open = async (target, atom, knapp) => {
+  const før = knapp?.textContent
   try {
-    const canLink = !!app.getHostCapabilities?.()?.openLinks
-    if (canLink && target === 'kart' && atom.address) return await app.openLink({ url: atom.address })
-    // «claude» går alltid via serveren: vertens openLink sier «ok» for claude://-adresser uten å åpne noe
-    // (sett i Code-fanen 20.10.2026), så tua_open åpner Desktop-prosjektet lokalt med `open` i stedet.
+    if (knapp) knapp.textContent = '…'
     const r = await app.callServerTool({ name: 'tua_open', arguments: { id: atom.id, target } })
-    if (r?.isError) root.append(el('p', { class: 'err' }, (r.content || []).map((c) => c.text).filter(Boolean).join(' ') || 'Kunne ikke åpne.'))
-  } catch (e) { root.append(el('p', { class: 'err' }, 'Kunne ikke åpne: ' + (e?.message || e))) }
+    if (r?.isError) { if (knapp) knapp.textContent = før; root.append(el('p', { class: 'err' }, (r.content || []).map((c) => c.text).filter(Boolean).join(' ') || 'Kunne ikke åpne.')); return }
+    if (knapp) { knapp.textContent = 'Åpnet ✓'; setTimeout(() => { knapp.textContent = før }, 2000) }
+  } catch (e) { if (knapp) knapp.textContent = før; root.append(el('p', { class: 'err' }, 'Kunne ikke åpne: ' + (e?.message || e))) }
 }
+// en knapp som åpner noe utenfor kortet; finnes ikke målet, vises ikke knappen (før: grå, død knapp)
+const åpneKnapp = (tekst, target, atom, { vis = true, primær = false, title = null } = {}) => { if (!vis) return null; const b = el('button', { class: 'btn' + (primær ? ' primary' : ''), type: 'button', title }, tekst); b.addEventListener('click', () => open(target, atom, b)); return b }
+const åpneLenke = (tekst, target, atom) => { const l = el('a', { role: 'button', tabindex: '0', style: 'cursor:pointer' }, tekst); l.addEventListener('click', () => open(target, atom, l)); return l }
 const tellModel = (text) => { try { app.updateModelContext({ content: [{ type: 'text', text }] }) } catch {} }
 // Runde 3a: «Kopier instruksen» — prosjekt-instruksen for Desktop («spør Tua først») når prosjektet har Desktop-uuid; Erik limer den inn én gang.
 const kopier = async (tekst, knapp) => {
@@ -168,8 +171,8 @@ const sidenSistBlokk = (s) => s ? el('div', { class: 'siden' },
 
 // Runde 3b: delingen på en delingssak — mottakerne som personer, lenka til mottakersiden (åpnes i nettleseren), «Kopier lenka», fila, trukket
 const kopierLenke = async (tekst, knapp) => { const før = knapp.textContent; try { await navigator.clipboard.writeText(tekst); knapp.textContent = 'Kopiert ✓' } catch { knapp.textContent = 'Kunne ikke kopiere' } setTimeout(() => { knapp.textContent = før }, 2500) }
-const delingBlokk = (d) => d ? [el('div', { class: 'lbl' }, 'Delt med'), el('div', { class: 'chips' }, ...d.til.map((t) => el('span', { class: 'chip', title: t.epost || '' }, `${t.navn}${t.merke ? ' · ' + t.merke : ''}`)), el('span', { class: 'chip' }, `nivå ${d.nivå}`), d.trukket ? el('span', { class: 'chip warn' }, 'trukket tilbake') : null, d.forespørsler ? el('span', { class: 'chip warn' }, `${d.forespørsler} ba om hele`) : null),
-  d.trukket ? el('p', { class: 'why' }, 'Delingen er trukket tilbake — lenka virker ikke lenger.') : el('div', { class: 'row' }, el('a', { class: 'btn', href: d.http, target: '_blank', rel: 'noopener' }, 'Mottakersiden'), (() => { const b = el('button', { class: 'btn', type: 'button' }, 'Kopier lenka'); b.addEventListener('click', () => kopierLenke(d.http, b)); return b })(), el('a', { class: 'btn', href: d.html, target: '_blank', rel: 'noopener', title: 'Siden som én HTML-fil — send den selv når mottakeren ikke er på samme nett' }, 'Som fil'))] : []
+const delingBlokk = (d, a) => d ? [el('div', { class: 'lbl' }, 'Delt med'), el('div', { class: 'chips' }, ...d.til.map((t) => el('span', { class: 'chip', title: t.epost || '' }, `${t.navn}${t.merke ? ' · ' + t.merke : ''}`)), el('span', { class: 'chip' }, `nivå ${d.nivå}`), d.trukket ? el('span', { class: 'chip warn' }, 'trukket tilbake') : null, d.forespørsler ? el('span', { class: 'chip warn' }, `${d.forespørsler} ba om hele`) : null),
+  d.trukket ? el('p', { class: 'why' }, 'Delingen er trukket tilbake — lenka virker ikke lenger.') : el('div', { class: 'row' }, a.app ? åpneKnapp('Mottakersiden', 'deling', a) : null, (() => { const b = el('button', { class: 'btn', type: 'button' }, 'Kopier lenka'); b.addEventListener('click', () => kopierLenke(d.http, b)); return b })(), a.app ? åpneKnapp('Som fil', 'delingsfil', a, { title: 'Siden som én HTML-fil — send den selv når mottakeren ikke er på samme nett' }) : null)] : []
 
 // ── ett atom (V12: S først, M/L på forespørsel, «Åpne i …»)
 function renderAtom(a) {
@@ -187,7 +190,7 @@ function renderAtom(a) {
     a.level !== 'S' && a.S ? el('p', { class: 's' }, a.S) : null,
     a.why ? el('p', { class: 'why' }, 'Hvorfor: ' + a.why) : null,
     a.clipped ? el('p', { class: 'clip' }, a.clipped) : null,
-    a.samtale ? el('p', { class: 'why samtale' }, `${a.samtale.tua ? 'Samtale i Tua' : 'Samtale fra ' + a.samtale.kilde} · ${a.samtale.vendinger} ${a.samtale.vendinger === 1 ? 'vending' : 'vendinger'} · siste ${a.samtale.siste}${a.samtale.modeller?.length ? ' · ' + a.samtale.modeller.join(', ') : ''}${a.samtale.konklusjon ? ' · konklusjon ' + a.samtale.konklusjon : ''} · `, el('a', { href: a.samtale.adresse, target: '_blank', rel: 'noopener' }, 'Fortsett i Tua ›')) : null,
+    a.samtale ? el('p', { class: 'why samtale' }, `${a.samtale.tua ? 'Samtale i Tua' : 'Samtale fra ' + a.samtale.kilde} · ${a.samtale.vendinger} ${a.samtale.vendinger === 1 ? 'vending' : 'vendinger'} · siste ${a.samtale.siste}${a.samtale.modeller?.length ? ' · ' + a.samtale.modeller.join(', ') : ''}${a.samtale.konklusjon ? ' · konklusjon ' + a.samtale.konklusjon : ''} · `, a.app ? åpneLenke('Fortsett i Tua ›', 'kart', a) : 'åpnes i Tua-appen') : null,
     a.utfordret ? el('p', { class: 'why utfordret' }, `${a.utfordret.tekst}${a.utfordret.låst ? ' · låst' : ''}`) : null,   // skive C (arb. 34)   // skive 4 (arb. 33)
     el('div', { class: 'row' }, seg,
       el('span', { class: 'meta', style: 'font-size:12px;color:var(--fg3)' },
@@ -195,17 +198,17 @@ function renderAtom(a) {
     el('div', { class: 'body' }, md(a.text)),
     ...chips('Bygget av', a.builtBy?.map((s) => ({ id: s.id, text: `${s.name} (v${s.version}, ${s.level})${s.missing ? ' · slettet' : s.stale ? ' · nå v' + s.now : ''}`, warn: s.stale || s.missing }))),
     ...chips('Synlig for', a.share?.map((s) => ({ text: `${s.project} · ${s.level}` }))),
-    ...delingBlokk(a.deling),
+    ...delingBlokk(a.deling, a),
     ...chips('Relaterte', a.related?.map((r) => ({ id: r.id, text: r.name, title: r.how }))),
     a.tags?.length ? el('div', { class: 'chips' }, ...a.tags.map((t) => el('span', { class: 'chip' }, '#' + t))) : null,
     el('div', { class: 'row' },
-      el('button', { class: 'btn primary', type: 'button', disabled: a.claudeProject ? null : 'true', title: a.claudeProject ? a.claudeProject : 'Desktop-prosjektet er ikke satt (sync-tua.js --claude-project)', onclick: () => open('claude', a) }, 'Åpne i Claude'),
-      el('button', { class: 'btn', type: 'button', disabled: a.file ? null : 'true', onclick: () => open('finder', a) }, 'Vis i Finder'),
-      el('button', { class: 'btn', type: 'button', disabled: a.repo ? null : 'true', onclick: () => open('code', a) }, 'Code'),
-      el('button', { class: 'btn', type: 'button', disabled: a.address ? null : 'true', onclick: () => open('kart', a) }, 'Kartet'),
+      åpneKnapp('Åpne i Claude', 'claude', a, { vis: !!a.claudeProject, primær: true, title: a.claudeProject || null }),
+      åpneKnapp('Vis i ' + (a.fm || 'Finder'), 'finder', a, { vis: !!a.file, primær: !a.claudeProject }),
+      åpneKnapp('Code', 'code', a, { vis: !!a.repo, title: 'Åpne repoet i Claude Code med dette atomet' }),
+      åpneKnapp('Åpne i Tua', 'kart', a, { vis: !!a.app && !!a.address, title: 'Åpne i Tua-appen på denne maskinen' }),
       instruksKnapp(a.instruks),
     ),
-    el('div', { class: 'foot' }, el('span', { class: 'addr' }, a.address || a.id), el('span', {}, [a.convo ? `Samtale: ${a.convo}` : '', a.shielded ? `${a.shielded} skjermet` : ''].filter(Boolean).join(' · '))),
+    el('div', { class: 'foot' }, el('span', { class: 'addr' }, a.app ? (a.address || a.id) : a.id), el('span', {}, [a.convo ? `Samtale: ${a.convo}` : '', a.shielded ? `${a.shielded} skjermet` : ''].filter(Boolean).join(' · '))),
   )
 }
 
@@ -230,7 +233,7 @@ function renderList(d) {
         el('div', { class: 'eyebrow' }, a.project, el('span', { class: 'meta' }, `· ${a.date}${a.kind === 'leveranse' ? ' · leveranse' : ''}${a.thread ? ` · tråd fra Spør: ${a.thread.svar} svar${a.thread.konklusjon ? ', konklusjon ' + a.thread.konklusjon : ''}` : ''}`)),
         el('h2', {}, el('a', { onclick: () => call({ id: a.id, level: 'S' }) }, a.name)),
         // skive 4 (arb. 33): en samtale vises som samtale — vendinger, siste, modellene, konklusjon — med «Fortsett i Tua» til Arbeid (#samtale/<id>)
-        a.samtale ? el('p', { class: 'why samtale' }, `${a.samtale.tua ? 'Samtale i Tua' : 'Samtale fra ' + a.samtale.kilde} · ${a.samtale.vendinger} ${a.samtale.vendinger === 1 ? 'vending' : 'vendinger'} · siste ${a.samtale.siste}${a.samtale.modeller?.length ? ' · ' + a.samtale.modeller.join(', ') : ''}${a.samtale.konklusjon ? ' · konklusjon ' + a.samtale.konklusjon : ''} · `, el('a', { href: a.samtale.adresse, target: '_blank', rel: 'noopener' }, 'Fortsett i Tua ›')) : null,
+        a.samtale ? el('p', { class: 'why samtale' }, `${a.samtale.tua ? 'Samtale i Tua' : 'Samtale fra ' + a.samtale.kilde} · ${a.samtale.vendinger} ${a.samtale.vendinger === 1 ? 'vending' : 'vendinger'} · siste ${a.samtale.siste}${a.samtale.modeller?.length ? ' · ' + a.samtale.modeller.join(', ') : ''}${a.samtale.konklusjon ? ' · konklusjon ' + a.samtale.konklusjon : ''} · `, d.app ? åpneLenke('Fortsett i Tua ›', 'kart', a) : 'åpnes i Tua-appen') : null,
     a.utfordret ? el('p', { class: 'why utfordret' }, `${a.utfordret.tekst}${a.utfordret.låst ? ' · låst' : ''}`) : null,   // skive C (arb. 34)
         el('p', { class: 's' }, a.S || a.snippet || ''),
         a.snippet && a.S ? el('p', { class: 'why' }, '… ' + a.snippet) : null,
