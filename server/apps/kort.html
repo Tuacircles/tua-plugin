@@ -44,6 +44,13 @@
   .btn.primary:disabled { background: transparent; color: var(--fg3); border-color: var(--line); }
   .row.nav { margin: 0 0 10px; }
   .row.bla { margin-top: 14px; align-items: center; }
+  .filter { flex: 1 1 200px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line2); border-radius: 999px; background: transparent; color: var(--fg); font: inherit; font-size: 13px; }
+  .alle { margin-top: 8px; border-top: 1px solid var(--line); }
+  .alle .rad { display: grid; grid-template-columns: 78px 1fr minmax(0, 30%); gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+  .alle .dato, .alle .pro { color: var(--fg3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .alle .pro { text-align: right; }
+  .alle .tittel { color: var(--fg); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .alle .tittel:hover { text-decoration: underline; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--bg2); color: var(--fg2); border: 1px solid var(--line); }
   .chip.warn { background: var(--warn-bg); color: var(--warn-fg); }
@@ -144,6 +151,7 @@ const call = async (args, til) => {
   if (busy) return
   busy = true
   try {
+    if (args.alle) { if (til !== undefined) plass = til; else { logg = logg.slice(0, plass + 1); logg.push(args); plass = logg.length - 1 } await visAlle(args); return }
     const r = await app.callServerTool({ name: 'tua_card', arguments: args })
     if (til !== undefined) plass = til
     else { const forrige = logg[plass]; if (forrige?.id && forrige.id === args.id) logg[plass] = args; else { logg = logg.slice(0, plass + 1); logg.push(args); plass = logg.length - 1 } }   // nivåbytte på samme sak er ikke et nytt steg
@@ -188,10 +196,66 @@ const delingBlokk = (d, a) => d ? [el('div', { class: 'lbl' }, 'Delt med'), el('
   d.trukket ? el('p', { class: 'why' }, 'Delingen er trukket tilbake — lenka virker ikke lenger.') : el('div', { class: 'row' }, a.app ? åpneKnapp('Mottakersiden', 'deling', a) : null, (() => { const b = el('button', { class: 'btn', type: 'button' }, 'Kopier lenka'); b.addEventListener('click', () => kopierLenke(d.http, b)); return b })(), a.app ? åpneKnapp('Som fil', 'delingsfil', a, { title: 'Siden som én HTML-fil — send den selv når mottakeren ikke er på samme nett' }) : null)] : []
 
 // ── ett atom (V12: S først, M/L på forespørsel, «Åpne i …»)
+// 0.5.20: «Vis alle» — hele lista i én visning (tittel, prosjekt, dato), hentet 50 om gangen, med et filterfelt. Kortet ber verten om stor visning
+// (sidepanel/fullskjerm) når verten tilbyr det; ellers vises lista i kortet der det står. Lista huskes, så «Tilbake» til den er øyeblikkelig.
+const ALLE_MAKS = 500
+const alleMinne = new Map()
+let stor = false
+const tilStor = async (på) => {
+  try {
+    const ctx = app.getHostContext?.()
+    const mål = på ? 'fullscreen' : 'inline'
+    if (!ctx?.availableDisplayModes?.includes(mål) || (ctx.displayMode || 'inline') === mål) { stor = på && ctx?.displayMode === 'fullscreen'; return }
+    const r = await app.requestDisplayMode({ mode: mål })
+    stor = r?.mode === 'fullscreen'
+  } catch { stor = false }
+}
+async function visAlle(args) {
+  const nøkkel = JSON.stringify(args)
+  let d = alleMinne.get(nøkkel)
+  const tegn = () => {
+    const filter = el('input', { type: 'search', class: 'filter', placeholder: 'Filtrer på tittel eller prosjekt', 'aria-label': 'Filtrer lista' })
+    const liste = el('div', { class: 'alle' })
+    const antall = el('span', { class: 'meta', style: 'font-size:12px;color:var(--fg3)' })
+    const fyll = () => {
+      const f = filter.value.trim().toLowerCase()
+      const vis = d.items.filter((a) => !f || (a.name + ' ' + a.project).toLowerCase().includes(f))
+      liste.replaceChildren(...vis.map((a) => el('div', { class: 'rad' },
+        el('span', { class: 'dato' }, a.date),
+        el('a', { class: 'tittel', title: a.S || '', onclick: () => call({ id: a.id, level: 'S' }) }, a.name),
+        el('span', { class: 'pro' }, a.project))))
+      antall.textContent = `${f ? vis.length + ' av ' : ''}${d.items.length}${d.total > d.items.length ? ' av ' + d.total + (d.ferdig ? ' (de første ' + ALLE_MAKS + ')' : ' — henter …') : ''} ${d.query ? 'treff på «' + d.query + '»' : 'saker'}${d.project ? ' i ' + d.project : ''}`
+    }
+    filter.oninput = fyll
+    put(navBlokk(), el('div', { class: 'eyebrow' }, 'Alle', el('span', { class: 'meta' }, d.project ? `· ${d.project}` : '· alle prosjekter')), el('div', { class: 'row' }, filter, antall), liste,
+      el('div', { class: 'foot' }, el('span', {}, 'Trykk på en tittel for å åpne saken. «Tilbake» tar deg hit igjen.'), el('span', {}, 'Tua · skjermet og logget')))
+    fyll()
+    return fyll
+  }
+  if (d?.ferdig) { tegn(); return }
+  d = { items: [], total: 0, query: args.query || '', project: args.project || '', ferdig: false }
+  alleMinne.set(nøkkel, d)
+  await tilStor(true)
+  let fyll = tegn()
+  try {
+    for (let o = 0; o < ALLE_MAKS; o += 50) {
+      const r = await app.callServerTool({ name: 'tua_card', arguments: rens({ query: args.query, project: args.project, context: args.context, limit: 50, offset: o, quiet: true }) })
+      const sc = r?.structuredContent
+      if (!sc || sc.mode !== 'list') break
+      d.total = sc.total; d.items.push(...sc.items)
+      if (logg[plass]?.alle) fyll(); else break                                // brukeren har gått videre — fortsett ikke å tegne over
+      if (!sc.items.length || d.items.length >= sc.total) break
+    }
+    d.ferdig = true
+    if (logg[plass]?.alle) fyll()
+    tellModel(`Brukeren åpnet «Vis alle» i Tua-kortet: ${d.items.length} ${d.query ? 'treff på «' + d.query + '»' : 'saker'}${d.project ? ' i ' + d.project : ''}.`)
+  } catch (e) { alleMinne.delete(nøkkel); root.append(el('p', { class: 'err' }, 'Fikk ikke hentet hele lista: ' + (e?.message || e))) }
+}
 const navBlokk = () => {
-  if (logg.length < 2) return null
+  const litenKnapp = stor ? el('button', { class: 'btn', type: 'button', title: 'Tilbake til kortet i samtalen', onclick: async () => { await tilStor(false); const a = logg[plass]; if (a) call(a, plass) } }, 'Liten visning') : null
+  if (logg.length < 2) return litenKnapp ? el('div', { class: 'row nav' }, litenKnapp) : null
   const kn = (tekst, i, title) => el('button', { class: 'btn', type: 'button', title, disabled: i < 0 || i >= logg.length ? 'true' : null, onclick: () => call(logg[i], i) }, tekst)
-  return el('div', { class: 'row nav' }, kn('‹ Tilbake', plass - 1, 'Forrige visning i kortet'), kn('Frem ›', plass + 1, 'Neste visning i kortet'))
+  return el('div', { class: 'row nav' }, kn('‹ Tilbake', plass - 1, 'Forrige visning i kortet'), kn('Frem ›', plass + 1, 'Neste visning i kortet'), litenKnapp)
 }
 function renderAtom(a) {
   const seg = el('div', { class: 'seg', role: 'group', 'aria-label': 'Nivå' },
@@ -239,6 +303,7 @@ function renderList(d) {
   const bla = fra > 0 || flere ? el('div', { class: 'row bla' },
     el('button', { class: 'btn', type: 'button', disabled: fra > 0 ? null : 'true', onclick: () => side(Math.max(0, fra - per)) }, `‹ Forrige ${per}`),
     el('button', { class: 'btn primary', type: 'button', disabled: flere ? null : 'true', onclick: () => side(fra + per) }, `Neste ${Math.min(per, Math.max(0, d.total - fra - d.items.length)) || per} ›`),
+    el('button', { class: 'btn', type: 'button', title: 'Hele lista i én visning, med filter', onclick: () => call(rens({ alle: true, query: d.query, project: d.project, context: d.context })) }, `Vis alle (${d.total})`),
     el('span', { class: 'meta', style: 'font-size:12px;color:var(--fg3)' }, `Viser ${d.items.length ? fra + 1 : 0}–${fra + d.items.length} av ${d.total}`)) : null
   put(
     navBlokk(),

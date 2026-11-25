@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.19 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.20 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import path__default from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -178,7 +178,7 @@ function registerApps(server, { client = 'Claude' } = {}) {
         level: enumType(['S', 'M', 'L']).optional().describe('Nivå for atom-kortet. Standard S (V12). Klippes av referansens nivå og Vault.'),
         project: stringType().optional().describe('Avgrens trefflista til ett prosjekt'),
         context: stringType().optional().describe('Vis som dette prosjektet ser det — aldri mer enn nivået prosjektet har fått'),
-        limit: numberType().int().min(1).max(10).optional().describe('Antall treff per side (standard 5, høyst 10)'),
+        limit: numberType().int().min(1).max(50).optional().describe('Antall treff per side (standard 5; bruk høyst 10 — kortets «Vis alle» henter 50 om gangen)'),
         offset: numberType().int().min(0).optional().describe('Bla i trefflista: hopp over så mange treff (0 = første side). Kortet har selv «Forrige» og «Neste»; bruk dette når brukeren ber om «de neste».'),
         quiet: booleanType().optional().describe('Internt: kortet henter M/L for visning; logges, men svarer uten preik'),
       },
@@ -216,7 +216,7 @@ function registerApps(server, { client = 'Claude' } = {}) {
         (sk.treff ? `\nSkjermet: ${sk.treff} (plassholdere — bruk dem uendret).` : '') +
         (siden ? `\n\n${sk.skjerm(siden.tekst)}` : '');
       sk.lær();
-      return { content: [{ type: 'text', text: txt }], structuredContent: sc }
+      return { content: [{ type: 'text', text: quiet ? `${items.length} treff vist i kortet (${offset + 1}–${offset + items.length} av ${hits.total}).` : txt }], structuredContent: sc }
     },
   );
 

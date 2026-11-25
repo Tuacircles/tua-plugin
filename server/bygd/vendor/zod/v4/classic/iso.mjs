@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.19 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.20 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { ZodStringFormat } from './schemas.mjs';
 import { _isoDateTime, _isoDate, _isoTime, _isoDuration } from '../core/api.mjs';
 import { $constructor } from '../core/core.mjs';

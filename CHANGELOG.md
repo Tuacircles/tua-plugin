@@ -2,6 +2,11 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.20 — 2026-11-26 (the card: "Vis alle")
+
+- **"Vis alle (N)" in the list card.** One view with the whole list (date, title, project), fetched 50 at a time up to 500, with a filter field. A title opens the atom; "Tilbake" returns to the list at once. The card asks the host for the large view (fullscreen / side panel) when the host offers it and shows "Liten visning" to go back; where the host does not offer it, the list is shown in the card where it stands.
+- `tua_card` accepts `limit` up to 50 (the card's own calls); the model should still use at most 10.
+
 ## 0.5.19 — 2026-11-26 (exports are read where they land; Gemini and Copilot)
 
 Concept note 36, part 2, measures 3 and 4.

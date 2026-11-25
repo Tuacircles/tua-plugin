@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.19 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.20 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { encode, has, maybe_map, is_buffer } from './utils.mjs';
 import { default_formatter, default_format, formatters } from './formats.mjs';
 import { isArray } from '../utils/values.mjs';
