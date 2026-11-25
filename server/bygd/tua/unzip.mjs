@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.18 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.19 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import os from 'node:os';
 import path__default from 'node:path';
@@ -25,4 +25,15 @@ function unzipToTemp(zipPath, hasRoot) {
   throw new Error(`kunne ikke pakke ut ${path__default.basename(zipPath)}: ${last || 'ingen json-filer i zip-en'} (trenger unzip eller tar)`)
 }
 
-export { unzipToTemp };
+// 0.5.19 (arb. 36 grep 3): bare innholdslista i en zip — ingenting pakkes ut. Brukes til å kjenne igjen en eksport i Nedlastinger.
+function zipEntries(zipPath) {
+  const tries = process.env.TUA_NO_UNZIP ? [] : [['unzip', ['-Z1', zipPath]]];
+  tries.push(['tar', ['-tf', zipPath]]);
+  for (const [cmd, args] of tries) {
+    const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    if (!r.error && r.status === 0 && r.stdout) return r.stdout.split(/\r?\n/).filter(Boolean)
+  }
+  return []
+}
+
+export { unzipToTemp, zipEntries };

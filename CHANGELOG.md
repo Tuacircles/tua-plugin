@@ -2,6 +2,19 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.19 — 2026-11-26 (exports are read where they land; Gemini and Copilot)
+
+Concept note 36, part 2, measures 3 and 4.
+
+- **Exports are read in Downloads.** Ordering an export used to be five steps (order, wait for the e-mail, download, find `Tua/Innboks`, move the file). Now the download is the last step: Tua recognises exports from Claude, ChatGPT, Google Takeout (Gemini) and Microsoft (Copilot) in `~/Downloads` and reads them there. Zip files are recognised from their file list (nothing is unpacked to decide), folders that Safari unpacked from the files in them, csv/json from the first bytes. Each file is checked once (`<archive>/.tua/nedlastinger.json`) and read once; a re-downloaded file is read again. The file stays where it is: Tua never moves or deletes anything in Downloads. Same switch as the rest of the automatic reading (`tua_setup(historikk=false)`).
+- **A short guide.** `tua_import(kilde=eksport)` reads what is there now, and when nothing is there it answers with the guide: a direct link to each of the four ordering pages and the exact choices (for Takeout: only "My Activity" › "Gemini Apps", format JSON).
+- **Gemini reader** (`server/lesere-ai.js`): Google Takeout "My Activity" JSON, one row per prompt with the answer as HTML. Rows are grouped into conversations by time (a new one after 30 minutes of silence, the export has no conversation id). A `conversations[].messages[]` shape is read too. A Takeout ordered as HTML (the default) is recognised and reported with what to choose instead; it is not read.
+- **Copilot reader**: the CSV from the Microsoft privacy dashboard (Date, Time, Type, Content, Source), with quoted and multi-line fields, comma or semicolon, US and Norwegian dates. Grouped by time. Microsoft truncates long answers in this export; the import report says so. A Copilot csv dropped in `Innboks` becomes conversations, not a document.
+- **Not verified against real exports.** Both readers are written from descriptions of the formats; no real Takeout or Copilot file has been available. The import report says this.
+- **Fixed: every real export import stopped with "stats is not defined".** Since 0.4 (M17) the callback that records an export import referred to a variable it never received, so a Claude or ChatGPT export placed in `Innboks` was renamed "(feilet)" instead of being read. Dry-runs worked, which hid it. Found by the new suite.
+- New suite `server/test-eksporter.mjs` (30 checks against temporary folders).
+- `PRIVACY.md` section 3 names the export files in Downloads.
+
 ## 0.5.18 — 2026-11-25 (the card can page and go back)
 
 - **Paging in the list.** A list card showed at most 10 hits and said "ask Claude for more"; Claude then had to fetch the rest as text. The list now has "Forrige N" and "Neste N" with "Viser 11–20 av 143". `tua_card` takes `offset`, and the text answer tells the model how to get the next page.

@@ -1,8 +1,9 @@
-// Tua-plugin 0.5.18 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.19 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import path__default from 'node:path';
 import crypto__default from 'node:crypto';
 import { kanLese, formatAv, FORMATER, les } from './lesere.mjs';
+import { erCopilotCsv } from './lesere-ai.mjs';
 import { ensureArchive, FILES_ROOT, INBOX_DIR, noteImport, filesMode, erTuaSak, load, upsert, save, LEVELS, levelOf } from './store.mjs';
 import { lagSkjermer, kjentePersoner, skrivNivåer as skrivNiv_er, ord } from './motor.mjs';
 
@@ -80,7 +81,7 @@ function innboksDokumenter() {
   let navn = [];
   try { navn = fs__default.readdirSync(INBOX_DIR); } catch { return [] }
   return navn.filter((n) => !n.startsWith('.') && !/ \(feilet\)\./i.test(n) && kanLese(n)).map((n) => path__default.join(INBOX_DIR, n))
-    .filter((p) => { try { return fs__default.statSync(p).isFile() && !erTuaSak(p) && !erLenkefil(p) } catch { return false } })
+    .filter((p) => { try { return fs__default.statSync(p).isFile() && !erTuaSak(p) && !erLenkefil(p) && !erCopilotCsv(p) } catch { return false } })
     .sort((a, b) => a.localeCompare(b, 'no'))
     .map((p) => { const st = fs__default.statSync(p); const f = formatAv(p); return { sti: p, navn: path__default.basename(p), format: f, label: FORMATER[f].label, bytes: st.size, mtime: st.mtimeMs } })
 }

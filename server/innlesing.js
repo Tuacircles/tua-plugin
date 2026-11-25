@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { les, formatAv, FORMATER, LeseFeil, kanLese } from './lesere.js'
+import { erCopilotCsv } from './lesere-ai.js'   // 0.5.19: en Copilot-eksport (csv) er samtaler, ikke et dokument — eksportimporten tar den
 import { load, save, upsert, levelOf, LEVELS, INBOX_DIR, FILES_ROOT, filesMode, ensureArchive, noteImport, erTuaSak } from './store.js'
 import { skrivNivåer, ord, lagSkjermer, kjentePersoner } from './motor.js'
 
@@ -125,7 +126,7 @@ export function innboksDokumenter() {
   let navn = []
   try { navn = fs.readdirSync(INBOX_DIR) } catch { return [] }
   return navn.filter((n) => !n.startsWith('.') && !/ \(feilet\)\./i.test(n) && kanLese(n)).map((n) => path.join(INBOX_DIR, n))
-    .filter((p) => { try { return fs.statSync(p).isFile() && !erTuaSak(p) && !erLenkefil(p) } catch { return false } })
+    .filter((p) => { try { return fs.statSync(p).isFile() && !erTuaSak(p) && !erLenkefil(p) && !erCopilotCsv(p) } catch { return false } })
     .sort((a, b) => a.localeCompare(b, 'no'))
     .map((p) => { const st = fs.statSync(p); const f = formatAv(p); return { sti: p, navn: path.basename(p), format: f, label: FORMATER[f].label, bytes: st.size, mtime: st.mtimeMs } })
 }

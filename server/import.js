@@ -100,6 +100,7 @@ export function firstSentence(t, max = S_MAX) {
 export const promptTitle = (t) => titleOf(firstSentence(t, 80), 'Spørsmål')
 // Parene, samtaleS/samtaleM og samtaleFraSak bor i samtaletekst.js (skive 1, arb. 33) — eksportert videre herfra så hooken og testene er uendret
 import { nyttPar, samtaleS, samtaleM, kortTittel } from './samtaletekst.js'
+import { finnGemini, parseGemini, erGeminiJson, erCopilotCsv, parseCopilotCsv } from './lesere-ai.js'   // 0.5.19 (arb. 36 grep 4): Gemini (Takeout) og Copilot (CSV)
 export { kortTittel }
 // Skive 3 (arb. 33 §7): gjentatt kjøring = en samtale-sak med samme kortede tittel, prosjekt og kilde finnes alt (en annen økt). Nøkkelen er fortsatt økt-id — to økter er to økter;
 // flagget gjør regelen synlig i fila, og visningen folder dem til én linje («9 kjøringer»). review --gjentatt merker eksisterende dubletter.
@@ -700,6 +701,7 @@ export function parseChatGPT(dir) {
 
 // Hvilken eksport er dette? ChatGPT har conversations.json med `mapping`; Claude har samtaler (chat_messages) eller
 // prosjekter (name + docs) i en eller flere json-filer. null = ingen av delene.
+export { findRoot, isManifest }
 export function detect(dir) {
   const p = path.join(dir, 'conversations.json')
   if (exists(p)) {
@@ -723,7 +725,10 @@ function findRoot(dir, loose = false) {
 }
 
 // Zip → temp-mappe (bare json-filene; medier i ChatGPT-eksporten pakkes ikke ut). Selve utpakkingen ligger i unzip.js.
-const unzip = (zipPath) => unzipToTemp(zipPath, (tmp) => !!findRoot(tmp, true))
+const unzip = (zipPath) => {
+  try { return unzipToTemp(zipPath, (tmp) => !!findRoot(tmp, true)) }
+  catch (e) { if (/^takeout-/i.test(path.basename(zipPath))) throw new Error(`${path.basename(zipPath)}: Google Takeout uten JSON — eksporten er trolig bestilt som HTML. Bestill på nytt: Takeout › «Min aktivitet» › «Flere formater» › velg JSON, og bare «Gemini-apper».`); throw e }
+}
 
 // ── Claude-eksporten slik den faktisk kommer (sett hos Erik 14.10.2026) ────
 // Eksportsiden gir en manifest-<uuid>-<tid>.json med `data_files[]` ({filename, category, part, batch_index, export_url})
@@ -750,9 +755,9 @@ export const manifestReport = (st) => [
   'Kategoriene conversations (samtaler), projects (prosjekter med dokumenter), design_chats (design-samtaler med prosjekt) og memories (Claudes minne om deg) blir atomer. frames og light_metadata legges i Ferdig uten atomer.',
 ].join('\n')
 // projects.json fra en annen kategori-zip (Innboks eller Ferdig) — så samtaler får prosjektnavn selv om projects-000.zip kom separat
-function siblingProjects(log) {
+function siblingProjects(log, ekstra = []) {
   const out = []
-  for (const z of inboxFiles().filter((p) => /^projects-\d+(?: \(.*\))?\.zip$/i.test(path.basename(p)))) {
+  for (const z of [...inboxFiles(), ...ekstra].filter((p) => /^projects-\d+(?: \(.*\))?\.zip$/i.test(path.basename(p)))) {
     try { const t = unzip(z); out.push(...collectClaude(t).projects); fs.rmSync(t, { recursive: true, force: true }) } catch (e) { log(`  prosjekter i ${path.basename(z)} kunne ikke leses: ${e.message}`) }
   }
   return out
@@ -765,9 +770,22 @@ const DESCRIBE = {
 
 // ── eksport-import ──────────────────────────────────────────────────────────
 // Returnerer rapporten (tekst + tall). Skriver ingenting når dryRun.
-export function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_MIN, after = null, log = () => {}, moveTo = null } = {}) {
+// 0.5.19: `via` sier hvor fila ble funnet («Innboks» eller «Nedlastinger»), `søsken` er andre filer ved siden av (projects-*.zip i Nedlastinger).
+// Gemini (Takeout-zip, -mappe eller json-fila alene) og Copilot (csv) leses av lesere-ai.js og går samme vei videre som ChatGPT.
+const EKSPORT = { claude: ['Claude-eksport', 'Claude-samtaler'], chatgpt: ['ChatGPT-eksport', 'ChatGPT-samtaler'], gemini: ['Gemini-eksport (Google Takeout)', 'Gemini-samtaler'], copilot: ['Copilot-eksport', 'Copilot-samtaler'] }
+export function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_MIN, after = null, log = () => {}, moveTo = null, via = 'Innboks', søsken = [] } = {}) {
   const t0 = Date.now()
   const name = path.basename(src)
+  const ferdigTolket = (data, kind) => {
+    const [label, defaultProject] = EKSPORT[kind]
+    log(`${name}: ${label} · ${data.convs.length} samtaler${dryRun ? ' · DRY-RUN' : ''}`)
+    const r = importParsed(data, { name, label, kind, dryRun, project, minChars, after, log, moveTo, via, defaultProject, reportKey: `import:${name}`, reportName: `Import: ${name}`, reportConvo: via, extraLines: data.merknader || [],
+      afterSave: () => noteImport('eksport', { fil: name, kind }) })
+    if (!dryRun) log(`${name}: ${r.stats.nye} nye · ${r.stats.oppdatert} oppdatert · ${r.stats.uendret} uendret · ${r.stats.korte} korte · ${r.written} filer skrevet · ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+    return { report: r.report, stats: r.stats, kind, count: data.convs.length }
+  }
+  if (fs.statSync(src).isFile() && /\.csv$/i.test(src)) { if (!erCopilotCsv(src)) throw new Error(`${name}: ikke en Copilot-eksport (venter kolonnene Type og Content)`); return ferdigTolket(parseCopilotCsv(src), 'copilot') }
+  if (fs.statSync(src).isFile() && erGeminiJson(src)) return ferdigTolket(parseGemini(src), 'gemini')
   // manifestet alene: mottaksstatus, ingen atomer utover rapporten
   if (fs.statSync(src).isFile() && isManifest(src)) {
     const st = manifestStatus() || { manifest: name, files: [], missing: [], present: [] }
@@ -781,6 +799,8 @@ export function importExport(src, { dryRun = false, project = null, minChars = D
   const root = findRoot(dir) || findRoot(dir, true)
   if (!root) throw new Error(`${name}: fant ingen json-filer`)
   const kind = detect(root)
+  const gemini = kind ? null : finnGemini(dir)
+  if (gemini) { try { return ferdigTolket(parseGemini(gemini), 'gemini') } finally { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }) } }
   if (!kind) {
     // en kategori vi ikke leser ennå (memories, design_chats, frames, light_metadata …): flyttes til Ferdig med beskjed om hva den inneholder
     const found = allJsons(root)
@@ -790,14 +810,14 @@ export function importExport(src, { dryRun = false, project = null, minChars = D
     if (tmp) fs.rmSync(tmp, { recursive: true, force: true })
     return { report, stats: { unsupported: true }, kind: 'ukjent', count: 0 }
   }
-  const data = kind === 'claude' ? parseClaude(root, { extraProjects: collectClaude(root).projects.length ? [] : siblingProjects(log) }) : parseChatGPT(root)
+  const data = kind === 'claude' ? parseClaude(root, { extraProjects: collectClaude(root).projects.length ? [] : siblingProjects(log, søsken) }) : parseChatGPT(root)
   const label = kind === 'claude' ? 'Claude-eksport' : 'ChatGPT-eksport'
   log(`${name}: ${label} · ${data.convs.length} samtaler · ${data.docs.length} dokumenter · ${(data.minner || []).length} minner${dryRun ? ' · DRY-RUN' : ''}`)
   const r = importParsed(data, {
-    name, label, kind, dryRun, project, minChars, after, log, moveTo, via: 'Innboks',
+    name, label, kind, dryRun, project, minChars, after, log, moveTo, via,
     defaultProject: kind === 'claude' ? 'Claude-samtaler' : 'ChatGPT-samtaler',
-    reportKey: `import:${name.replace(/ \(.*\)(?=\.zip$)/, '')}`, reportName: `Import: ${name}`, reportConvo: 'Innboks',
-    afterSave: (atoms) => {
+    reportKey: `import:${name.replace(/ \(.*\)(?=\.zip$)/, '')}`, reportName: `Import: ${name}`, reportConvo: via,
+    afterSave: (atoms, stats) => {                                    // 0.5.19: `stats` kom ikke inn her — hver ekte eksportimport stoppet med «stats is not defined»
       const st = manifestStatus()                                      // oppdater mottaksstatusen når en kategori-zip er lest
       if (st) upsert(atoms, { key: 'import:eksport-manifest', name: 'Claude-eksport: mottak', content: manifestReport(st), project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], drift: true, short: clip(`Claude-eksport: ${st.present.length} av ${st.files.length} filer mottatt${st.missing.length ? `; mangler ${st.missing.map((f) => f.filename).join(', ')}` : ''}.`, S_MAX) })
       noteImport('eksport', { fil: name, kind, nye: stats.nye, oppdatert: stats.oppdatert })
@@ -1218,7 +1238,7 @@ export const historyLine = (c = historyCounts()) => {
 }
 
 // ── Innboks: overvåking ─────────────────────────────────────────────────────
-const isCandidate = (p) => { try { if (/ \(feilet\)/.test(p)) return false; const st = fs.statSync(p); return (st.isFile() && (/\.zip$/i.test(p) || isManifest(p))) || (st.isDirectory() && !!findRoot(p)) } catch { return false } }
+const isCandidate = (p) => { try { if (/ \(feilet\)/.test(p)) return false; const st = fs.statSync(p); return (st.isFile() && (/\.zip$/i.test(p) || isManifest(p) || erCopilotCsv(p) || erGeminiJson(p))) || (st.isDirectory() && (!!findRoot(p) || !!finnGemini(p))) } catch { return false } }
 const stable = (p) => { try { const a = fs.statSync(p).size; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); return fs.statSync(p).size === a } catch { return false } }
 const uniq = (dir, base) => { let p = path.join(dir, base); if (!exists(p)) return p; const e = path.extname(base), b = base.slice(0, base.length - e.length); return path.join(dir, `${b} (${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')})${e}`) }
 export function inboxPending() { try { return fs.readdirSync(INBOX_DIR).filter((n) => !n.startsWith('.') && n !== 'Ferdig' && isCandidate(path.join(INBOX_DIR, n))) } catch { return [] } }

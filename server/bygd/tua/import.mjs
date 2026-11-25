@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.18 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.19 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import os from 'node:os';
 import path__default from 'node:path';
@@ -11,6 +11,7 @@ import { CLAUDE_APP_DIR, posix } from './platform.mjs';
 import { lesInnInnboks, innboksDokumenter } from './innlesing.mjs';
 import { arbeidForslag } from './arbeid.mjs';
 import { kortTittel, samtaleM, samtaleS, nyttPar } from './samtaletekst.mjs';
+import { erCopilotCsv, parseCopilotCsv, erGeminiJson, parseGemini, finnGemini } from './lesere-ai.mjs';
 
 // import.js — «Ta med historikken» (M14 + M17): tidligere samtaler og dokumenter blir atomer. Kildene:
 //
@@ -662,9 +663,6 @@ function parseChatGPT(dir) {
   });
   return { kind: 'chatgpt', convs, docs: [], projects: [], format: { felter: [...seen].sort(), prosjektkobling: null, prosjekterIFila: 0 } }
 }
-
-// Hvilken eksport er dette? ChatGPT har conversations.json med `mapping`; Claude har samtaler (chat_messages) eller
-// prosjekter (name + docs) i en eller flere json-filer. null = ingen av delene.
 function detect(dir) {
   const p = path__default.join(dir, 'conversations.json');
   if (exists(p)) {
@@ -685,7 +683,10 @@ function findRoot(dir, loose = false) {
 }
 
 // Zip → temp-mappe (bare json-filene; medier i ChatGPT-eksporten pakkes ikke ut). Selve utpakkingen ligger i unzip.js.
-const unzip = (zipPath) => unzipToTemp(zipPath, (tmp) => !!findRoot(tmp, true));
+const unzip = (zipPath) => {
+  try { return unzipToTemp(zipPath, (tmp) => !!findRoot(tmp, true)) }
+  catch (e) { if (/^takeout-/i.test(path__default.basename(zipPath))) throw new Error(`${path__default.basename(zipPath)}: Google Takeout uten JSON — eksporten er trolig bestilt som HTML. Bestill på nytt: Takeout › «Min aktivitet» › «Flere formater» › velg JSON, og bare «Gemini-apper».`); throw e }
+};
 
 // ── Claude-eksporten slik den faktisk kommer (sett hos Erik 14.10.2026) ────
 // Eksportsiden gir en manifest-<uuid>-<tid>.json med `data_files[]` ({filename, category, part, batch_index, export_url})
@@ -712,9 +713,9 @@ const manifestReport = (st) => [
   'Kategoriene conversations (samtaler), projects (prosjekter med dokumenter), design_chats (design-samtaler med prosjekt) og memories (Claudes minne om deg) blir atomer. frames og light_metadata legges i Ferdig uten atomer.',
 ].join('\n');
 // projects.json fra en annen kategori-zip (Innboks eller Ferdig) — så samtaler får prosjektnavn selv om projects-000.zip kom separat
-function siblingProjects(log) {
+function siblingProjects(log, ekstra = []) {
   const out = [];
-  for (const z of inboxFiles().filter((p) => /^projects-\d+(?: \(.*\))?\.zip$/i.test(path__default.basename(p)))) {
+  for (const z of [...inboxFiles(), ...ekstra].filter((p) => /^projects-\d+(?: \(.*\))?\.zip$/i.test(path__default.basename(p)))) {
     try { const t = unzip(z); out.push(...collectClaude(t).projects); fs__default.rmSync(t, { recursive: true, force: true }); } catch (e) { log(`  prosjekter i ${path__default.basename(z)} kunne ikke leses: ${e.message}`); }
   }
   return out
@@ -727,9 +728,22 @@ const DESCRIBE = {
 
 // ── eksport-import ──────────────────────────────────────────────────────────
 // Returnerer rapporten (tekst + tall). Skriver ingenting når dryRun.
-function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_MIN, after = null, log = () => {}, moveTo = null } = {}) {
+// 0.5.19: `via` sier hvor fila ble funnet («Innboks» eller «Nedlastinger»), `søsken` er andre filer ved siden av (projects-*.zip i Nedlastinger).
+// Gemini (Takeout-zip, -mappe eller json-fila alene) og Copilot (csv) leses av lesere-ai.js og går samme vei videre som ChatGPT.
+const EKSPORT = { claude: ['Claude-eksport', 'Claude-samtaler'], chatgpt: ['ChatGPT-eksport', 'ChatGPT-samtaler'], gemini: ['Gemini-eksport (Google Takeout)', 'Gemini-samtaler'], copilot: ['Copilot-eksport', 'Copilot-samtaler'] };
+function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_MIN, after = null, log = () => {}, moveTo = null, via = 'Innboks', søsken = [] } = {}) {
   const t0 = Date.now();
   const name = path__default.basename(src);
+  const ferdigTolket = (data, kind) => {
+    const [label, defaultProject] = EKSPORT[kind];
+    log(`${name}: ${label} · ${data.convs.length} samtaler${dryRun ? ' · DRY-RUN' : ''}`);
+    const r = importParsed(data, { name, label, kind, dryRun, project, minChars, after, log, moveTo, via, defaultProject, reportKey: `import:${name}`, reportName: `Import: ${name}`, reportConvo: via, extraLines: data.merknader || [],
+      afterSave: () => noteImport('eksport', { fil: name, kind }) });
+    if (!dryRun) log(`${name}: ${r.stats.nye} nye · ${r.stats.oppdatert} oppdatert · ${r.stats.uendret} uendret · ${r.stats.korte} korte · ${r.written} filer skrevet · ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    return { report: r.report, stats: r.stats, kind, count: data.convs.length }
+  };
+  if (fs__default.statSync(src).isFile() && /\.csv$/i.test(src)) { if (!erCopilotCsv(src)) throw new Error(`${name}: ikke en Copilot-eksport (venter kolonnene Type og Content)`); return ferdigTolket(parseCopilotCsv(src), 'copilot') }
+  if (fs__default.statSync(src).isFile() && erGeminiJson(src)) return ferdigTolket(parseGemini(src), 'gemini')
   // manifestet alene: mottaksstatus, ingen atomer utover rapporten
   if (fs__default.statSync(src).isFile() && isManifest(src)) {
     const st = manifestStatus() || { manifest: name, files: [], missing: [], present: [] };
@@ -743,6 +757,8 @@ function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_
   const root = findRoot(dir) || findRoot(dir, true);
   if (!root) throw new Error(`${name}: fant ingen json-filer`)
   const kind = detect(root);
+  const gemini = kind ? null : finnGemini(dir);
+  if (gemini) { try { return ferdigTolket(parseGemini(gemini), 'gemini') } finally { if (tmp) fs__default.rmSync(tmp, { recursive: true, force: true }); } }
   if (!kind) {
     // en kategori vi ikke leser ennå (memories, design_chats, frames, light_metadata …): flyttes til Ferdig med beskjed om hva den inneholder
     const found = allJsons(root);
@@ -752,14 +768,14 @@ function importExport(src, { dryRun = false, project = null, minChars = DEFAULT_
     if (tmp) fs__default.rmSync(tmp, { recursive: true, force: true });
     return { report, stats: { unsupported: true }, kind: 'ukjent', count: 0 }
   }
-  const data = kind === 'claude' ? parseClaude(root, { extraProjects: collectClaude(root).projects.length ? [] : siblingProjects(log) }) : parseChatGPT(root);
+  const data = kind === 'claude' ? parseClaude(root, { extraProjects: collectClaude(root).projects.length ? [] : siblingProjects(log, søsken) }) : parseChatGPT(root);
   const label = kind === 'claude' ? 'Claude-eksport' : 'ChatGPT-eksport';
   log(`${name}: ${label} · ${data.convs.length} samtaler · ${data.docs.length} dokumenter · ${(data.minner || []).length} minner${dryRun ? ' · DRY-RUN' : ''}`);
   const r = importParsed(data, {
-    name, label, kind, dryRun, project, minChars, after, log, moveTo, via: 'Innboks',
+    name, label, kind, dryRun, project, minChars, after, log, moveTo, via,
     defaultProject: kind === 'claude' ? 'Claude-samtaler' : 'ChatGPT-samtaler',
-    reportKey: `import:${name.replace(/ \(.*\)(?=\.zip$)/, '')}`, reportName: `Import: ${name}`, reportConvo: 'Innboks',
-    afterSave: (atoms) => {
+    reportKey: `import:${name.replace(/ \(.*\)(?=\.zip$)/, '')}`, reportName: `Import: ${name}`, reportConvo: via,
+    afterSave: (atoms, stats) => {                                    // 0.5.19: `stats` kom ikke inn her — hver ekte eksportimport stoppet med «stats is not defined»
       const st = manifestStatus();                                      // oppdater mottaksstatusen når en kategori-zip er lest
       if (st) upsert(atoms, { key: 'import:eksport-manifest', name: 'Claude-eksport: mottak', content: manifestReport(st), project: 'Tua', convo: 'Innboks', source: 'Tua', by: 'regel', tags: ['import'], drift: true, short: clip(`Claude-eksport: ${st.present.length} av ${st.files.length} filer mottatt${st.missing.length ? `; mangler ${st.missing.map((f) => f.filename).join(', ')}` : ''}.`, S_MAX) });
       noteImport('eksport', { fil: name, kind, nye: stats.nye, oppdatert: stats.oppdatert });
@@ -1168,7 +1184,7 @@ const historyLine = (c = historyCounts()) => {
 };
 
 // ── Innboks: overvåking ─────────────────────────────────────────────────────
-const isCandidate = (p) => { try { if (/ \(feilet\)/.test(p)) return false; const st = fs__default.statSync(p); return (st.isFile() && (/\.zip$/i.test(p) || isManifest(p))) || (st.isDirectory() && !!findRoot(p)) } catch { return false } };
+const isCandidate = (p) => { try { if (/ \(feilet\)/.test(p)) return false; const st = fs__default.statSync(p); return (st.isFile() && (/\.zip$/i.test(p) || isManifest(p) || erCopilotCsv(p) || erGeminiJson(p))) || (st.isDirectory() && (!!findRoot(p) || !!finnGemini(p))) } catch { return false } };
 const stable = (p) => { try { const a = fs__default.statSync(p).size; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); return fs__default.statSync(p).size === a } catch { return false } };
 const uniq = (dir, base) => { let p = path__default.join(dir, base); if (!exists(p)) return p; const e = path__default.extname(base), b = base.slice(0, base.length - e.length); return path__default.join(dir, `${b} (${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')})${e}`) };
 function inboxPending() { try { return fs__default.readdirSync(INBOX_DIR).filter((n) => !n.startsWith('.') && n !== 'Ferdig' && isCandidate(path__default.join(INBOX_DIR, n))) } catch { return [] } }
@@ -1255,4 +1271,4 @@ if (!globalThis.__TUA_BUNDLE && process.argv[1] && path__default.resolve(process
   }
 }
 
-export { COWORK_ROOT, DEFAULT_MIN, firstPara, historyCounts, historyLine, importAll, importAlt, importCode, importDesktop, importFinder, importShare, inboxPending, listCodeSessions, parseCodeSession, processInbox, processInboxShares, projectOfCwd, titleOf, watchDesktop, watchInbox };
+export { COWORK_ROOT, DEFAULT_MIN, detect, firstPara, historyCounts, historyLine, importAll, importAlt, importCode, importDesktop, importExport, importFinder, importShare, inboxPending, listCodeSessions, parseCodeSession, processInbox, processInboxShares, projectOfCwd, titleOf, watchDesktop, watchInbox };

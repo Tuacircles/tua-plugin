@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.18 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.19 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import { $ZodAsyncError, config } from './core.mjs';
 import { $ZodError, $ZodRealError } from './errors.mjs';
 import { finalizeIssue, captureStackTrace } from './util.mjs';

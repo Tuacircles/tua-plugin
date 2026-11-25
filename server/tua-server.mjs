@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.18 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.19 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 globalThis.__TUA_BUNDLE = true;
 import { McpServer } from './bygd/vendor/@modelcontextprotocol/sdk/server/mcp.mjs';
 import { StdioServerTransport } from './bygd/vendor/@modelcontextprotocol/sdk/server/stdio.mjs';
@@ -7,6 +7,7 @@ import { settHørerTil as settH_rerTil, følgereAv as f_lgereAv, erArbeid, løsn
 import { ensureArchive, archiveOptions, filesMode, FILES_ROOT, rootLabel, chooseArchive, load, INBOX_DIR, KINDS, LINK_KINDS, upsert, save, WELCOME_KEY, finishOnboarding, SHORT_L, S_MAX, M_MAX, LONG_L, fmtTime, fileOf, search, visibleIn, readVersion, versions, vaultClamp, maxLevel, hasExternalEdits, related, needsLevel, compose, logDelivery, setShare, FILE, onboardingActive, welcomeAtom, linksFor, isVault, sources, staleSources, renderStatus, deliveries, isStale, clampLevel } from './bygd/tua/store.mjs';
 import { DEFAULT_MIN, processInbox, processInboxShares, inboxPending, importShare, importDesktop, importFinder, importAll, historyCounts, importCode, watchInbox, watchDesktop, historyLine } from './bygd/tua/import.mjs';
 import { watchFinder } from './bygd/tua/finder.mjs';
+import { lesNedlastinger, eksportVeiviser, watchNedlastinger } from './bygd/tua/eksporter.mjs';
 import { lesHistorikk, settAutoHistorikk, startLesing, autoHistorikk, historikkTilstand, forslagArkiv, funnetLinje, kortLinje, watchHistorikk } from './bygd/tua/historikk.mjs';
 import { skjermerFor, erFilSak, lever, endepunkt, maksNivå as maksNiv_, leverSamtale, MotorFeil, anslåTokens as ansl_Tokens, ord, del } from './bygd/tua/motor.mjs';
 import { erSettNoensteds } from './bygd/tua/skjermvalg.mjs';
@@ -37,7 +38,7 @@ import { enumType, booleanType, stringType, numberType, arrayType, objectType, u
 // NB: stdout er MCP-protokollen. All logging må gå til stderr.
 
 // M17: vaktene — Innboks (eksporter og delte lenker), Desktop-cachen (hvert 10. min), Finder-mappene. Ingenting før arkivet er valgt.
-const startWatchers = () => { const log = (m) => console.error(`[tua] ${m}`); watchInbox({ log }); watchDesktop({ log }); watchFinder({ log }); watchHistorikk({ log }); };
+const startWatchers = () => { const log = (m) => console.error(`[tua] ${m}`); watchInbox({ log }); watchDesktop({ log }); watchFinder({ log }); watchHistorikk({ log }); watchNedlastinger({ log, på: autoHistorikk, ved: () => startLesing({ log, bareNedlastinger: true }) }); };
 const CLIENT = process.env.TUA_CLIENT || (process.env.CLAUDECODE ? 'Claude Code' : 'Claude Desktop');
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE);
 const APP = process.env.TUA_APP_URL || 'http://127.0.0.1:5274/';          // M12: kartet som egen app (broen serverer det)
@@ -49,7 +50,7 @@ const addr = (id) => `${APP}#atom/${id}`;           // atomets adresse i kartet 
 // 0.5.17 (arb. 36 grep 1): samme inngang, annen jobb — `--les-historikk` leser det som ligger på maskinen og avslutter. Serveren starter
 // den som en egen prosess (historikk.js startLesing), så verktøykall aldri venter på lesingen.
 if (process.argv.includes('--les-historikk')) {
-  const r = await lesHistorikk({ log: (m) => console.error(`[tua] ${m}`), tving: process.argv.includes('--tving') });
+  const r = await lesHistorikk({ log: (m) => console.error(`[tua] ${m}`), tving: process.argv.includes('--tving'), bareNedlastinger: process.argv.includes('--bare-nedlastinger') });
   if (r.hoppet) console.error(`[tua] Historikken: ikke lest (${r.hoppet})`);
   process.exit(r.feil ? 1 : 0);
 }
@@ -66,11 +67,11 @@ const INSTRUCTIONS =
   '(4) Ved lagring: content = hele innholdet, short = ingress (alltid, ≤ 300 tegn), medium når over ~3 000 tegn, project = brukerens prosjektnavn, convo = 3–8 ord om samtalen. ' +
   '(5) Står det en linje som begynner med «oppsett:» eller «onboarding:» i et verktøysvar, følg den etter at du har svart på det brukeren ba om — det er brukerens første økt med Tua. Arkivstedet velger brukeren selv (tua_setup); gjett aldri. ' +
   '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Codex-samtaler (~/.codex/sessions — Codex CLI og ChatGPT-appen; kilde=codex), Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt, og det andre som ligger lokalt (Code, Cowork, Codex, dokumenter) leses av seg selv ved oppstart og omtrent hver time — brukeren slår det av med tua_setup(historikk=false). ' +
-  'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen. ' +
+  'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. En eksport brukeren har lastet ned (Claude, ChatGPT, Gemini via Google Takeout, Copilot) kjennes igjen i Nedlastinger og leses der av seg selv; spør brukeren hvordan samtalene fra nettleser eller mobil kommer med, gir tua_import(kilde=eksport) veiviseren med lenkene. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen. ' +
   '(7) SIDEN SIST: første gang du bruker Tua i en samtale, kommer en blokk «Siden sist i Tua» (Spør-tråder, konklusjoner, delinger, filer lest inn i appen) — gjengi den i én kort liste før du svarer, så brukeren ser hva som er gjort i Tua. tua_search viser Spør-tråder og konklusjoner for prosjektet øverst. ' +
   '(8) «DEL MED <navn>»: tua_share deler med en PERSON (kollega) — lager en delingssak (skjermet gjengivelse, logget) og en lenke til mottakersiden (låste rader på nivået, «Be om hele»); S som standard, M/L bare når brukeren sier det. Kall først med forhandsvis=true og still ETT spørsmål («Anna får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi lenka, nedlastingslenka og den kopierbare teksten videre slik de er.';
 
-const server = new McpServer({ name: 'tua', version: '0.5.18' }, { instructions: INSTRUCTIONS });
+const server = new McpServer({ name: 'tua', version: '0.5.19' }, { instructions: INSTRUCTIONS });
 
 // M14: er arkivet ikke valgt, stoppes hvert verktøykall med et spørsmål om sted — via elicitation når klienten støtter det
 // (Code gjør det), ellers som en «oppsett:»-linje modellen skal stille brukeren. Pakket rundt registerTool, så det gjelder
@@ -220,10 +221,11 @@ server.registerTool(
       'kilde=alt (anbefalt ved «ta med historikken»): alle kildene under + Innboks. kilde=code: Claude Code-øktene (~/.claude/projects; én atom per økt + substansielle svar og dokumenter). ' +
       'kilde=cowork: Claude Desktops Cowork-økter (audit.jsonl; prosjekt = mappa valgt i Cowork). kilde=codex: Codex-samtalene (~/.codex/sessions — Codex CLI og ChatGPT-appen skriver samme rollout-filer; Codex har ingen hooks, så dette er eneste fangst; kilde «Codex»). kilde=desktop: Desktop-samtalene fra Claude Desktops egen cache — alt som har vært åpnet i Desktop, med prosjekt, verktøykall og filer Claude skrev; leses også av seg selv hvert 10. minutt. ' +
       'kilde=finder: dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord, ved referanse (aldri kopi). kilde=lenke: en delt Claude-lenke (claude.ai/share/…) brukeren limer inn — gi den i `lenke`. kilde=innboks: eksport-zip, lenkefiler og løse dokumenter (PDF, tekst, md, html, csv, docx) som ligger i Innboks nå — dokumentene leses lokalt og blir saker med ingress og sammendrag fra den lokale modellen (project velger prosjekt, standard «Innboks»). ' +
+      'kilde=eksport: eksporter fra Claude, ChatGPT, Gemini (Google Takeout, JSON) og Copilot (CSV) som ligger i Nedlastinger — kjennes igjen og leses der, fila blir liggende urørt; finnes ingen, svarer verktøyet med veiviseren (lenke rett til de fire bestillingssidene). Bruk den også når brukeren spør hvordan samtalene fra nettleser eller mobil kommer med. ' +
       'Bruk når brukeren sier «ta med historikken», «importer samtalene mine», «hent inn gamle økter», «lagre denne delte lenken». Kjør med dryRun=true først og vis tallene. ' +
       'Idempotent — kan kjøres igjen; bare endrede økter får ny versjon. Samtaler som bare finnes på claude.ai web/mobil: be brukeren åpne dem i Desktop eller lage en delt lenke; Tua kaller aldri det interne API-et.',
     inputSchema: {
-      kilde: enumType(['alt', 'code', 'cowork', 'codex', 'desktop', 'finder', 'lenke', 'innboks']).optional().describe('alt, code (standard), cowork, codex, desktop, finder, lenke eller innboks.'),
+      kilde: enumType(['alt', 'code', 'cowork', 'codex', 'desktop', 'finder', 'lenke', 'innboks', 'eksport']).optional().describe('alt, code (standard), cowork, codex, desktop, finder, lenke, innboks eller eksport.'),
       lenke: stringType().optional().describe('For kilde=lenke: én eller flere delte lenker (https://claude.ai/share/<id>), eller teksten de står i.'),
       project: stringType().optional().describe('Bare økter fra dette prosjektet (repo-/prosjektnavn).'),
       etter: stringType().optional().describe('Bare økter endret etter dato, ÅÅÅÅ-MM-DD.'),
@@ -245,6 +247,11 @@ server.registerTool(
     if (kilde === 'lenke') {
       if (!lenke) return text('Gi den delte lenken i `lenke` (https://claude.ai/share/<id>).')
       return text((await importShare(lenke, { ...opts, via: `chat (${CLIENT})` })).report + tail('import:lenker'))
+    }
+    if (kilde === 'eksport') {
+      const r = lesNedlastinger({ dryRun: !!dryRun, log });
+      if (!r.funnet.length) return text(`Fant ingen eksport i Nedlastinger ennå.\n\n${eksportVeiviser({ auto: autoHistorikk() })}\n\nGjengi lenkene og stegene for den tjenesten brukeren spør om; ikke alle fire hvis brukeren bare bruker én.`)
+      return text(r.report + (dryRun ? '\n\nKjør igjen uten dryRun for å lese dem.' : ''))
     }
     if (kilde === 'desktop') return text(importDesktop(opts).report + tail('import:desktop'))
     if (kilde === 'finder') return text(importFinder(opts).report + tail('import:finder'))

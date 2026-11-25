@@ -22,3 +22,14 @@ export function unzipToTemp(zipPath, hasRoot) {
   }
   throw new Error(`kunne ikke pakke ut ${path.basename(zipPath)}: ${last || 'ingen json-filer i zip-en'} (trenger unzip eller tar)`)
 }
+
+// 0.5.19 (arb. 36 grep 3): bare innholdslista i en zip — ingenting pakkes ut. Brukes til å kjenne igjen en eksport i Nedlastinger.
+export function zipEntries(zipPath) {
+  const tries = process.env.TUA_NO_UNZIP ? [] : [['unzip', ['-Z1', zipPath]]]
+  tries.push(['tar', ['-tf', zipPath]])
+  for (const [cmd, args] of tries) {
+    const r = spawnSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    if (!r.error && r.status === 0 && r.stdout) return r.stdout.split(/\r?\n/).filter(Boolean)
+  }
+  return []
+}

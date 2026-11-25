@@ -20,9 +20,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { load, save, upsert, filesMode, FILES_ROOT, INBOX_DIR, readConfig, writeConfig, archiveOptions, ensureArchive, S_MAX } from './store.js'
+import { load, save, upsert, filesMode, FILES_ROOT, readConfig, writeConfig, archiveOptions, ensureArchive, S_MAX } from './store.js'
 import { importAlt } from './import.js'
 import { insideTmp } from './platform.js'
+import { lesNedlastinger, NEDLASTINGER } from './eksporter.js'   // 0.5.19 (arb. 36 grep 3): eksporter leses der de lander
 
 const AKTIV_MS = 30 * 60 * 1000          // økter rørt siste halvtime er i bruk
 const MELLOM_MS = 50 * 60 * 1000         // minst så lenge mellom to runder, uansett hvor mange Tua-prosesser som kjører
@@ -68,12 +69,12 @@ export function funnetLinje(c = {}) {
 // Første gang: alt (også Desktop-cachen og dokumentene, så kortet har hele bildet). Siden: Code, Cowork og Codex — Desktop-cachen og
 // Finder-mappene har egne vakter (watchDesktop hvert 10. minutt, watchFinder). Innboks har sin vakt (watchInbox).
 let leser = false
-export async function lesHistorikk({ log = () => {}, tving = false } = {}) {
+export async function lesHistorikk({ log = () => {}, tving = false, bareNedlastinger = false } = {}) {
   if (leser) return { hoppet: 'leser alt' }
   if (ensureArchive().needsChoice || !filesMode()) return { hoppet: 'arkivet er ikke valgt' }
   if (!tving && !autoHistorikk()) return { hoppet: 'slått av' }
   const t = historikkTilstand(), nå = Date.now()
-  if (!tving && t.sist && nå - t.sist < MELLOM_MS) return { hoppet: 'lest nylig' }
+  if (!tving && !bareNedlastinger && t.sist && nå - t.sist < MELLOM_MS) return { hoppet: 'lest nylig' }
   if (t.lås && t.lås.pid !== process.pid && nå - t.lås.at < LÅS_MS && lever(t.lås.pid)) return { hoppet: 'en annen Tua-prosess leser' }
   leser = true
   skriv({ lås: { pid: process.pid, at: nå } })
@@ -84,6 +85,14 @@ export async function lesHistorikk({ log = () => {}, tving = false } = {}) {
   const første = !t.første
   const tall = {}
   try {
+    // 0.5.19: en eksport som er lastet ned (Claude, ChatGPT, Gemini, Copilot) leses der den ligger — i hver runde, og alene når vakta ser en ny fil
+    try { const n = lesNedlastinger({ log }); if (n.lest.length) tall.nedlastinger = { nye: n.nye, oppdatert: n.lest.reduce((s, e) => s + (e.stats?.oppdatert || 0), 0), filer: n.lest.length } } catch (e) { tall.nedlastinger = { feil: String(e?.message || e) } }
+    if (bareNedlastinger) {
+      if (tall.nedlastinger?.nye) skrivDetteFantJeg()
+      skriv({ lås: null, nedlastinger: { at: Date.now(), ...(tall.nedlastinger || {}) } })
+      if (tall.nedlastinger) log(`Historikken: eksport i Nedlastinger lest — ${tall.nedlastinger.feil || `${tall.nedlastinger.filer} ${tall.nedlastinger.filer === 1 ? 'fil' : 'filer'}, ${tall.nedlastinger.nye} nye samtaler`}`)
+      return { tall, nye: tall.nedlastinger?.nye || 0, bareNedlastinger: true }
+    }
     await importAlt({
       kilder: første ? ['code', 'cowork', 'codex', 'desktop', 'finder'] : ['code', 'cowork', 'codex'],
       eldreEnn: AKTIV_MS, bareEndret: !første, log: () => {},
@@ -106,14 +115,14 @@ export async function lesHistorikk({ log = () => {}, tving = false } = {}) {
 
 // Egen prosess: server-inngangen (kildefila eller den bygde) med --les-historikk. Returnerer et løfte som løses når barnet er ferdig.
 let barn = null
-export function startLesing({ log = () => {}, tving = false, inngang = process.argv[1] } = {}) {
+export function startLesing({ log = () => {}, tving = false, bareNedlastinger = false, inngang = process.argv[1] } = {}) {
   if (barn) return barn
   if (ensureArchive().needsChoice || !filesMode() || (!tving && !autoHistorikk())) return Promise.resolve({ hoppet: true })
   const t = historikkTilstand()
-  if (!tving && t.sist && Date.now() - t.sist < MELLOM_MS) return Promise.resolve({ hoppet: true })
+  if (!tving && !bareNedlastinger && t.sist && Date.now() - t.sist < MELLOM_MS) return Promise.resolve({ hoppet: true })
   barn = new Promise((resolve) => {
     try {
-      const p = spawn(process.execPath, [inngang, '--les-historikk', ...(tving ? ['--tving'] : [])], { env: { ...process.env, TUA_FILES_ROOT: FILES_ROOT }, stdio: ['ignore', 'ignore', 'pipe'] })
+      const p = spawn(process.execPath, [inngang, '--les-historikk', ...(tving ? ['--tving'] : []), ...(bareNedlastinger ? ['--bare-nedlastinger'] : [])], { env: { ...process.env, TUA_FILES_ROOT: FILES_ROOT }, stdio: ['ignore', 'ignore', 'pipe'] })
       let err = ''
       p.stderr.on('data', (d) => { err += d; const l = String(d).split('\n').filter((x) => /Historikken/.test(x)); for (const x of l) log(x.replace(/^\[tua\]\s*/, '')) })
       p.on('error', (e) => { log(`Historikken: ${e.message}`); barn = null; resolve({ feil: e.message }) })
@@ -171,7 +180,7 @@ export function detteFantJeg(atoms) {
   const content = [
     medium, '',
     '## Det som ikke er med',
-    `Samtaler som bare finnes på claude.ai i nettleser eller mobil ligger ikke på maskinen. Åpne dem i Claude Desktop, så fanges de, eller legg en eksport i Innboks (${INBOX_DIR}).`, '',
+    `Samtaler som bare finnes i nettleser eller på mobil (claude.ai, ChatGPT, Gemini, Copilot) ligger ikke på maskinen. Bestill en eksport hos leverandøren og last den ned: Tua kjenner den igjen i ${NEDLASTINGER()} og leser den der. Si «hvordan tar jeg med samtalene fra nettleseren?» for lenkene. Claude-samtaler fanges også når du åpner dem i Claude Desktop.`, '',
     '## Hvordan det skjer',
     `Alt er lest lokalt og ligger som vanlige markdown-filer i ${FILES_ROOT}. Ingenting er sendt noe sted. Tua ser etter nye samtaler på maskinen omtrent en gang i timen. Si «slå av automatisk lesing» for å stoppe det (tua_setup historikk=false).`,
   ].join('\n')
