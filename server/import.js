@@ -315,9 +315,13 @@ export function listCoworkSessions(root = COWORK_ROOT) {
 }
 
 // source = 'code' (Claude Code, ~/.claude/projects) eller 'cowork' (Claude Desktop Cowork). Samme parser, samme atom-form.
-export function importCode({ files = null, source = 'code', dryRun = false, project = null, minChars = DEFAULT_MIN, after = null, log = () => {}, skipSession = '' } = {}) {
+// 0.5.17 (arb. 36 grep 1): `eldreEnn` (ms) hopper over filer rørt så nylig — økta er i bruk, hooken har den, den tas neste runde.
+// `bareEndret` leser bare filer endret siden forrige import av samme kilde (med margin for dem som ble hoppet over sist) — bakgrunnsrunden.
+export function importCode({ files = null, source = 'code', dryRun = false, project = null, minChars = DEFAULT_MIN, after = null, log = () => {}, skipSession = '', eldreEnn = 0, bareEndret = false } = {}) {
   const t0 = Date.now()
-  const list = files ? files.map((f) => ({ file: f })) : source === 'cowork' ? listCoworkSessions() : source === 'codex' ? listCodexSessions() : listCodeSessions()
+  let list = files ? files.map((f) => ({ file: f })) : source === 'cowork' ? listCoworkSessions() : source === 'codex' ? listCodexSessions() : listCodeSessions()
+  if (bareEndret) { const sist = importState()[source]?.at || 0; if (sist) list = list.filter((f) => !f.mtime || f.mtime > sist - Math.max(2 * eldreEnn, 60 * 60 * 1000)) }
+  if (eldreEnn) list = list.filter((f) => !f.mtime || f.mtime < Date.now() - eldreEnn)
   const srcLabel = source === 'cowork' ? 'Claude Cowork' : source === 'codex' ? 'Codex' : 'Claude Code'
   const srcRoot = source === 'cowork' ? COWORK_ROOT : source === 'codex' ? CODEX_SESSIONS : CODE_PROJECTS
   // Codex (28.10.2026): samme løkke, egen leser (parseCodexSession), eget nøkkelprefiks codex:<tråd-id>, svarene fra «Codex» (ikke Claude), ordene i UI «samtale»/«rollout-fil»

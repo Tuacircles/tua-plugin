@@ -48,6 +48,7 @@ const desk = await import(mod('desktop.js'))
 const dora = await import(mod('dora.js'))                                     // runde 3a: «Siden sist i Tua» som én linje ved øktstart (Tua → Claude)
 const { posix, insideTmp } = await import(mod('platform.js'))
 const { load, save, upsert, filesMode, S_MAX, SHORT_L, importState, mergeGa } = store
+const hist = await import(mod('historikk.js'))                               // 0.5.17 (arb. 36): historikken leses av seg selv — påminnelsene gjelder bare når bryteren er av
 const arb = await import(mod('arbeid.js'))                                   // friksjon 20: arbeidet som samler — kobling og forslag
 const { parseCodeSession, projectOfCwd, repoRootOf, titleOf, firstPara, isDataDump, MIN_SVAR, inboxPending, pendingCodeSessions, pendingCoworkSessions, pendingCodexSessions, historyCounts, sha8, promptKey, worthKeeping, promptTitle, promptL, firstSentence, samtaleS, samtaleM, forelderAv, isTuaCommand } = imp
 
@@ -119,17 +120,19 @@ try {
     const daysCw = lastCowork ? Math.floor((Date.now() - lastCowork) / DAYS) : null
     const daysCx = lastCodex ? Math.floor((Date.now() - lastCodex) / DAYS) : null
     const parts = []
+    let selvlest = false
+    try { selvlest = hist.autoHistorikk() } catch {}                             // 0.5.17: på → ingen «ikke tatt med»-påminnelser; serveren leser dem selv
     if (inbox.length) parts.push(`${inbox.length} fil${inbox.length === 1 ? '' : 'er'} venter i Innboks (${inbox.join(', ')}) — de importeres av serveren når den starter, eller med tua_import(kilde=innboks)`)
-    if (pending && (days === null || days >= 7)) parts.push(`${pending} Code-økt${pending === 1 ? '' : 'er'} er ikke tatt med i Tua${days === null ? ' (aldri importert)' : ` (siste import for ${days} dager siden)`} — tilby «ta med historikken» (tua_import kilde=code) én gang hvis det passer`)
-    if (pendingCw && (daysCw === null || daysCw >= 7)) parts.push(`${pendingCw} Cowork-økt${pendingCw === 1 ? '' : 'er'} er ikke tatt med${daysCw === null ? ' (aldri importert)' : ` (siste import for ${daysCw} dager siden)`} — tua_import(kilde=cowork)`)
+    if (!selvlest && pending && (days === null || days >= 7)) parts.push(`${pending} Code-økt${pending === 1 ? '' : 'er'} er ikke tatt med i Tua${days === null ? ' (aldri importert)' : ` (siste import for ${days} dager siden)`} — tilby «ta med historikken» (tua_import kilde=code) én gang hvis det passer`)
+    if (!selvlest && pendingCw && (daysCw === null || daysCw >= 7)) parts.push(`${pendingCw} Cowork-økt${pendingCw === 1 ? '' : 'er'} er ikke tatt med${daysCw === null ? ' (aldri importert)' : ` (siste import for ${daysCw} dager siden)`} — tua_import(kilde=cowork)`)
     // 28.10.2026: Codex (CLI og ChatGPT-appen) har ingen hooks — importen er eneste fangst
-    if (pendingCx && (daysCx === null || daysCx >= 7)) parts.push(`${pendingCx} Codex-samtale${pendingCx === 1 ? '' : 'r'} (Codex CLI / ChatGPT-appen) er ikke tatt med${daysCx === null ? ' (aldri importert)' : ` (siste import for ${daysCx} dager siden)`} — tua_import(kilde=codex)`)
+    if (!selvlest && pendingCx && (daysCx === null || daysCx >= 7)) parts.push(`${pendingCx} Codex-samtale${pendingCx === 1 ? '' : 'r'} (Codex CLI / ChatGPT-appen) er ikke tatt med${daysCx === null ? ' (aldri importert)' : ` (siste import for ${daysCx} dager siden)`} — tua_import(kilde=codex)`)
     // M17: Desktop-samtaler i cachen og dokumenter med AI-opphav — raske tall (forrige skanning / bare opphav), hooken har 10 s
     let hc = null
     try { hc = historyCounts({ quick: true, fresh: true }) } catch {}
     const lastDesk = st.desktop?.at || 0, daysDesk = lastDesk ? Math.floor((Date.now() - lastDesk) / DAYS) : null
-    if (hc?.desktopNew && (daysDesk === null || daysDesk >= 7)) parts.push(`${hc.desktopNew} Desktop-samtale${hc.desktopNew === 1 ? '' : 'r'} i Claude Desktops cache er ikke tatt med — tua_import(kilde=desktop); leses ellers av seg selv når serveren kjører`)
-    if (hc?.dokumenter && !st.finder) parts.push(`${hc.dokumenter} dokument${hc.dokumenter === 1 ? '' : 'er'} med AI-opphav i Nedlastinger/Dokumenter/Skrivebord er ikke i Tua — tua_import(kilde=finder)`)
+    if (!selvlest && hc?.desktopNew && (daysDesk === null || daysDesk >= 7)) parts.push(`${hc.desktopNew} Desktop-samtale${hc.desktopNew === 1 ? '' : 'r'} i Claude Desktops cache er ikke tatt med — tua_import(kilde=desktop); leses ellers av seg selv når serveren kjører`)
+    if (!selvlest && hc?.dokumenter && !st.finder) parts.push(`${hc.dokumenter} dokument${hc.dokumenter === 1 ? '' : 'er'} med AI-opphav i Nedlastinger/Dokumenter/Skrivebord er ikke i Tua — tua_import(kilde=finder)`)
     // 21.10: helsesjekkens varsel (docs/rutine-helsesjekk.md steg 7) — rødt i natt → si det i første økt, så slettes fila
     try { const vf = path.join(FILES_ROOT, '.tua', 'helsesjekk-varsel.txt'); const v = fs.readFileSync(vf, 'utf8').trim(); if (v) parts.push(`VARSEL fra Tua-helsesjekken i natt: ${v} — rapporten ligger som atom «Helsesjekk <dato>» i prosjekt Tua. Si det til brukeren først`); fs.unlinkSync(vf) } catch {}
     // 21.10 (Erik): resultatet presenteres som Tua-kort når det er klart — første økt etter kjøringen viser rapporten én gang
@@ -145,7 +148,9 @@ try {
     // M24: aldri importert → pek på /tua_start (alt inn + automatikken på). Et git-repo uten .tua-sync.json → tilby /tua_auto,
     // én gang per repo per 30 dager (husket i <arkiv>/.tua/auto-tilbudt.json). Begge er tilbud; ingenting kjøres uten ja.
     const extra = []
-    if (!st.last) extra.push('ingen historikk er tatt med ennå — /tua_start tar med alt og slår på automatikken; nevn det én gang hvis det passer')
+    // 0.5.17 (arb. 36 grep 5): er historikken lest og kortet ikke vist ennå, vises «Dette fant jeg» nå — én gang (serveren gjør det samme ved første verktøykall)
+    try { const k = hist.kortLinje(); if (k) extra.push(k) } catch {}
+    if (!selvlest && !st.last) extra.push('ingen historikk er tatt med ennå — /tua_start tar med alt og slår på automatikken; nevn det én gang hvis det passer')
     const root = gitRootOf(cwd)
     if (root && !fs.existsSync(path.join(root, '.tua-sync.json')) && !insideArchive(root) && offerOnce(root)) extra.push(`repoet «${path.basename(root)}» speiles ikke til Tua ennå (ingen .tua-sync.json) — tilby /tua_auto én gang hvis det passer: node "${path.join(HERE, '..', 'server', 'sync-tua.js')}" --project "${path.basename(root)}" --install-hook`)
     // Runde 3a (03-avisen §5): det som er gjort i Tua-appen for prosjektet de siste 7 dagene (Spør-tråder, konklusjoner, delinger, filer lest inn) — én linje,
@@ -169,7 +174,7 @@ try {
         } else if (k.åpne?.length) arbeidLinje = `Arbeid i gang i ${project}: ${k.åpne.slice(0, 3).map((r) => `«${r.name}» (${r.samtaler} ${r.samtaler === 1 ? 'samtale' : 'samtaler'})`).join(', ')} — hører denne samtalen til ett av dem, sier brukeren det («hører til …»)`
       }
     } catch (e) { log({ error: `start: ${e?.message || e}` }) }
-    if (parts.length || extra.length || siden || arbeidLinje) process.stdout.write(`Tua: ${[...parts, ...extra, siden, arbeidLinje].filter(Boolean).join('. ')}. ${parts.length ? 'Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. ' : ''}Ikke kjør noe uten at brukeren sier ja.\n`)
+    if (parts.length || extra.length || siden || arbeidLinje) process.stdout.write(`Tua: ${[...parts, ...extra, siden, arbeidLinje].filter(Boolean).join('. ')}. ${!selvlest && parts.length ? 'Ett ja fra brukeren → tua_import(kilde=alt, dryRun=true) viser omfanget først. ' : ''}${selvlest ? 'Samtaler og dokumenter på maskinen leses av seg selv; spør ikke om import. ' : ''}Ikke kjør noe annet uten at brukeren sier ja.\n`)
     log({ pending, pendingCw, desktop: hc?.desktopNew, dokumenter: hc?.dokumenter, inbox: inbox.length, days, daysCw, first: !st.last, repoOffer: extra.length > (st.last ? 0 : 1) })
     if (konfigurert) log({ arkivmappe: konfigurert.root, before: konfigurert.before, note: 'innstillingen «arkivmappe» skrevet til ~/.tua/config.json' })
   } else if (mode === 'prompt') {

@@ -1,19 +1,20 @@
-// Tua-plugin 0.5.16 — bygd av bygg.mjs 2026-11-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.17 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 globalThis.__TUA_BUNDLE = true;
 import { McpServer } from './bygd/vendor/@modelcontextprotocol/sdk/server/mcp.mjs';
 import { StdioServerTransport } from './bygd/vendor/@modelcontextprotocol/sdk/server/stdio.mjs';
 import { registerApps } from './bygd/tua/apps.mjs';
 import { settHørerTil as settH_rerTil, følgereAv as f_lgereAv, erArbeid, løsne as l_sne, delAv } from './bygd/tua/arbeid.mjs';
-import { ensureArchive, archiveOptions, FILES_ROOT, filesMode, rootLabel, chooseArchive, load, INBOX_DIR, KINDS, LINK_KINDS, upsert, save, WELCOME_KEY, finishOnboarding, SHORT_L, S_MAX, M_MAX, LONG_L, fmtTime, fileOf, search, visibleIn, readVersion, versions, vaultClamp, maxLevel, hasExternalEdits, related, needsLevel, compose, logDelivery, setShare, FILE, onboardingActive, welcomeAtom, linksFor, isVault, sources, staleSources, renderStatus, deliveries, isStale, clampLevel } from './bygd/tua/store.mjs';
+import { ensureArchive, archiveOptions, filesMode, FILES_ROOT, rootLabel, chooseArchive, load, INBOX_DIR, KINDS, LINK_KINDS, upsert, save, WELCOME_KEY, finishOnboarding, SHORT_L, S_MAX, M_MAX, LONG_L, fmtTime, fileOf, search, visibleIn, readVersion, versions, vaultClamp, maxLevel, hasExternalEdits, related, needsLevel, compose, logDelivery, setShare, FILE, onboardingActive, welcomeAtom, linksFor, isVault, sources, staleSources, renderStatus, deliveries, isStale, clampLevel } from './bygd/tua/store.mjs';
 import { DEFAULT_MIN, processInbox, processInboxShares, inboxPending, importShare, importDesktop, importFinder, importAll, historyCounts, importCode, watchInbox, watchDesktop, historyLine } from './bygd/tua/import.mjs';
 import { watchFinder } from './bygd/tua/finder.mjs';
+import { lesHistorikk, settAutoHistorikk, startLesing, autoHistorikk, historikkTilstand, forslagArkiv, funnetLinje, kortLinje, watchHistorikk } from './bygd/tua/historikk.mjs';
 import { skjermerFor, erFilSak, lever, endepunkt, maksNivå as maksNiv_, leverSamtale, MotorFeil, anslåTokens as ansl_Tokens, ord, del } from './bygd/tua/motor.mjs';
 import { erSettNoensteds } from './bygd/tua/skjermvalg.mjs';
 import { utfordringInfo } from './bygd/tua/utfordring.mjs';
 import { finnSamtale, samtaleInfo, samtaleLinje as samtaleLinje$1 } from './bygd/tua/samtale.mjs';
 import { instruksFor, trådFørst as tr_dF_rst, trådLinje as tr_dLinje, skalVise, sidenSist } from './bygd/tua/dora.mjs';
 import { lesInnInnboks } from './bygd/tua/innlesing.mjs';
-import { enumType, stringType, booleanType, numberType, arrayType, objectType, unionType } from './bygd/vendor/zod/v3/types.mjs';
+import { enumType, booleanType, stringType, numberType, arrayType, objectType, unionType } from './bygd/vendor/zod/v3/types.mjs';
 
 // server.js — Tua som MCP-server (stdio).
 //
@@ -36,7 +37,7 @@ import { enumType, stringType, booleanType, numberType, arrayType, objectType, u
 // NB: stdout er MCP-protokollen. All logging må gå til stderr.
 
 // M17: vaktene — Innboks (eksporter og delte lenker), Desktop-cachen (hvert 10. min), Finder-mappene. Ingenting før arkivet er valgt.
-const startWatchers = () => { const log = (m) => console.error(`[tua] ${m}`); watchInbox({ log }); watchDesktop({ log }); watchFinder({ log }); };
+const startWatchers = () => { const log = (m) => console.error(`[tua] ${m}`); watchInbox({ log }); watchDesktop({ log }); watchFinder({ log }); watchHistorikk({ log }); };
 const CLIENT = process.env.TUA_CLIENT || (process.env.CLAUDECODE ? 'Claude Code' : 'Claude Desktop');
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE);
 const APP = process.env.TUA_APP_URL || 'http://127.0.0.1:5274/';          // M12: kartet som egen app (broen serverer det)
@@ -45,6 +46,13 @@ const addr = (id) => `${APP}#atom/${id}`;           // atomets adresse i kartet 
 // M14: første kjøring. Finnes et arkiv (eller et valg i ~/.tua/config.json), brukes det. Finnes ingenting, GJETTER vi ikke:
 // det første verktøykallet spør brukeren hvor arkivet skal ligge (elicitation i klienter som støtter det, ellers via
 // verktøysvaret + tua_setup). Først da lages mappa med velkomstatomet.
+// 0.5.17 (arb. 36 grep 1): samme inngang, annen jobb — `--les-historikk` leser det som ligger på maskinen og avslutter. Serveren starter
+// den som en egen prosess (historikk.js startLesing), så verktøykall aldri venter på lesingen.
+if (process.argv.includes('--les-historikk')) {
+  const r = await lesHistorikk({ log: (m) => console.error(`[tua] ${m}`), tving: process.argv.includes('--tving') });
+  if (r.hoppet) console.error(`[tua] Historikken: ikke lest (${r.hoppet})`);
+  process.exit(r.feil ? 1 : 0);
+}
 const firstRun = ensureArchive();
 if (firstRun.needsChoice) console.error(`[tua] ingen Tua-mappe funnet — spør brukeren hvor arkivet skal ligge ved første verktøykall (${archiveOptions().filter((o) => o.available).map((o) => o.label).join(', ')})`);
 
@@ -57,12 +65,12 @@ const INSTRUCTIONS =
   '(3) TILBY, IKKE SKRIV — når du har levert noe verdt å finne igjen, spør én gang «Vil du at jeg lagrer dette til Tua?». Kall tua_save bare når brukeren sier ja eller selv ber om lagring. Spør aldri hvilken mappe; prosjektet er mappa. ' +
   '(4) Ved lagring: content = hele innholdet, short = ingress (alltid, ≤ 300 tegn), medium når over ~3 000 tegn, project = brukerens prosjektnavn, convo = 3–8 ord om samtalen. ' +
   '(5) Står det en linje som begynner med «oppsett:» eller «onboarding:» i et verktøysvar, følg den etter at du har svart på det brukeren ba om — det er brukerens første økt med Tua. Arkivstedet velger brukeren selv (tua_setup); gjett aldri. ' +
-  '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Codex-samtaler (~/.codex/sessions — Codex CLI og ChatGPT-appen; kilde=codex), Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt. ' +
+  '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Codex-samtaler (~/.codex/sessions — Codex CLI og ChatGPT-appen; kilde=codex), Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt, og det andre som ligger lokalt (Code, Cowork, Codex, dokumenter) leses av seg selv ved oppstart og omtrent hver time — brukeren slår det av med tua_setup(historikk=false). ' +
   'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen. ' +
   '(7) SIDEN SIST: første gang du bruker Tua i en samtale, kommer en blokk «Siden sist i Tua» (Spør-tråder, konklusjoner, delinger, filer lest inn i appen) — gjengi den i én kort liste før du svarer, så brukeren ser hva som er gjort i Tua. tua_search viser Spør-tråder og konklusjoner for prosjektet øverst. ' +
   '(8) «DEL MED <navn>»: tua_share deler med en PERSON (kollega) — lager en delingssak (skjermet gjengivelse, logget) og en lenke til mottakersiden (låste rader på nivået, «Be om hele»); S som standard, M/L bare når brukeren sier det. Kall først med forhandsvis=true og still ETT spørsmål («Anna får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi lenka, nedlastingslenka og den kopierbare teksten videre slik de er.';
 
-const server = new McpServer({ name: 'tua', version: '0.5.16' }, { instructions: INSTRUCTIONS });
+const server = new McpServer({ name: 'tua', version: '0.5.17' }, { instructions: INSTRUCTIONS });
 
 // M14: er arkivet ikke valgt, stoppes hvert verktøykall med et spørsmål om sted — via elicitation når klienten støtter det
 // (Code gjør det), ellers som en «oppsett:»-linje modellen skal stille brukeren. Pakket rundt registerTool, så det gjelder
@@ -71,28 +79,52 @@ const optionLines = () => archiveOptions().map((o) => `${o.id} = ${o.label}${o.a
 async function ensureReady(tool) {
   if (!ensureArchive().needsChoice || tool === 'tua_setup') return null
   const avail = archiveOptions().filter((o) => o.available);
+  // 0.5.17 (arb. 36 grep 2): ETT spørsmål, ikke to — Tua foreslår stedet selv og sier hva den fant. Ja → arkivet lages og historikken leses.
+  const forslag = forslagArkiv();
+  let funnet = { samtaler: 0, dokumenter: 0, tekst: '' };
+  try { funnet = funnetLinje(historyCounts({ quick: true })); } catch {}
+  const fantSetning = funnet.tekst ? `Jeg fant ${funnet.tekst} på denne maskinen, og leser dem inn lokalt. ` : '';
   if (server.server.getClientCapabilities()?.elicitation) {
     try {
       const r = await server.server.elicitInput({
-        message: 'Tua trenger en mappe for arkivet ditt — hvert atom blir en markdown-fil der. Hvor skal den ligge? (Kan endres senere i innstillingene.)',
-        requestedSchema: { type: 'object', properties: { sted: { type: 'string', title: 'Arkivsted', description: 'Mappa «Tua» lages her', enum: avail.map((o) => o.id), enumNames: avail.map((o) => `${o.label} — ${o.path}`) } }, required: ['sted'] },
+        message: `Tua legger arkivet i ${forslag ? forslag.path : 'en mappe du velger'} — hver sak blir en vanlig markdown-fil der. ${fantSetning}Start? (Stedet kan endres under, og senere.)`,
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            sted: { type: 'string', title: 'Arkivsted', description: 'Mappa «Tua» lages her', enum: avail.map((o) => o.id), enumNames: avail.map((o) => `${o.label} — ${o.path}`), ...(forslag ? { default: forslag.id } : {}) },
+            historikk: { type: 'boolean', title: 'Les inn det som ligger på maskinen', description: 'Tidligere samtaler og dokumenter leses lokalt og holdes ved like. Ingenting sendes noe sted.', default: true },
+          },
+          required: ['sted'],
+        },
       });
       if (r.action === 'accept' && r.content?.sted) {
+        if (r.content.historikk === false) settAutoHistorikk(false);
         const done = chooseArchive(r.content.sted);
-        console.error(`[tua] arkivet valgt via elicitation: ${done.root} (${done.label})`);
+        console.error(`[tua] arkivet valgt via elicitation: ${done.root} (${done.label}) · historikk ${autoHistorikk() ? 'leses' : 'av'}`);
         startWatchers();
         return null                                                   // fortsett med det opprinnelige kallet
       }
     } catch (e) { console.error(`[tua] elicitation feilet: ${e.message}`); }
   }
+  const andre = avail.filter((o) => o.id !== forslag?.id);
   return text(
-    `oppsett: Tua har ikke noe arkiv på denne maskinen ennå, og gjetter ikke hvor det skal ligge. Spør brukeren — én gang, kort — hvor arkivet skal ligge: ` +
-    `${avail.map((o) => `${o.label} (${o.path})`).join(', ')}${avail.length < archiveOptions().length ? ` [ikke funnet: ${archiveOptions().filter((o) => !o.available).map((o) => o.label).join(', ')}]` : ''}. ` +
-    `Forklar i én setning: mappa synkes av tjenesten brukeren velger, og alt er vanlige markdown-filer. Når brukeren har valgt, kall tua_setup(sted=<id>) — id-er: ${avail.map((o) => o.id).join(', ')} — eller tua_setup(sti=<absolutt sti>) for en annen mappe. Deretter gjentar du det brukeren egentlig ba om (${tool}).`,
+    `oppsett: Tua har ikke noe arkiv på denne maskinen ennå. Still brukeren ÉTT spørsmål, kort og med disse opplysningene: ` +
+    `«Arkivet legges i ${forslag ? forslag.path : '~/Tua'} (${forslag ? forslag.label : 'lokalt'}), som vanlige markdown-filer. ${fantSetning}Start?» ` +
+    `Sier brukeren ja: kall tua_setup(sted=${forslag ? forslag.id : 'lokalt'}). ` +
+    (andre.length ? `Vil brukeren ha arkivet et annet sted: ${andre.map((o) => `${o.id} = ${o.label} (${o.path})`).join(' · ')}, eller tua_setup(sti=<absolutt sti>). ` : 'Vil brukeren ha en annen mappe: tua_setup(sti=<absolutt sti>). ') +
+    `Vil brukeren ikke ha med det som ligger på maskinen: legg til historikk=false. Velg aldri sted uten svar fra brukeren. Deretter gjentar du det brukeren egentlig ba om (${tool}).`,
   )
 }
 const _register = server.registerTool.bind(server);
-server.registerTool = (name, cfg, handler) => _register(name, cfg, async (a, extra) => (await ensureReady(name)) || handler(a, extra));
+// 0.5.17 (arb. 36 grep 5): når historikken er lest første gang, får det første verktøysvaret etterpå linja som ber Claude vise «Dette fant jeg» — én gang.
+const medKort = (r, name, a) => {
+  if (a?.quiet || name === 'tua_open' || !Array.isArray(r?.content) || r.content[0]?.type !== 'text') return r
+  let linje = '';
+  try { linje = kortLinje(); } catch {}
+  if (linje) r.content[0].text += `\n\nonboarding: ${linje}`;
+  return r
+};
+server.registerTool = (name, cfg, handler) => _register(name, cfg, async (a, extra) => { const stopp = await ensureReady(name); return stopp || medKort(await handler(a, extra), name, a) });
 
 const text = (s) => ({ content: [{ type: 'text', text: s }] });
 const LevelArg = enumType(['S', 'M', 'L']);
@@ -119,6 +151,7 @@ const onboardLine = (atoms) => {
 };
 // M17: «Jeg fant N Code-økter, N Cowork-økter, N Desktop-samtaler, N dokumenter — vil du ta dem med?» Ett ja → tua_import(kilde=alt).
 const historyStep = () => {
+  if (autoHistorikk()) return ''                                    // 0.5.17: leses av seg selv — kortet «Dette fant jeg» sier resten
   let line = '';
   try { line = historyLine(historyCounts()); } catch {}
   return line ? `(4) Si, i én setning: «${line}» Forklar kort at alt leses lokalt (ingen eksport, ingen innlogging) og blir søkbare atomer med peker tilbake. Sier brukeren ja: kall tua_import(kilde=alt, dryRun=true) og vis tallene, så tua_import(kilde=alt). Ikke kjør noe uten ja. ` : ''
@@ -137,12 +170,21 @@ server.registerTool(
     inputSchema: {
       sted: enumType(['icloud', 'dropbox', 'onedrive', 'googledrive', 'lokalt']).optional().describe('Skytjeneste eller lokalt (~/Tua).'),
       sti: stringType().optional().describe('Alternativt: absolutt sti til en mappe som skal være arkivet.'),
+      historikk: booleanType().optional().describe('Bryteren for automatisk lesing av det som ligger på maskinen (Code, Cowork, Codex, Desktop, dokumenter). Standard på. false slår av, true slår på igjen.'),
     },
   },
-  async ({ sted, sti }) => {
+  async ({ sted, sti, historikk }) => {
+    if (historikk !== undefined) { settAutoHistorikk(historikk); console.error(`[tua] automatisk lesing av historikken: ${historikk ? 'på' : 'av'}`); }
+    if (!sted && !sti && historikk !== undefined && filesMode()) {
+      if (historikk) startLesing({ log: (m) => console.error(`[tua] ${m}`) });
+      return text(historikk
+        ? 'Automatisk lesing er slått på. Tua leser det som ligger på maskinen nå, og ser etter nye samtaler omtrent en gang i timen.'
+        : 'Automatisk lesing er slått av. Tua leser ikke lenger samtaler og dokumenter på maskinen av seg selv. Det som alt er lest, blir liggende. «Ta med historikken» (tua_import) virker fortsatt når brukeren ber om det.')
+    }
     if (!sted && !sti) {
       return text(
         `Arkiv: ${filesMode() ? `${FILES_ROOT} (${rootLabel()})` : 'ikke valgt ennå'}\nSteder på denne maskinen: ${optionLines()}\n` +
+        `Automatisk lesing av det som ligger på maskinen: ${autoHistorikk() ? 'på' : 'av'}${historikkTilstand().sist ? ` (sist ${new Date(historikkTilstand().sist).toLocaleString('no-NO')})` : ''} — tua_setup(historikk=false|true)\n` +
         (filesMode() ? 'Vil brukeren flytte arkivet: det er en Finder-jobb (flytt mappa) + tua_setup(sti=ny sti); Tua kopierer ikke filer selv.' : 'Spør brukeren hvor arkivet skal ligge, og kall tua_setup(sted=…).') +
         '\nInnstillinger-siden (M15): http://127.0.0.1:5274/innstillinger — arkivsted, skytjenester, AI-nøkler i Keychain og Finder-mapper, med Trust Score (krever at kartet kjører: npm run kart i tua-plugin).' +
         instruksLinje(),
@@ -152,11 +194,17 @@ server.registerTool(
     let r;
     try { r = chooseArchive(sti || sted); } catch (e) { return text(`Kunne ikke velge «${sti || sted}»: ${e.message}\nSteder: ${optionLines()}`) }
     startWatchers();
+    // 0.5.17 (arb. 36 grep 1 og 5): les det som ligger på maskinen med en gang — vent inntil 20 s, så kortet «Dette fant jeg» kan følge med i samme svar
+    let lest = '';
+    if (autoHistorikk()) {
+      const ferdig = await Promise.race([startLesing({ log: (m) => console.error(`[tua] ${m}`) }).then(() => true), new Promise((ok) => setTimeout(() => ok(false), 20000))]);
+      lest = ferdig ? '' : ' Tua leser nå det som ligger på maskinen (tidligere samtaler og dokumenter) i bakgrunnen; si at det er klart om litt, og at kortet «Dette fant jeg» kommer da.';
+    } else lest = ' Automatisk lesing av historikken er slått av (tua_setup historikk=true slår den på).';
     const atoms = load();
     console.error(`[tua] arkivet ${r.created ? 'opprettet' : 'valgt'}: ${r.root} (${r.label})`);
     return text(
       `${r.created ? 'Arkivet er opprettet' : before && before !== r.root ? `Arkivet er byttet fra ${before} til` : 'Arkivet er valgt'}: ${r.root} (${r.label}). ` +
-        `${atoms.length} atom${atoms.length === 1 ? '' : 'er'}${r.created ? ' — velkomstatomet «Velkommen til Tua» ligger i mappa «Tua»' : ''}. Innboks: ${INBOX_DIR}. Valget er lagret og kan endres senere.` +
+        `${atoms.length} atom${atoms.length === 1 ? '' : 'er'}${r.created ? ' — velkomstatomet «Velkommen til Tua» ligger i mappa «Tua»' : ''}. Innboks: ${INBOX_DIR}. Valget er lagret og kan endres senere.${lest}` +
         onboardLine(atoms),
     )
   },

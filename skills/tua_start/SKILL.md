@@ -6,27 +6,31 @@ description: Kom i gang med Tua i ett grep — ta med all historikk (Code-økter
 # tua_start — ta med alt, og hold det på
 
 Én kommando for det brukeren egentlig vil første gang: **alt som finnes skal inn, og alt som kommer skal fanges.**
-Alt leses lokalt, uten eksport og uten innlogging. Ingenting skrives før brukeren har sagt ja én gang.
+Alt leses lokalt, uten eksport og uten innlogging. Ingenting skrives før brukeren har sagt ja én gang (oppsettet).
 Kan kjøres igjen når som helst — importen er idempotent, oppsettet hopper over det som alt er gjort.
 
 ## 0 · Arkivet
 
 Er arkivet ikke valgt ennå, spør det første verktøykallet hvor det skal ligge (`tua_setup`). Gjett aldri; vent på svaret før du går videre.
 
-## 1 · Omfanget (ingenting skrives)
+## 1 · Historikken (leses av seg selv fra 0.5.17)
+
+Når arkivet er valgt, leser Tua det som ligger på maskinen uten et eget ja — Code-økter, Cowork-økter, Codex-samtaler,
+Desktop-samtaler og dokumenter med AI-opphav — og holder det ved like omtrent en gang i timen. Sjekk tilstanden:
+
+    tua_setup()
+
+Står «Automatisk lesing … på»: vis kortet «Dette fant jeg» om det ikke alt er vist (`tua_search(query="Dette fant jeg", project="Tua")`,
+så `tua_card(id=…, level="M")`), og gå til trinn 3. Står den «av»: spør én gang om brukeren vil slå den på (`tua_setup(historikk=true)`)
+eller bare ta med alt nå.
+
+## 2 · Importen for hånd (når lesingen er av, eller brukeren vil ha alt nå)
 
     tua_import(kilde=alt, dryRun=true)
 
-Vis tallene slik de kommer: N Code-økter, N Cowork-økter, N Desktop-samtaler, N dokumenter, N filer i Innboks.
-Spør **én gang**: «Ta med alt?» Vil brukeren bare ha deler, bruk `kilde=code|cowork|desktop|finder|innboks` eller `etter=ÅÅÅÅ-MM-DD`.
-
-## 2 · Importen
-
-    tua_import(kilde=alt)
-
-Si på forhånd at det kan ta noen minutter ved mye historikk. Rapportér én linje per kilde («N nye · N oppdatert · N uendret»)
-og at rapportene ligger som atomer i prosjekt «Tua». Samtaler som bare finnes på claude.ai web/mobil blir ikke med:
-be brukeren åpne dem i Claude Desktop (så fanges de av seg selv) eller lime inn en delt lenke (`kilde=lenke`).
+Vis tallene, spør **én gang** «Ta med alt?», og kjør så `tua_import(kilde=alt)`. Bare deler: `kilde=code|cowork|codex|desktop|finder|innboks`
+eller `etter=ÅÅÅÅ-MM-DD`. Samtaler som bare finnes på claude.ai web/mobil blir ikke med: be brukeren åpne dem i Claude Desktop
+(så fanges de av seg selv) eller lime inn en delt lenke (`kilde=lenke`).
 
 ## 3 · Fremover — tre flater, én linje hver
 
@@ -48,7 +52,7 @@ Ett kort avsnitt: hva som ble tatt med (tallene), hva som nå er på, og én set
 
 ## Regler
 
-- Spør én gang, ikke per kilde. Kjør aldri importen uten ja.
+- Spør én gang, ikke per kilde. Importen for hånd kjøres aldri uten ja; den automatiske lesingen har fått sitt ja i oppsettet og slås av med `tua_setup(historikk=false)`.
 - Tua sletter aldri noe; alt kan fjernes igjen i Finder.
 - I Claude Desktop uten repo: trinn 0–2, og si at hooks bare finnes i Claude Code.
 - Ikke les eksporter eller økter inn i samtalen — tallene og rapportlinjene er nok.

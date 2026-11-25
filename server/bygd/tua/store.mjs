@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.16 — bygd av bygg.mjs 2026-11-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.17 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import 'node:os';
 import path__default from 'node:path';
@@ -926,4 +926,4 @@ const erTuaRepo = (root) => !!root && fs__default.existsSync(path__default.join(
 const ØKT_NØKKEL = /^(?:okt|samtale):([^:]+)$|^(?:svar|prompt):(?!spor:)([^:]+):/;
 const øktIdAv = (key) => { const m = ØKT_NØKKEL.exec(String(key || '')); const id = m ? (m[1] || m[2]) : null; return id ? id.slice(0, 8) : null };
 
-export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaRepo, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, hashOf, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, markDirty, maxLevel, mergeGa, needsLevel, noteImport, onboardingActive, projectOf, projects, readConfig, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sha8, sources, staleSources, statusOf, tråder, upsert, vaultClamp, versions, visibleIn, welcomeAtom, øktIdAv };
+export { DATA_DIR, FILE, FILES_ROOT, INBOX_DIR, KINDS, LEVELS, LINK_KINDS, LONG_L, M_MAX, SHORT_L, S_MAX, WELCOME_KEY, archiveOptions, chooseArchive, clampLevel, claudeProjectHref, compose, deliveries, ensureArchive, erTuaRepo, erTuaSak, fileOf, filesMode, finishOnboarding, fmtTime, hasExternalEdits, hashOf, importState, isStale, isVault, levelOf, linksFor, load, logDelivery, markDirty, maxLevel, mergeGa, needsLevel, noteImport, onboardingActive, projectOf, projects, readConfig, readVersion, registerProject, related, renderStatus, rootLabel, save, search, setShare, sha8, sources, staleSources, statusOf, tråder, upsert, vaultClamp, versions, visibleIn, welcomeAtom, writeConfig, øktIdAv };

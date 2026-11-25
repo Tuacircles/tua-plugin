@@ -14,11 +14,11 @@ We collect nothing. Installing, running or removing the plugin sends no usage st
 
 ## 3. What the plugin processes on your machine
 
-When you ask it to (a tool call, a hook you left enabled, or a file you place in `Innboks`), the plugin reads your own content and writes it as markdown files ("atoms") into your archive folder:
+When you ask it to (a tool call, a hook you left enabled, a file you place in `Innboks`), and — from 0.5.17 — after you have answered the one setup question ("Arkivet legges i … Jeg fant N samtaler … Start?"), the plugin reads your own content and writes it as markdown files ("atoms") into your archive folder:
 
 - text you ask Claude to save, and deliverables Claude composes from your atoms;
 - in Claude Code, when auto-capture is on: your own prompts of 80 characters or more (each as its own atom, linked to the answer it got, never shared with other projects by default), long answers from Claude, text documents Claude writes for you, and a session summary (prompts, files written, last answer);
-- on request ("ta med historikken"): your Claude Code sessions (`~/.claude/projects`), your Cowork sessions and Claude Desktop conversations as they are stored by the Claude apps on this machine (Claude Desktop's cache is copied to a temporary file before decoding and never modified), documents in Downloads/Documents/Desktop that originate from an AI service (identified from download metadata or by matching their hash to something Claude wrote), and conversation exports you place in `Innboks`;
+- after setup, automatically and about once an hour (0.5.17; before that only on request): your Claude Code sessions (`~/.claude/projects`), your Cowork sessions and Claude Desktop conversations as they are stored by the Claude apps on this machine (Claude Desktop's cache is copied to a temporary file before decoding and never modified), documents in Downloads/Documents/Desktop that originate from an AI service (identified from download metadata or by matching their hash to something Claude wrote), and conversation exports you place in `Innboks`. This reading is local, uses no model and sends nothing anywhere; sessions touched in the last 30 minutes are left for the next round. Turn it off in the setup question, or any time by saying "slå av automatisk lesing" (`tua_setup(historikk=false)`, stored as `historikk.auto` in `~/.tua/config.json`). What is already read stays until you delete the files;
 - a public `https://claude.ai/share/<id>` page, only when you paste such a link; fetched with one plain request, no cookies, no login.
 
 Conversation content may contain personal data about you and about people mentioned in it. It stays in your folder.

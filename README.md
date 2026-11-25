@@ -17,7 +17,7 @@ Tua is a Norwegian-language product (tool descriptions, skills and answers are i
 | **Skill** `tua_auto` | Mirror a git project (commit log, manifest, decision log, PDF-backed documents) into Tua after every commit. |
 | **Skill** `tua_start` | Onboarding in one go: bring in all history (dry run first), confirm auto-capture, set up `tua_auto` for the repository you are in. |
 | **Skill** `tua_status` | Read-only overview: atoms per project, what is still outside Tua, whether the hooks are saving, whether this repository is mirrored. |
-| **Hooks** (Claude Code only) | `SessionStart` reminder when history is waiting to be imported (points to `tua_start` the first time, offers `tua_auto` once per repository) · `UserPromptSubmit` saves each substantial prompt as its own atom (0.5.8, V16 — silent, never writes to the prompt) · `Stop` saves long answers and links them to the prompt · `PostToolUse Write/Edit` saves text documents you write · `PreCompact`/`SessionEnd` saves a session summary. All can be turned off with the plugin setting **Automatisk fangst**. |
+| **Hooks** (Claude Code only) | `SessionStart` shows the "Dette fant jeg" card once after the first reading, reminds about waiting history only when automatic reading is off, and offers `tua_auto` once per repository · `UserPromptSubmit` saves each substantial prompt as its own atom (0.5.8, V16 — silent, never writes to the prompt) · `Stop` saves long answers and links them to the prompt · `PostToolUse Write/Edit` saves text documents you write · `PreCompact`/`SessionEnd` saves a session summary. All can be turned off with the plugin setting **Automatisk fangst**. |
 | **The Tua card** | An MCP App (`ui://tua/kort`) that renders a hit list or one atom inside Claude Desktop, claude.ai, Cursor and VS Code, with S → M → L on demand and "Open in …" buttons. |
 
 ### How an atom works
@@ -53,7 +53,7 @@ claude plugin install tua@tua-lokal
 
 ### First run
 
-The first tool call asks where the archive should live — iCloud Drive, Dropbox, OneDrive, Google Drive or a local folder (`~/Tua`). Tua never guesses: in Claude Code the question is a form; elsewhere Claude asks you and calls `tua_setup`. The choice is stored in `~/.tua/config.json` and the folder gets one welcome atom. Then Tua offers, once, to bring in your history ("Jeg fant N Code-økter …"); nothing is imported without your yes.
+The first tool call asks one question (0.5.17): "The archive goes in Dropbox/Tua. I found 412 conversations on this machine and will read them in locally. Start?" Tua proposes the first cloud folder it finds (otherwise `~/Tua`) and never creates anything before you answer: in Claude Code the question is a form where you can pick another place or untick the history; elsewhere Claude asks you and calls `tua_setup`. The choice is stored in `~/.tua/config.json` and the folder gets one welcome atom. After your yes, what is already on the machine (Claude Code, Cowork, Codex, Claude Desktop, documents with AI origin) is read locally in a separate process and kept up to date about once an hour, and the card "Dette fant jeg" shows what Tua now knows: conversations per source, projects, the five latest threads and three questions to try. One switch turns the reading off: `tua_setup(historikk=false)`.
 
 ### Settings
 
@@ -106,7 +106,7 @@ This section exists so that nothing Tua does is a surprise. It is the complete l
 
 **Slik virker det.** Si «lagre dette til Tua» — Claude skriver ingressen (S) selv, og sammendraget (M) når innholdet er langt. Spør «hva har jeg om likviditet» — treffene svarer med S, og Claude henter M før L. Si «gjør dette synlig i Riulf» — atomet blir en referanse i det prosjektet, på nivået du velger. Si «lag et styrenotat av disse» — `tua_compose` bygger en leveranse med sporing tilbake til kildene.
 
-**Første gang** spør Tua hvor arkivet skal ligge (iCloud Drive, Dropbox, OneDrive, Google Drive eller lokalt). Valget lagres i `~/.tua/config.json` og kan endres med `tua_setup`. Deretter tilbyr Tua én gang å ta med historikken: `tua_import(kilde=alt, dryRun=true)` viser tallene først, og ingenting importeres uten at du sier ja.
+**Første gang** stiller Tua ett spørsmål (0.5.17): «Arkivet legges i Dropbox/Tua. Jeg fant 412 samtaler på denne maskinen, og leser dem inn lokalt. Start?» Tua foreslår den første skymappa den finner (ellers `~/Tua`) og lager ingenting før du har svart. Valget lagres i `~/.tua/config.json` og kan endres med `tua_setup`. Etter ja-et leses det som alt ligger på maskinen, lokalt og uten modell, og holdes ved like omtrent en gang i timen. Kortet «Dette fant jeg» viser hva Tua nå vet: samtaler per kilde, prosjektene, de fem siste trådene og tre spørsmål du kan stille. Én bryter slår lesingen av: si «slå av automatisk lesing» (`tua_setup(historikk=false)`).
 
 **Historikken (M17):** «Ta med historikken» leser alt som finnes lokalt, uten eksport og uten innlogging: Code-økter (`~/.claude/projects`), Cowork-økter (`audit.jsonl`), Desktop-samtaler (fra Claude Desktops egen cache — alt som har vært åpnet i Desktop, med prosjekt; leses også av seg selv hvert 10. minutt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse, aldri kopi). Delte lenker (`claude.ai/share/…`) limes inn eller legges i Innboks; innholdet fylles når lenken åpnes i Desktop. Tua kaller aldri claude.ai sitt interne API.
 

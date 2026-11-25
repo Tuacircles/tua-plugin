@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.16 — bygd av bygg.mjs 2026-11-24. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.17 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 import fs__default from 'node:fs';
 import os from 'node:os';
 import path__default from 'node:path';
@@ -27,6 +27,7 @@ const firstDir = (dir, prefix) => { try { return fs__default.readdirSync(dir).fi
 
 // Stier i «posix-form» for regex-tester (/\/(node_modules|\.git)\//): omvendt skråstrek → skråstrek. Endrer aldri stien som brukes mot disken.
 const posix = (p) => String(p || '').replace(/\\/g, '/');
+const insideTmp = (p) => { const q = posix(p); return /^\/(private\/)?tmp\//.test(q) || q.startsWith(posix(os.tmpdir()).replace(/\/$/, '') + '/') };
 
 // 1. Claude Desktops datamappe (Electrons userData): cache i Cache/Cache_Data, Cowork-økter i local-agent-mode-sessions
 const CLAUDE_APP_DIR = IS_MAC
@@ -94,4 +95,4 @@ function zoneIdentifierUrls(file) {
   } catch { return [] }
 }
 
-export { CLAUDE_APP_DIR, FILE_MANAGER, HOME, IS_MAC, IS_WIN, cloudBases, openSpawn, posix, zoneIdentifierUrls };
+export { CLAUDE_APP_DIR, FILE_MANAGER, HOME, IS_MAC, IS_WIN, cloudBases, insideTmp, openSpawn, posix, zoneIdentifierUrls };

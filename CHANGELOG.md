@@ -2,6 +2,19 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.17 — 2026-11-25 (read first, show afterwards)
+
+Onboarding for someone who already uses AI (concept note 36, part 2, measures 1, 2 and 5). The readers existed; the friction was the order: Tua asked before it read, and the yes never came (on the owner's own machine 60 Claude Code sessions had waited 35 days).
+
+- **One question instead of two.** Without an archive the first tool call now proposes the place itself and says what it found: "Arkivet legges i Dropbox/Tua. Jeg fant 412 samtaler på denne maskinen, og leser dem inn lokalt. Start?" The first cloud folder on the machine is proposed, otherwise `~/Tua`. In Claude Code the form has the place preselected and a tick box for the history. Nothing is created before the user answers.
+- **What is on the machine is read without a separate yes.** After setup, Claude Code sessions, Cowork sessions, Codex conversations, the Claude Desktop cache and documents with AI origin are read by the same import functions as `tua_import`, in a separate process (the server entry with `--les-historikk`) so tool calls never wait. Then about once an hour, only files changed since last time. Sessions touched in the last 30 minutes are in use and wait for the next round. A lock and a 50-minute throttle in `<archive>/.tua/historikk.json` keep several Tua processes from reading at once. Local only, no model, nothing sent.
+- **One switch.** `tua_setup(historikk=false)` turns the reading off (`historikk.auto` in `~/.tua/config.json`), `true` turns it on again. `tua_setup` without arguments shows the state. `tua_import` works as before on request.
+- **"Dette fant jeg".** After the first reading Tua writes an atom with S/M/L: conversations per source, projects, the five latest threads and three questions to ask right away. The first tool answer afterwards (or the `SessionStart` hook) asks Claude to show it as a card, once.
+- The `SessionStart` hook no longer nags about sessions "not brought in" while automatic reading is on.
+- An archive in a temporary folder is never read automatically (test suites), unless `TUA_HISTORIKK_AUTO=1`. `TUA_HISTORIKK_AUTO=0` turns it off for a process.
+- New suite `server/test-historikk.mjs` (24 checks over real MCP against a temporary folder).
+- `PRIVACY.md` section 3 updated: local history is now read after the setup question, not only on request.
+
 ## 0.5.16 — 2026-11-24 (the card's "open" buttons work everywhere)
 
 - **The card's buttons into the Tua app did nothing in Claude Desktop.** "Kartet", "Fortsett i Tua", "Mottakersiden" and "Som fil" pointed at `http://127.0.0.1:5274`, and Claude Desktop only lets `https` links out of an MCP App (`open-link non-https blocked` in its log), so a click had no effect and no error. Everything that opens something outside the card now goes through the server's `tua_open`, which opens it locally (`open`, `explorer.exe`, `xdg-open`). `tua_open` has two new fixed targets, `deling` and `delingsfil`, and `kart` opens the same address the card shows (a conversation opens in Arbeid).
