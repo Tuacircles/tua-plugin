@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.17 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.18 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 const default_format = 'RFC3986';
 const default_formatter = (v) => String(v);
 const formatters = {

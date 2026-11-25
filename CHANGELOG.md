@@ -2,6 +2,12 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.18 — 2026-11-25 (the card can page and go back)
+
+- **Paging in the list.** A list card showed at most 10 hits and said "ask Claude for more"; Claude then had to fetch the rest as text. The list now has "Forrige N" and "Neste N" with "Viser 11–20 av 143". `tua_card` takes `offset`, and the text answer tells the model how to get the next page.
+- **Back and forward.** Every step inside the card (a list, a page, an atom opened from the list, a related atom) is remembered, and "Tilbake" / "Frem" at the top move between them like in a browser. Switching S/M/L on the same atom is not a step. A new card from Claude starts over.
+- "Siden sist i Tua" is shown on the first page only.
+
 ## 0.5.17 — 2026-11-25 (read first, show afterwards)
 
 Onboarding for someone who already uses AI (concept note 36, part 2, measures 1, 2 and 5). The readers existed; the friction was the order: Tua asked before it read, and the yes never came (on the owner's own machine 60 Claude Code sessions had waited 35 days).

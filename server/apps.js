@@ -179,12 +179,13 @@ export function registerApps(server, { client = 'Claude' } = {}) {
         level: z.enum(['S', 'M', 'L']).optional().describe('Nivå for atom-kortet. Standard S (V12). Klippes av referansens nivå og Vault.'),
         project: z.string().optional().describe('Avgrens trefflista til ett prosjekt'),
         context: z.string().optional().describe('Vis som dette prosjektet ser det — aldri mer enn nivået prosjektet har fått'),
-        limit: z.number().int().min(1).max(10).optional().describe('Antall treff (standard 5)'),
+        limit: z.number().int().min(1).max(10).optional().describe('Antall treff per side (standard 5, høyst 10)'),
+        offset: z.number().int().min(0).optional().describe('Bla i trefflista: hopp over så mange treff (0 = første side). Kortet har selv «Forrige» og «Neste»; bruk dette når brukeren ber om «de neste».'),
         quiet: z.boolean().optional().describe('Internt: kortet henter M/L for visning; logges, men svarer uten preik'),
       },
       _meta: { ui: { resourceUri: KORT_URI } },
     },
-    async ({ id, query, level = 'S', project, context, limit = 5, quiet }) => {
+    async ({ id, query, level = 'S', project, context, limit = 5, offset = 0, quiet }) => {
       const atoms = load()
       if (id) {
         const cur = atoms.find((x) => x.id === id)
@@ -195,7 +196,7 @@ export function registerApps(server, { client = 'Claude' } = {}) {
         return { content: [{ type: 'text', text: quiet ? `${a.level} av ${a.id} vist i kortet.` : atomText(a) }], structuredContent: { mode: 'atom', atom: a } }
       }
       // runde 3a: tråder fra Spør øverst, treffene skjermet (S er fri, ingen Utlevert-linje), «Siden sist i Tua» ved første kall, instruksen når prosjektet har Desktop-uuid
-      const hits = trådFørst(atoms, search(atoms, query || '', { project, context, limit }))
+      const hits = trådFørst(atoms, search(atoms, query || '', { project, context, limit, offset }))
       const sk = skjermerFor(atoms)
       const items = hits.map(({ atom: a, S, max, snippet, tråd }) => ({
         id: a.id, name: sk.skjerm(a.name, { utvidet: erFilSak(a) }), project: a.project, date: date(a.capturedAt), version: a.version || 1, kind: a.kind || 'capture',
@@ -204,14 +205,15 @@ export function registerApps(server, { client = 'Claude' } = {}) {
         ...(a.kind === 'samtale' ? (() => { const i = samtaleInfo(atoms, a, { base: process.env.TUA_APP_URL || 'http://127.0.0.1:5274/' }); return { samtale: { kilde: i.kilde, tua: i.tua, vendinger: i.vendinger, siste: date(i.siste), modeller: i.modeller, konklusjon: i.konklusjon, adresse: i.adresse, linje: samtaleLinje(i) } } })() : {}),   // skive 1+4 (arb. 33): samtalen fullt ut
       }))
       const prosjekt = project || context || ''
-      const siden = skalVise(prosjekt) ? sidenSist(atoms, { prosjekt }) : null
+      const siden = !offset && skalVise(prosjekt) ? sidenSist(atoms, { prosjekt }) : null   // 0.5.18: bare på første side
       const sidenSc = siden ? { prosjekt: siden.prosjekt, dager: siden.dager, lagret: siden.lagret, linjer: [...siden.linjer.map((l) => ({ slag: l.slag, id: l.id, tekst: sk.skjerm(l.tekst) })), ...(siden.samtaler ? [{ slag: 'samtale', id: siden.samtaler.siste.id, tekst: sk.skjerm(siden.samtaler.tekst), adresse: siden.samtaler.siste.adresse }] : [])] } : null   // skive 4: «Samtaler i Tua: N, siste «…»»
       const instruks = instruksFor(prosjekt)
-      const sc = { mode: 'list', query: query || '', project: project || '', total: hits.total, app: await appOppe(), items, ...(sidenSc ? { sidenSist: sidenSc } : {}), ...(instruks ? { instruks: instruks.tekst, instruksProsjekt: instruks.prosjekt } : {}) }
+      const sc = { mode: 'list', query: query || '', project: project || '', context: context || '', total: hits.total, offset, limit, app: await appOppe(), items, ...(sidenSc ? { sidenSist: sidenSc } : {}), ...(instruks ? { instruks: instruks.tekst, instruksProsjekt: instruks.prosjekt } : {}) }
       const txt = (items.length
-        ? `${hits.total} treff${query ? ` på «${query}»` : ''}${project ? ` i ${project}` : ''} (viser ${items.length}${hits.tråder ? `, ${hits.tråder} tråder fra Spør øverst` : ''}):\n` +
+        ? `${hits.total} treff${query ? ` på «${query}»` : ''}${project ? ` i ${project}` : ''} (viser ${offset + 1}–${offset + items.length}${hits.tråder ? `, ${hits.tråder} tråder fra Spør øverst` : ''}):\n` +
           items.map((i) => `- [${i.id}] ${i.name} — ${i.project} · ${i.date}${i.thread ? ` · tråd: ${i.thread.svar} svar${i.thread.konklusjon ? `, konklusjon ${i.thread.konklusjon}` : ''}` : ''}${i.samtale ? `\n  ${i.samtale.linje}` : ''}${i.S ? `\n  ${i.S}` : ''}`).join('\n')
-        : `Ingen treff${query ? ` på «${query}»` : ''}.`) +
+        : `Ingen treff${query ? ` på «${query}»` : ''}${offset ? ` fra nummer ${offset + 1}` : ''}.`) +
+        (hits.total > offset + items.length ? `\nFlere: kortet har «Neste ${limit}»; de neste som tekst eller kort er tua_card(${query ? `query="${query}", ` : ''}${project ? `project="${project}", ` : ''}limit=${limit}, offset=${offset + limit}).` : '') +
         (sk.treff ? `\nSkjermet: ${sk.treff} (plassholdere — bruk dem uendret).` : '') +
         (siden ? `\n\n${sk.skjerm(siden.tekst)}` : '')
       sk.lær()

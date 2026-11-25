@@ -33,6 +33,17 @@ ok(html.text.includes('window.McpApps') && html.text.includes('tua_card'), `HTML
 
 const list = await client.callTool({ name: 'tua_card', arguments: { query: q, limit: 5 } })
 ok(list.structuredContent?.mode === 'list' && list.structuredContent.items.length > 0, `treffliste «${q}»: ${list.structuredContent?.total} treff, ${list.structuredContent?.items?.length} vist`)
+// 0.5.18: bla i lista — side 1 og side 2 med ett treff per side gir to ulike saker, offset og limit følger med til kortet, teksten sier hvordan neste side hentes
+let s1, s2
+{
+  s1 = await client.callTool({ name: 'tua_card', arguments: { limit: 1 } })
+  s2 = await client.callTool({ name: 'tua_card', arguments: { limit: 1, offset: 1 } })
+  const a = s1.structuredContent, b = s2.structuredContent
+  ok(a?.total >= 2 && a.offset === 0 && b.offset === 1 && b.limit === 1 && a.items[0]?.id && b.items[0]?.id && a.items[0].id !== b.items[0].id, `bla: side 1 og side 2 er ulike saker (${a?.total} i alt, offset ${a?.offset} → ${b?.offset})`)
+  ok(/offset=1\)/.test(s1.content?.[0]?.text || '') && /viser 2–2/.test(s2.content?.[0]?.text || ''), 'bla: teksten sier «viser 2–2» og hvordan neste side hentes')
+  const forbi = await client.callTool({ name: 'tua_card', arguments: { limit: 5, offset: 100000 } })
+  ok(forbi.structuredContent?.mode === 'list' && forbi.structuredContent.items.length === 0 && !forbi.isError, 'bla: forbi slutten gir en tom side, ikke en feil')
+}
 const firstId = list.structuredContent?.items?.[0]?.id
 const atom = firstId ? await client.callTool({ name: 'tua_card', arguments: { id: firstId, level: 'M' } }) : null
 ok(atom?.structuredContent?.mode === 'atom' && atom.structuredContent.atom.level, `atom-kort ${firstId}: nivå ${atom?.structuredContent?.atom?.level}, ${atom?.structuredContent?.atom?.text?.length} tegn`)
@@ -57,7 +68,10 @@ ok(ingenDeling?.isError && /ingen deling/.test(ingenDeling.content[0].text), `tu
 
 if (out) {
   fs.mkdirSync(out, { recursive: true })
-  const fixtures = { list, atom }
+  // 0.5.18: testverten kan bla — to sider med ett treff hver, og kortet for hver av de to sakene
+  const kort = {}
+  for (const r of [s1, s2]) { const id = r?.structuredContent?.items?.[0]?.id; if (id) kort[id] = await client.callTool({ name: 'tua_card', arguments: { id } }) }
+  const fixtures = { list: s1, atom, sider: [s1, s2], kort }
   const J = (x) => JSON.stringify(x).replace(/<\//g, '<\\/')      // «</script>» inne i strenger må ikke lukke script-taggen
   const host = `<!DOCTYPE html><html lang="nb"><head><meta charset="utf-8"><title>Tua-kort — testvert</title>
 <style>body{margin:0;background:#F5F4ED;font-family:system-ui,sans-serif;padding:24px}.wrap{max-width:640px;margin:0 auto}
@@ -84,7 +98,7 @@ window.addEventListener('message', async (ev) => {
   }
   if (m.method === 'ui/notifications/initialized') {
     const r = FIX[current]
-    send({ method: 'ui/notifications/tool-input', params: { arguments: current === 'list' ? { query: ${J(q)} } : { id: r.structuredContent.atom.id, level: 'M' } } })
+    send({ method: 'ui/notifications/tool-input', params: { arguments: current === 'list' ? { limit: 1 } : { id: r.structuredContent.atom.id, level: 'M' } } })
     send({ method: 'ui/notifications/tool-result', params: r })
     log('← tool-input + tool-result sendt (' + current + ')'); return
   }
@@ -94,8 +108,9 @@ window.addEventListener('message', async (ev) => {
     const a = m.params.arguments || {}
     let result
     if (m.params.name === 'tua_open') result = { content: [{ type: 'text', text: 'Åpnet (testvert)' }], structuredContent: { ok: true, target: a.target, ran: ['open', '(testvert)'] } }
+    else if (a.id && FIX.atom.structuredContent.atom.id !== a.id && FIX.kort[a.id]) result = FIX.kort[a.id]
     else if (a.id) result = FIX.atom.structuredContent.atom.id === a.id ? { ...FIX.atom, structuredContent: { ...FIX.atom.structuredContent, atom: { ...FIX.atom.structuredContent.atom, level: a.level || 'S', text: a.level === 'S' ? FIX.atom.structuredContent.atom.S : FIX.atom.structuredContent.atom.text } } } : { content: [{ type: 'text', text: 'Testverten har bare ett atom inlinet: ' + FIX.atom.structuredContent.atom.id }], structuredContent: { mode: 'error', error: 'Testverten har bare ett atom (' + FIX.atom.structuredContent.atom.name + '). I Claude ville dette hentet ' + a.id + '.' } }
-    else result = FIX.list
+    else result = FIX.sider[a.offset || 0] || FIX.list
     send({ id: m.id, result }); return
   }
   if (m.method === 'ui/open-link') { const https = /^https:/.test(m.params.url); log('→ ui/open-link ' + m.params.url + (https ? '' : ' — BLOKKERT (ikke https), som i Claude Desktop')); send({ id: m.id, result: https ? {} : { isError: true } }); return }

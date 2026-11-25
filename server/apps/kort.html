@@ -41,6 +41,9 @@
   .btn { min-height: 32px; padding: 0 12px; border: 1px solid var(--line2); border-radius: 999px; background: transparent; color: var(--fg); font: inherit; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
   .btn:disabled { color: var(--fg3); border-color: var(--line); cursor: default; }
   .btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .btn.primary:disabled { background: transparent; color: var(--fg3); border-color: var(--line); }
+  .row.nav { margin: 0 0 10px; }
+  .row.bla { margin-top: 14px; align-items: center; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--bg2); color: var(--fg2); border: 1px solid var(--line); }
   .chip.warn { background: var(--warn-bg); color: var(--warn-fg); }
@@ -132,10 +135,20 @@ const md = (text) => {
   return out
 }
 
-const call = async (args) => {
+// 0.5.18: navigering i kortet. Hvert steg (liste, side i lista, sak, nivå) legges i en logg, så «Tilbake» og «Frem» virker som i en nettleser.
+// Et nytt kort fra Claude starter loggen på nytt. `til` = plass i loggen (tilbake/frem); uten `til` er det et nytt steg.
+let logg = [], plass = -1
+const rens = (o) => Object.fromEntries(Object.entries(o || {}).filter(([, v]) => v !== '' && v !== undefined && v !== null))
+const argsAv = (sc) => (sc?.mode === 'atom' ? { id: sc.atom.id, level: sc.atom.level } : sc?.mode === 'list' ? rens({ query: sc.query, project: sc.project, context: sc.context, limit: sc.limit, offset: sc.offset }) : null)
+const call = async (args, til) => {
   if (busy) return
   busy = true
-  try { const r = await app.callServerTool({ name: 'tua_card', arguments: args }); render(r) }
+  try {
+    const r = await app.callServerTool({ name: 'tua_card', arguments: args })
+    if (til !== undefined) plass = til
+    else { const forrige = logg[plass]; if (forrige?.id && forrige.id === args.id) logg[plass] = args; else { logg = logg.slice(0, plass + 1); logg.push(args); plass = logg.length - 1 } }   // nivåbytte på samme sak er ikke et nytt steg
+    render(r)
+  }
   catch (e) { root.append(el('p', { class: 'err' }, 'Tua svarte ikke: ' + (e?.message || e))) }
   finally { busy = false }
 }
@@ -175,6 +188,11 @@ const delingBlokk = (d, a) => d ? [el('div', { class: 'lbl' }, 'Delt med'), el('
   d.trukket ? el('p', { class: 'why' }, 'Delingen er trukket tilbake — lenka virker ikke lenger.') : el('div', { class: 'row' }, a.app ? åpneKnapp('Mottakersiden', 'deling', a) : null, (() => { const b = el('button', { class: 'btn', type: 'button' }, 'Kopier lenka'); b.addEventListener('click', () => kopierLenke(d.http, b)); return b })(), a.app ? åpneKnapp('Som fil', 'delingsfil', a, { title: 'Siden som én HTML-fil — send den selv når mottakeren ikke er på samme nett' }) : null)] : []
 
 // ── ett atom (V12: S først, M/L på forespørsel, «Åpne i …»)
+const navBlokk = () => {
+  if (logg.length < 2) return null
+  const kn = (tekst, i, title) => el('button', { class: 'btn', type: 'button', title, disabled: i < 0 || i >= logg.length ? 'true' : null, onclick: () => call(logg[i], i) }, tekst)
+  return el('div', { class: 'row nav' }, kn('‹ Tilbake', plass - 1, 'Forrige visning i kortet'), kn('Frem ›', plass + 1, 'Neste visning i kortet'))
+}
 function renderAtom(a) {
   const seg = el('div', { class: 'seg', role: 'group', 'aria-label': 'Nivå' },
     ...['S', 'M', 'L'].map((L) => el('button', {
@@ -185,6 +203,7 @@ function renderAtom(a) {
     }, L)))
   const chips = (label, items, cls) => items?.length ? [el('div', { class: 'lbl' }, label), el('div', { class: 'chips' }, ...items.map((c) => el('span', { class: 'chip' + (c.warn ? ' warn' : '') + (c.id ? ' link' : ''), onclick: c.id ? () => call({ id: c.id, level: 'S' }) : null, title: c.title || null }, c.text)))] : []
   put(
+    navBlokk(),
     el('div', { class: 'eyebrow' }, a.project, el('span', { class: 'meta' }, `· ${a.date} · v${a.version}${a.kind === 'leveranse' ? ' · leveranse' : ''}${a.source ? ' · ' + a.source : ''}`)),
     el('h1', {}, a.name),
     a.level !== 'S' && a.S ? el('p', { class: 's' }, a.S) : null,
@@ -214,7 +233,15 @@ function renderAtom(a) {
 
 // ── treffliste (forsiden i miniatyr: ingresser, nyeste først)
 function renderList(d) {
+  const fra = d.offset || 0, per = d.limit || d.items.length || 5
+  const side = (o) => call(rens({ query: d.query, project: d.project, context: d.context, limit: per, offset: o }))
+  const flere = d.total > fra + d.items.length
+  const bla = fra > 0 || flere ? el('div', { class: 'row bla' },
+    el('button', { class: 'btn', type: 'button', disabled: fra > 0 ? null : 'true', onclick: () => side(Math.max(0, fra - per)) }, `‹ Forrige ${per}`),
+    el('button', { class: 'btn primary', type: 'button', disabled: flere ? null : 'true', onclick: () => side(fra + per) }, `Neste ${Math.min(per, Math.max(0, d.total - fra - d.items.length)) || per} ›`),
+    el('span', { class: 'meta', style: 'font-size:12px;color:var(--fg3)' }, `Viser ${d.items.length ? fra + 1 : 0}–${fra + d.items.length} av ${d.total}`)) : null
   put(
+    navBlokk(),
     sidenSistBlokk(d.sidenSist),
     el('div', { class: 'eyebrow' }, d.query ? `${d.total} treff på «${d.query}»` : `${d.total} atomer`, el('span', { class: 'meta' }, d.project ? `· ${d.project}` : '· alle prosjekter')),
     ...d.items.map((a) => {
@@ -242,7 +269,8 @@ function renderList(d) {
       )
     }),
     d.instruks ? el('div', { class: 'row' }, instruksKnapp(d.instruks), el('span', { class: 'meta', style: 'font-size:12px;color:var(--fg3)' }, `Desktop-prosjektet «${d.instruksProsjekt}»: lim inn i Project instructions`)) : null,
-    el('div', { class: 'foot' }, el('span', {}, d.total > d.items.length ? `Viser ${d.items.length} av ${d.total} — be Claude om flere` : 'Alle treff vist'), el('span', {}, 'Tua · S i søk, M og L på forespørsel · skjermet og logget')),
+    bla,
+    el('div', { class: 'foot' }, el('span', {}, bla ? `Viser ${fra + 1}–${fra + d.items.length} av ${d.total}` : 'Alle treff vist'), el('span', {}, 'Tua · S i søk, M og L på forespørsel · skjermet og logget')),
   )
 }
 
@@ -255,7 +283,7 @@ function render(result) {
   else root.replaceChildren(el('p', { class: 'err' }, sc.error || 'Ukjent svar.'))
 }
 
-app.ontoolresult = render
+app.ontoolresult = (r) => { const a = argsAv(r?.structuredContent); logg = a ? [a] : []; plass = logg.length - 1; render(r) }   // nytt kort fra Claude: loggen starter på nytt
 app.ontoolinput = () => {}
 app.onhostcontextchanged = applyHost
 await app.connect()
