@@ -2,6 +2,14 @@
 
 All notable changes to the Tua plugin. Versions follow `version` in `.claude-plugin/plugin.json`; raise it with every release.
 
+## 0.5.21 — 2026-11-26 (a notice when a newer version exists)
+
+- **Why.** A plugin from a GitHub marketplace does not update itself unless the user turns auto-update on for that marketplace, and a manually installed `.mcpb` never does. Without a notice people stay on old versions without knowing.
+- **What.** At most once a day the server asks GitHub for the latest release (`GET api.github.com/repos/tuacircles/tua-plugin/releases/latest`). When it is newer than the installed version, the first tool answer (or the `SessionStart` hook) carries one `oppdatering:` line, once per version, with what the user can do: for a plugin "Update now" / `claude plugin update tua@<marketplace>` and how to turn on auto-update; for a `.mcpb` the direct link to the new file.
+- **This is the first request the plugin makes on its own.** It carries no login, no cookies and nothing about the user, the archive or the installed version (User-Agent `tua-plugin`). Tua never downloads or installs anything. One switch: `tua_setup(oppdateringsvarsel=false)`. Never runs before the archive is chosen, and never against an archive in a temporary folder (test suites) unless `TUA_OPPDATERING=1`.
+- `tua_setup` without arguments shows the installed version and the latest version seen.
+- New suite `server/test-oppdatering.mjs` (18 checks against a local stand-in for GitHub). `PRIVACY.md` section 4 and the README's network paragraph updated ("no update check" no longer holds).
+
 ## 0.5.20 — 2026-11-26 (the card: "Vis alle")
 
 - **"Vis alle (N)" in the list card.** One view with the whole list (date, title, project), fetched 50 at a time up to 500, with a filter field. A title opens the atom; "Tilbake" returns to the list at once. The card asks the host for the large view (fullscreen / side panel) when the host offers it and shows "Liten visning" to go back; where the host does not offer it, the list is shown in the card where it stands.

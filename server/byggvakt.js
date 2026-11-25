@@ -30,7 +30,7 @@ else {
 }
 const vPlugin = readJson(path.join(PLUGIN, '.claude-plugin', 'plugin.json')).version
 const vPkg = readJson(path.join(PLUGIN, 'package.json')).version
-const vSrv = (() => { try { return (fs.readFileSync(path.join(HERE, 'server.js'), 'utf8').match(/name: 'tua', version: '([^']+)'/) || [])[1] } catch { return undefined } })()
+const vSrv = (() => { try { return (fs.readFileSync(path.join(HERE, 'server.js'), 'utf8').match(/(?:name: 'tua', version: |const VERSJON = )'([^']+)'/) || [])[1] } catch { return undefined } })()
 if (!(vPlugin && vPlugin === vPkg && vPlugin === vSrv)) problems.push(`versjonene spriker: plugin.json ${vPlugin} · package.json ${vPkg} · server.js ${vSrv}`)
 
 if (!problems.length) process.exit(0)

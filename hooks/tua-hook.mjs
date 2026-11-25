@@ -150,6 +150,8 @@ try {
     const extra = []
     // 0.5.17 (arb. 36 grep 5): er historikken lest og kortet ikke vist ennå, vises «Dette fant jeg» nå — én gang (serveren gjør det samme ved første verktøykall)
     try { const k = hist.kortLinje(); if (k) extra.push(k) } catch {}
+    // 0.5.21: varsel om ny utgave — hooken henter ingenting selv; den leser det serveren sist hentet, og sier det én gang per utgave
+    try { const opp = await import(mod('oppdatering.js')); const v = JSON.parse(fs.readFileSync(path.join(HERE, '..', '.claude-plugin', 'plugin.json'), 'utf8')).version; const l = opp.oppdateringsLinje({ versjon: v }); if (l) extra.push(l) } catch {}
     if (!selvlest && !st.last) extra.push('ingen historikk er tatt med ennå — /tua_start tar med alt og slår på automatikken; nevn det én gang hvis det passer')
     const root = gitRootOf(cwd)
     if (root && !fs.existsSync(path.join(root, '.tua-sync.json')) && !insideArchive(root) && offerOnce(root)) extra.push(`repoet «${path.basename(root)}» speiles ikke til Tua ennå (ingen .tua-sync.json) — tilby /tua_auto én gang hvis det passer: node "${path.join(HERE, '..', 'server', 'sync-tua.js')}" --project "${path.basename(root)}" --install-hook`)

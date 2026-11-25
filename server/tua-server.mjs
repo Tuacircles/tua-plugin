@@ -1,4 +1,4 @@
-// Tua-plugin 0.5.20 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
+// Tua-plugin 0.5.21 — bygd av bygg.mjs 2026-11-25. IKKE REDIGER: kilden er server/*.js og node_modules.
 globalThis.__TUA_BUNDLE = true;
 import { McpServer } from './bygd/vendor/@modelcontextprotocol/sdk/server/mcp.mjs';
 import { StdioServerTransport } from './bygd/vendor/@modelcontextprotocol/sdk/server/stdio.mjs';
@@ -7,6 +7,7 @@ import { settHørerTil as settH_rerTil, følgereAv as f_lgereAv, erArbeid, løsn
 import { ensureArchive, archiveOptions, filesMode, FILES_ROOT, rootLabel, chooseArchive, load, INBOX_DIR, KINDS, LINK_KINDS, upsert, save, WELCOME_KEY, finishOnboarding, SHORT_L, S_MAX, M_MAX, LONG_L, fmtTime, fileOf, search, visibleIn, readVersion, versions, vaultClamp, maxLevel, hasExternalEdits, related, needsLevel, compose, logDelivery, setShare, FILE, onboardingActive, welcomeAtom, linksFor, isVault, sources, staleSources, renderStatus, deliveries, isStale, clampLevel } from './bygd/tua/store.mjs';
 import { DEFAULT_MIN, processInbox, processInboxShares, inboxPending, importShare, importDesktop, importFinder, importAll, historyCounts, importCode, watchInbox, watchDesktop, historyLine } from './bygd/tua/import.mjs';
 import { watchFinder } from './bygd/tua/finder.mjs';
+import { settVarsel, sjekkOppdatering, varselPå as varselP_, oppdateringTilstand, oppdateringsLinje, watchOppdatering } from './bygd/tua/oppdatering.mjs';
 import { lesNedlastinger, eksportVeiviser, watchNedlastinger } from './bygd/tua/eksporter.mjs';
 import { lesHistorikk, settAutoHistorikk, startLesing, autoHistorikk, historikkTilstand, forslagArkiv, funnetLinje, kortLinje, watchHistorikk } from './bygd/tua/historikk.mjs';
 import { skjermerFor, erFilSak, lever, endepunkt, maksNivå as maksNiv_, leverSamtale, MotorFeil, anslåTokens as ansl_Tokens, ord, del } from './bygd/tua/motor.mjs';
@@ -37,8 +38,9 @@ import { enumType, booleanType, stringType, numberType, arrayType, objectType, u
 // ved første kall, Spør-tråder øverst i tua_search, prosjekt-instruksen (dora.js).
 // NB: stdout er MCP-protokollen. All logging må gå til stderr.
 
+const VERSJON = '0.5.21';
 // M17: vaktene — Innboks (eksporter og delte lenker), Desktop-cachen (hvert 10. min), Finder-mappene. Ingenting før arkivet er valgt.
-const startWatchers = () => { const log = (m) => console.error(`[tua] ${m}`); watchInbox({ log }); watchDesktop({ log }); watchFinder({ log }); watchHistorikk({ log }); watchNedlastinger({ log, på: autoHistorikk, ved: () => startLesing({ log, bareNedlastinger: true }) }); };
+const startWatchers = () => { const log = (m) => console.error(`[tua] ${m}`); watchInbox({ log }); watchDesktop({ log }); watchFinder({ log }); watchHistorikk({ log }); watchNedlastinger({ log, på: autoHistorikk, ved: () => startLesing({ log, bareNedlastinger: true }) }); watchOppdatering({ versjon: VERSJON, log }); };
 const CLIENT = process.env.TUA_CLIENT || (process.env.CLAUDECODE ? 'Claude Code' : 'Claude Desktop');
 const ARKIV = () => (filesMode() ? FILES_ROOT : FILE);
 const APP = process.env.TUA_APP_URL || 'http://127.0.0.1:5274/';          // M12: kartet som egen app (broen serverer det)
@@ -65,13 +67,13 @@ const INSTRUCTIONS =
   '(2) Svar kort: S og adresse. L bare når svaret krever det. Alt du får fra Tua er SKJERMET og LOGGET (V21): plassholdere som [Person A], [E-post 1] eller [Adresse 1] er opplysninger du ikke har fått — bruk dem uendret i svaret, gjett aldri hva de står for. Vault-merkede saker får du bare som S; får du S med en linje om hvorfor, svar på S. ' +
   '(3) TILBY, IKKE SKRIV — når du har levert noe verdt å finne igjen, spør én gang «Vil du at jeg lagrer dette til Tua?». Kall tua_save bare når brukeren sier ja eller selv ber om lagring. Spør aldri hvilken mappe; prosjektet er mappa. ' +
   '(4) Ved lagring: content = hele innholdet, short = ingress (alltid, ≤ 300 tegn), medium når over ~3 000 tegn, project = brukerens prosjektnavn, convo = 3–8 ord om samtalen. ' +
-  '(5) Står det en linje som begynner med «oppsett:» eller «onboarding:» i et verktøysvar, følg den etter at du har svart på det brukeren ba om — det er brukerens første økt med Tua. Arkivstedet velger brukeren selv (tua_setup); gjett aldri. ' +
+  '(5) Står det en linje som begynner med «oppsett:», «onboarding:» eller «oppdatering:» i et verktøysvar, følg den etter at du har svart på det brukeren ba om — det er brukerens første økt med Tua. Arkivstedet velger brukeren selv (tua_setup); gjett aldri. ' +
   '(6) «Ta med historikken»: alt som finnes lokalt fanges uten eksport — tua_import(kilde=alt) tar Code-økter (~/.claude/projects), Cowork-økter, Codex-samtaler (~/.codex/sessions — Codex CLI og ChatGPT-appen; kilde=codex), Desktop-samtaler (fra Claude Desktops egen cache: alt som har vært åpnet i Desktop, med prosjekt) og dokumenter med AI-opphav i Nedlastinger/Dokumenter/Skrivebord (ved referanse). Kjør med dryRun=true først og vis tallene. Desktop-cachen leses også av seg selv hvert 10. minutt, og det andre som ligger lokalt (Code, Cowork, Codex, dokumenter) leses av seg selv ved oppstart og omtrent hver time — brukeren slår det av med tua_setup(historikk=false). ' +
   'Samtaler bare på claude.ai web/mobil: be brukeren åpne dem i Claude Desktop (så fanges de), eller lage en delt lenke («Del» → claude.ai/share/…) og lime den inn — tua_import(kilde=lenke, lenke=…) — eller legge eksporten i Innboks. En eksport brukeren har lastet ned (Claude, ChatGPT, Gemini via Google Takeout, Copilot) kjennes igjen i Nedlastinger og leses der av seg selv; spør brukeren hvordan samtalene fra nettleser eller mobil kommer med, gir tua_import(kilde=eksport) veiviseren med lenkene. Tua kaller aldri claude.ai sitt interne API og bruker aldri cookies. Les aldri eksporter inn i samtalen. ' +
   '(7) SIDEN SIST: første gang du bruker Tua i en samtale, kommer en blokk «Siden sist i Tua» (Spør-tråder, konklusjoner, delinger, filer lest inn i appen) — gjengi den i én kort liste før du svarer, så brukeren ser hva som er gjort i Tua. tua_search viser Spør-tråder og konklusjoner for prosjektet øverst. ' +
   '(8) «DEL MED <navn>»: tua_share deler med en PERSON (kollega) — lager en delingssak (skjermet gjengivelse, logget) og en lenke til mottakersiden (låste rader på nivået, «Be om hele»); S som standard, M/L bare når brukeren sier det. Kall først med forhandsvis=true og still ETT spørsmål («Anna får S av 2 saker, 3 opplysninger skjermes — ok?»), kall så uten forhåndsvis når brukeren sier ja, og gi lenka, nedlastingslenka og den kopierbare teksten videre slik de er.';
 
-const server = new McpServer({ name: 'tua', version: '0.5.20' }, { instructions: INSTRUCTIONS });
+const server = new McpServer({ name: 'tua', version: VERSJON }, { instructions: INSTRUCTIONS });
 
 // M14: er arkivet ikke valgt, stoppes hvert verktøykall med et spørsmål om sted — via elicitation når klienten støtter det
 // (Code gjør det), ellers som en «oppsett:»-linje modellen skal stille brukeren. Pakket rundt registerTool, så det gjelder
@@ -123,6 +125,9 @@ const medKort = (r, name, a) => {
   let linje = '';
   try { linje = kortLinje(); } catch {}
   if (linje) r.content[0].text += `\n\nonboarding: ${linje}`;
+  let ny = '';
+  try { ny = oppdateringsLinje({ versjon: VERSJON }); } catch {}                // 0.5.21: én linje, én gang per ny utgave
+  if (ny) r.content[0].text += `\n\noppdatering: ${ny}`;
   return r
 };
 server.registerTool = (name, cfg, handler) => _register(name, cfg, async (a, extra) => { const stopp = await ensureReady(name); return stopp || medKort(await handler(a, extra), name, a) });
@@ -171,10 +176,19 @@ server.registerTool(
     inputSchema: {
       sted: enumType(['icloud', 'dropbox', 'onedrive', 'googledrive', 'lokalt']).optional().describe('Skytjeneste eller lokalt (~/Tua).'),
       sti: stringType().optional().describe('Alternativt: absolutt sti til en mappe som skal være arkivet.'),
+      oppdateringsvarsel: booleanType().optional().describe('Bryteren for varselet om ny utgave. Standard på: Tua spør GitHub én gang i døgnet om siste utgave (én GET uten opplysninger om brukeren) og sier fra én gang når det finnes en nyere. false slår av — da henter Tua ingenting fra nettet av seg selv.'),
       historikk: booleanType().optional().describe('Bryteren for automatisk lesing av det som ligger på maskinen (Code, Cowork, Codex, Desktop, dokumenter). Standard på. false slår av, true slår på igjen.'),
     },
   },
-  async ({ sted, sti, historikk }) => {
+  async ({ sted, sti, historikk, oppdateringsvarsel }) => {
+    if (oppdateringsvarsel !== undefined) {
+      settVarsel(oppdateringsvarsel); console.error(`[tua] varsel om ny utgave: ${oppdateringsvarsel ? 'på' : 'av'}`);
+      if (!sted && !sti && historikk === undefined) {
+        if (!oppdateringsvarsel) return text('Varselet om ny utgave er slått av. Tua henter ikke lenger noe fra nettet av seg selv. Nye utgaver ligger på https://github.com/tuacircles/tua-plugin/releases.')
+        const r = await sjekkOppdatering({ versjon: VERSJON, tving: true });
+        return text(`Varselet om ny utgave er slått på. Tua spør GitHub én gang i døgnet om siste utgave. ${r.feil ? `Fikk ikke sjekket nå (${r.feil}).` : r.ny ? '' : `Denne maskinen har siste utgave (${VERSJON}).`}`)
+      }
+    }
     if (historikk !== undefined) { settAutoHistorikk(historikk); console.error(`[tua] automatisk lesing av historikken: ${historikk ? 'på' : 'av'}`); }
     if (!sted && !sti && historikk !== undefined && filesMode()) {
       if (historikk) startLesing({ log: (m) => console.error(`[tua] ${m}`) });
@@ -185,6 +199,7 @@ server.registerTool(
     if (!sted && !sti) {
       return text(
         `Arkiv: ${filesMode() ? `${FILES_ROOT} (${rootLabel()})` : 'ikke valgt ennå'}\nSteder på denne maskinen: ${optionLines()}\n` +
+        `Tua ${VERSJON} · varsel om ny utgave: ${varselP_() ? 'på' : 'av'}${oppdateringTilstand().siste ? ` (siste utgave sett: ${oppdateringTilstand().siste})` : ''} — tua_setup(oppdateringsvarsel=false|true)\n` +
         `Automatisk lesing av det som ligger på maskinen: ${autoHistorikk() ? 'på' : 'av'}${historikkTilstand().sist ? ` (sist ${new Date(historikkTilstand().sist).toLocaleString('no-NO')})` : ''} — tua_setup(historikk=false|true)\n` +
         (filesMode() ? 'Vil brukeren flytte arkivet: det er en Finder-jobb (flytt mappa) + tua_setup(sti=ny sti); Tua kopierer ikke filer selv.' : 'Spør brukeren hvor arkivet skal ligge, og kall tua_setup(sted=…).') +
         '\nInnstillinger-siden (M15): http://127.0.0.1:5274/innstillinger — arkivsted, skytjenester, AI-nøkler i Keychain og Finder-mapper, med Trust Score (krever at kartet kjører: npm run kart i tua-plugin).' +
